@@ -1,0 +1,3 @@
+interface:
+  display_name: "Astral CLI"
+  short_description: "Operate Astral workspaces, tasks, messages, sync, and Agent status through the CLI."

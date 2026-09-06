@@ -1,0 +1,3 @@
+interface:
+  display_name: "Astral Install"
+  short_description: "Install and verify the Astral CLI safely across Windows, macOS, and Linux."

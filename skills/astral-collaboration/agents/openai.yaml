@@ -1,0 +1,3 @@
+interface:
+  display_name: "Astral Collaboration"
+  short_description: "Coordinate multiple Agents safely with Task leases, status, messages, sync, and handoffs."
