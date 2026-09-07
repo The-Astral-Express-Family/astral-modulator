@@ -1,0 +1,15 @@
+# Redocly lint 配置。规则说明见 https://redocly.com/docs/cli/rules/
+# 只关掉对脚手架阶段产生噪音的推荐规则；其余沿用 recommended。
+apis:
+  main:
+    root: api/openapi.yaml
+rules:
+  # 受保护端点统一隐含 401/403（security 已声明），逐个写 4xx 是噪音；
+  # 有特定错误语义的端点（409/404 等）已显式声明。
+  operation-4xx-response: off
+  # servers 由 /.well-known/astral 动态发现，规范内用相对基址。
+  no-empty-servers: off
+  # 脚手架阶段 operationId/description 逐步补全。
+  operation-description: off
+  # webhooks/memory 等未定稿端点暂不进 paths（见 TODO.md），schema 描述按需补。
+  no-ambiguous-paths: error

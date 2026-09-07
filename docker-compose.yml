@@ -1,0 +1,21 @@
+# 开发用 PostgreSQL。生产部署不使用本文件（见 docs/deployment.md）。
+# 端口 5433 避免与本机已有 postgres 冲突。
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: astral
+      POSTGRES_PASSWORD: astral
+      POSTGRES_DB: astral
+    ports:
+      - "5433:5432"
+    volumes:
+      - astral-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astral -d astral"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  astral-pgdata:

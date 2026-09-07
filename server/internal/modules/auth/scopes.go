@@ -1,0 +1,58 @@
+// Package auth 是认证/授权模块（architecture §6.1）。
+// 本文件固定 scope 词表；服务端授权只认最终 scope 集合，不信任客户端传的 role 字符串。
+package auth
+
+// Scope 词表，与 docs/architecture.md §10 一一对应。
+// 变更属于协议变更：同步 openapi.yaml 的 security 描述与 TODO.md 登记。
+const (
+	ScopeWorkspaceRead         = "workspace:read"
+	ScopeWorkspaceWrite        = "workspace:write"
+	ScopeWorkspaceManageMember = "workspace:manage_members"
+
+	ScopeTaskRead     = "task:read"
+	ScopeTaskWrite    = "task:write"
+	ScopeTaskClaim    = "task:claim"
+	ScopeTaskOverride = "task:override"
+
+	ScopeTagRead  = "tag:read"
+	ScopeTagWrite = "tag:write"
+
+	ScopeDocumentRead  = "document:read"
+	ScopeDocumentWrite = "document:write"
+
+	ScopeMemoryRead  = "memory:read"
+	ScopeMemoryWrite = "memory:write"
+
+	ScopeMessageRead = "message:read"
+	ScopeMessageSend = "message:send"
+
+	ScopePresenceWrite = "presence:write"
+
+	ScopeAuditRead = "audit:read"
+
+	ScopeAgentManage       = "agent:manage"
+	ScopeIntegrationUse    = "integration:use"
+	ScopeIntegrationManage = "integration:manage"
+)
+
+// AllScopes 调试用全集；不得用于默认授权。
+var AllScopes = []string{
+	ScopeWorkspaceRead, ScopeWorkspaceWrite, ScopeWorkspaceManageMember,
+	ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTaskOverride,
+	ScopeTagRead, ScopeTagWrite,
+	ScopeDocumentRead, ScopeDocumentWrite,
+	ScopeMemoryRead, ScopeMemoryWrite,
+	ScopeMessageRead, ScopeMessageSend,
+	ScopePresenceWrite,
+	ScopeAuditRead,
+	ScopeAgentManage, ScopeIntegrationUse, ScopeIntegrationManage,
+}
+
+// Role 是 scope bundle。角色定义变更需评估已有 credential 的语义。
+var RoleToScopes = map[string][]string{
+	"viewer":      {ScopeWorkspaceRead, ScopeTaskRead, ScopeTagRead, ScopeDocumentRead, ScopeMemoryRead, ScopeMessageRead},
+	"contributor": {ScopeWorkspaceRead, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite},
+	"agent":       {ScopeWorkspaceRead, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite},
+	"maintainer":  {ScopeWorkspaceRead, ScopeWorkspaceWrite, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTaskOverride, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite, ScopeAuditRead, ScopeAgentManage},
+	"owner":       AllScopes, // 含 workspace:manage_members 等
+}

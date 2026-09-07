@@ -1,0 +1,1 @@
+{"root":["./src/env.d.ts","./src/main.ts","./src/api/client.ts","./src/api/sse.ts","./src/api/types.ts","./src/api/modules/core.ts","./src/router/index.ts","./src/stores/session.ts","./src/app.vue","./src/views/dashboardview.vue","./src/views/deviceapproveview.vue","./src/views/notfoundview.vue","./src/views/workspaceoverviewview.vue"],"version":"5.9.3"}

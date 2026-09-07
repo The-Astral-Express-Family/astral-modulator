@@ -67,3 +67,23 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# ---- Go server ----
+server/astral-server
+server/astral-server.exe
+server/*.test
+server/coverage.out
+
+# ---- Web ----
+web/node_modules/
+web/dist/
+web/*.local
+
+# ---- env / secrets（凭证只进系统 Credential Store 或 secret manager）----
+.env
+.env.*
+
+# ---- editors/tooling ----
+.idea/
+.vscode/
+redocly.ignore

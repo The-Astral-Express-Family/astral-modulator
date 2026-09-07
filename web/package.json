@@ -1,0 +1,24 @@
+{
+  "name": "astral-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Astral Modulator Web Console — 观察、管理、冲突解决、权限与审计",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc -b"
+  },
+  "dependencies": {
+    "pinia": "^3.0.3",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.4",
+    "typescript": "~5.9.2",
+    "vite": "^7.1.9",
+    "vue-tsc": "^3.1.8"
+  }
+}
