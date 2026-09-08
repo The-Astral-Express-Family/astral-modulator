@@ -196,7 +196,7 @@ func TestRenameAndDeleteFlow(t *testing.T) {
 func TestEventsEmittedViaOutbox(t *testing.T) {
 	f := setup(t)
 	hub := event.NewHub()
-	events, unsub := hub.Subscribe(nil)
+	events, unsub := hub.Subscribe(event.Subscription{})
 	defer unsub()
 
 	proposal, code := propose(t, f, "create", "evtag")

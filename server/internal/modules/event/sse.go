@@ -14,6 +14,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 )
 
 // SSEHandler 提供工作区事件流端点（docs/protocol.md §5）：
@@ -75,7 +76,12 @@ func (h *SSEHandler) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	// 1. 先订阅（补发期间 dispatcher 投递进入缓冲），补发结束后按游标去重。
-	events, unsub := h.Hub.Subscribe(WorkspaceFilter(workspaceID))
+	// 订阅携带 actor 身份：凭证/会话撤销时经 Hub.DisconnectActor 主动断流。
+	var actorID string
+	if p := auth.PrincipalFrom(r.Context()); p != nil {
+		actorID = p.ActorID
+	}
+	events, unsub := h.Hub.Subscribe(Subscription{ActorID: actorID, Filter: WorkspaceFilter(workspaceID)})
 	defer unsub()
 
 	if lastEventID != "" && h.DB != nil {

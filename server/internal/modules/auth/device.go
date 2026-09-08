@@ -271,6 +271,13 @@ func (s *Service) IssueCredential(ctx context.Context, in CreateCredentialInput)
 
 // RevokeCredential 立即吊销。
 func (s *Service) RevokeCredential(ctx context.Context, credentialID string) error {
+	var cred model.Credential
+	if err := s.DB.WithContext(ctx).First(&cred, "id = ?", credentialID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "credential not found or already revoked"}
+		}
+		return err
+	}
 	res := s.DB.WithContext(ctx).Model(&model.Credential{}).
 		Where("id = ? AND revoked_at IS NULL", credentialID).Update("revoked_at", time.Now())
 	if res.Error != nil {
@@ -279,5 +286,6 @@ func (s *Service) RevokeCredential(ctx context.Context, credentialID string) err
 	if res.RowsAffected == 0 {
 		return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "credential not found or already revoked"}
 	}
+	s.notifyRevoked(cred.ActorID)
 	return nil
 }

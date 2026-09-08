@@ -191,7 +191,7 @@ func TestSweeperExpiresLeases(t *testing.T) {
 	createTask(t, f, "tsk_sweep", "sweep")
 	pa := principal(t, f, f.credA)
 
-	events, unsub := f.hub.Subscribe(nil)
+	events, unsub := f.hub.Subscribe(event.Subscription{})
 	defer unsub()
 	if _, _, err := f.m.Claim(context.Background(), pa, "tsk_sweep", nil, 300); err != nil {
 		t.Fatal(err)

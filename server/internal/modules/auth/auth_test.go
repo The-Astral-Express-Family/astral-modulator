@@ -227,3 +227,112 @@ func TestSessionExpiry(t *testing.T) {
 		t.Fatalf("expired access: %v", apiErr)
 	}
 }
+
+// TestRefreshHonorsAbsoluteSessionLife（D10，TODO 3.2 边界加固）：
+// refresh 是 30d 滑动窗口，但整族寿命从创建起算封顶 MaxSessionLife。
+func TestRefreshHonorsAbsoluteSessionLife(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("created 89d ago: refresh OK, expires capped at created+90d", func(t *testing.T) {
+		s := newSvc(t)
+		refresh, actor, err := s.loginSession(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backdate(t, s, actor.ID, -89*24*time.Hour)
+		pair, err := s.Refresh(ctx, refresh, "ip", "ua")
+		if err != nil {
+			t.Fatalf("refresh near life end: %v", err)
+		}
+		var sess model.Session
+		if err := s.DB.Where("actor_id = ?", actor.ID).Order("created_at DESC").First(&sess).Error; err != nil {
+			t.Fatal(err)
+		}
+		wantCap := sess.CreatedAt.Add(s.MaxSessionLife)
+		if !sess.ExpiresAt.Equal(wantCap) {
+			t.Fatalf("expires_at = %v, want capped at created+MaxSessionLife = %v", sess.ExpiresAt, wantCap)
+		}
+		_ = pair
+	})
+
+	t.Run("created 90d+1s ago: refresh rejected with TOKEN_EXPIRED", func(t *testing.T) {
+		s := newSvc(t)
+		refresh, actor, err := s.loginSession(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backdate(t, s, actor.ID, -s.MaxSessionLife-time.Second)
+		_, err = s.Refresh(ctx, refresh, "ip", "ua")
+		apiErr, ok := err.(*httpx.APIError)
+		if !ok || apiErr.Code != httpx.CodeTokenExpired {
+			t.Fatalf("err = %v, want TOKEN_EXPIRED", err)
+		}
+	})
+}
+
+func (s *Service) loginSession(t *testing.T) (string, *model.Actor, error) {
+	t.Helper()
+	if _, err := s.Register(context.Background(), RegisterInput{Email: "human@example.com", Password: "hunter2safe"}); err != nil {
+		return "", nil, err
+	}
+	return s.Login(context.Background(), "human@example.com", "hunter2safe", "ip", "ua")
+}
+
+// backdate 把 actor 全部 session 的 created_at/expires_at 平移到 offset 处，
+// 模拟时间流逝（sqlite/PG 均为普通列更新）。
+func backdate(t *testing.T, s *Service, actorID string, offset time.Duration) {
+	t.Helper()
+	if err := s.DB.Model(&model.Session{}).Where("actor_id = ?", actorID).Updates(map[string]any{
+		"created_at": time.Now().Add(offset),
+		"expires_at": time.Now().Add(s.RefreshTTL), // 滑动窗口按最近活跃计
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRevokeNotifiesHook：撤销断流的装配面——credential 与 session family
+// 撤销后必须以 actorID 触发 OnRevoke（security.md）。
+func TestRevokeNotifiesHook(t *testing.T) {
+	t.Run("credential revoke", func(t *testing.T) {
+		var notified []string
+		s := newSvc(t)
+		s.OnRevoke = func(actorID string) { notified = append(notified, actorID) }
+		ctx := context.Background()
+		if _, err := s.IssueCredential(ctx, CreateCredentialInput{
+			ActorID: "agt_x1", Kind: "agent", Scopes: []string{ScopeTaskRead},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// 找到刚签发的 credential id 再吊销。
+		var cred model.Credential
+		if err := s.DB.First(&cred, "actor_id = ?", "agt_x1").Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RevokeCredential(ctx, cred.ID); err != nil {
+			t.Fatal(err)
+		}
+		if len(notified) != 1 || notified[0] != "agt_x1" {
+			t.Fatalf("notified = %v, want [agt_x1]", notified)
+		}
+	})
+
+	t.Run("refresh replay revokes family", func(t *testing.T) {
+		var notified []string
+		s := newSvc(t)
+		s.OnRevoke = func(actorID string) { notified = append(notified, actorID) }
+		refresh, actor, err := s.loginSession(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Refresh(context.Background(), refresh, "ip", "ua"); err != nil {
+			t.Fatal(err)
+		}
+		// 旧 refresh 重放 → 整族撤销 → 回调。
+		if _, err := s.Refresh(context.Background(), refresh, "ip", "ua"); err == nil {
+			t.Fatal("replayed refresh must fail")
+		}
+		if len(notified) != 1 || notified[0] != actor.ID {
+			t.Fatalf("notified = %v, want [%s]", notified, actor.ID)
+		}
+	})
+}

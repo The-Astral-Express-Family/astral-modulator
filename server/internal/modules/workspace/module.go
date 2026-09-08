@@ -460,9 +460,16 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 		prefix = ids.Service
 	}
 	actor := model.Actor{ID: ids.New(prefix), Kind: in.Kind, DisplayName: in.DisplayName}
-	// agent actor 创建不发领域事件（无对应事件类型，待契约补充）；审计随事务落库。
+	// agent actor 创建即落 workspace（D9：membership 行是归属的唯一事实，
+	// 人/agent 通用；credential 绑定只是 scope 载体）。不发领域事件
+	// （无对应事件类型，待契约补充）；审计随事务落库。
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&actor).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.WorkspaceMember{
+			WorkspaceID: ws.ID, ActorID: actor.ID, Role: "agent",
+		}).Error; err != nil {
 			return err
 		}
 		return audit.RecordInTx(tx, audit.Entry{

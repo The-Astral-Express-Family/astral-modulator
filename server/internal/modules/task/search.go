@@ -138,7 +138,7 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 
 	out := make([]ScoredTask, 0, end-offset)
 	for i := offset; i < end; i++ {
-		st := ScoredTask{Task: toTaskDTO(pool[i], nil)}
+		st := ScoredTask{Task: toTaskDTO(pool[i], nil, nil)}
 		if scores != nil {
 			v := scores[pool[i].ID]
 			st.Score = &v

@@ -173,6 +173,27 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - 测试：approve 原子提升 / maintainer 无权裁决 / 裁决单次使用 / 过期 409 /
   owner 目标与非成员目标拒绝。go build/vet/test、redocly lint、路由与错误码契约门全绿。
 
+### 第 9 轮（2026-09-09）：设计复审落地 —— D9/D10/D11 + 撤销断流
+
+> 本轮先做「对计划本身的设计审查」再实施：发现并裁决 4 个规划缺陷（D9/D10/D11
+> 及 tag 列表 DTO 缺 workspace_id 的契约漂移），全部闭环后才动代码。
+
+- **D11 tag 关联链路补全**：`PUT/DELETE /tasks/{id}/tags/{tag_id}`（幂等语义见
+  openapi 注释）；关联 = 任务修改（条件 revision bump + `task.updated` 事件
+  data.tag_change=attach|detach + audit）；Task DTO 增补 `tags`（get/update/claim/
+  attach 响应填充，list/search 省略）；tag 包导出统一 `TagDTO`（补 workspace_id，
+  修掉与 openapi Tag schema 的漂移）。task_tags 表、search?tag= 过滤自此真实可用。
+- **D9 T-ws-7**：不建新绑定模型（推翻原计划前提）；listAgents = membership 行 ∪
+  有效 credential 绑定（覆盖存量只发过 credential 的 agent）；createAgent 同事务
+  补 role='agent' 成员行——「谁在 workspace」自此只有 membership 一个事实来源。
+- **D10 session 绝对寿命**：MaxSessionLife 30d→90d（原与 RefreshTTL 相同，
+  上限永不生效）；Refresh 在轮换后若已越界明确拒绝（修掉「签发即过期 session」的
+  边界洞）；补 TODO 3.2 拖欠的滑动 vs 创建起算边界测试（89d 过 / 90d+1s 拒）。
+- **凭证/会话撤销断流（security.md）**：Hub 订阅携带 actor 身份，`DisconnectActor`
+  关闭该 actor 全部 SSE 流；装配层把 auth.OnRevoke 接到 hub（session family 撤销、
+  refresh 重放撤族、credential 吊销、logout 四条路径触发）。
+- 协议行为变更登记见 §9；openapi 新增 2 个操作（attachTaskTag/detachTaskTag）。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -188,6 +209,9 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | D7 | task 搜索实现路径 | **Go 侧过滤排序**（RE2 regex + 字符 trigram 相似度），候选集结构化过滤后封顶 2000 行 | RE2 线性时间天然免疫 ReDoS（架构文档担心的 POSIX regex 拖库问题不存在）；MVP 规模下内存排序足够且 sqlite/PG 可移植可测。回迁 pg_trgm/POSIX SQL 的触发条件：单 workspace 任务量到万级或出现搜索延迟 SLO（实现隔离在 task/search.go，语义不变） |
 | D6 | Human 浏览器登录 MVP | **本地账号**（email+password, bcrypt）+ HttpOnly Cookie session | Device Flow 需要 Human 在浏览器完成登录才能闭环；OIDC/federation 是后续项（security.md 暂缓清单）。首个 human 账号通过 bootstrap 注册创建（仅当服务器无 human 时开放） |
 | D8 | approval 裁决人约束 | MVP 允许发起人**自批**（审批人须为 owner） | 单 owner workspace 若强制双人裁决，首位新 owner 永远无法产生（死锁）。approval 的 MVP 目标是显式生命周期 + TTL + 可审计，而非双人控制；收紧为「他人裁决」的触发条件：出现多 owner 的生产 workspace 或安全事件 |
+| D9 | agent 的 workspace 归属模型 | **不引入新绑定模型**：membership 行（人/agent 通用）与 credential 绑定（agent 专用）即既有两条真实路径；`createAgent` 同事务补 role='agent' 成员行；listAgents 取两路径并集 | 原计划「需 agent-workspace 绑定模型」是第三条平行路径，会让「谁在 workspace 里」出现三种事实来源；membership 本就是人 actor 的归属事实，agent 复用它即可。credential 绑定保持纯授权语义（scope 载体），不承担归属语义 |
+| D10 | session 绝对上限 | `MaxSessionLife=90d`（创建起算），`RefreshTTL=30d`（滑动） | 原两者同为 30d，轮换窗口可无限续命，绝对上限永不生效，与 architecture §8.3「生命周期上限从创建时刻算」矛盾。90d 给足跨季度长任务余量，同时封顶被盗 refresh 的最长寿命 |
+| D11 | tag 与 task 的关联 | `PUT/DELETE /tasks/{id}/tags/{tag_id}`；关联是任务修改：条件 revision bump + `task.updated` 事件；Task DTO 的 `tags` 仅 get/attach/detach/update 响应填充 | tags 故事在 round 5 只做了「建/删」，attach 链路缺失导致 task_tags 表、search?tag= 过滤、Task.tags 字段全部空转。revision bump 使 tag 变更纳入既有乐观并发与事件流，不新造事件类型 |
 
 ## 2. 待裁决契约
 
@@ -267,6 +291,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - [x] capabilities.features 开放首个特性 `task_lease`
 - [ ] pg_trgm 回迁路径（D7 触发条件：单 workspace 任务量到万级或搜索延迟 SLO；
       语义不变，实现替换点在 task/search.go）
+- [x] tag attach/detach 实装（D11；round 5 遗留的关联链路缺口，task_tags 表自此启用）
 - [ ] 裁决并登记 T1
 
 ## 6. Phase 4 — Presence / Message / Events（architecture §27 Phase 4）
@@ -323,6 +348,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-09 | 第 7 轮：私信发送校验收件人「本 workspace 可达」（成员 或 绑定 credential 的 agent）；不可达返回 404 NOT_FOUND | 行为 | CLI/Web |
 | 2026-09-09 | 第 7 轮：refresh 并发轮换改条件更新：输家收到 401（token 已被替换），不再误触整族撤销 | 行为 | CLI |
 | 2026-09-09 | 第 8 轮：新增端点 POST/GET `/workspaces/{id}/approvals`、POST `/approvals/{id}/approve|deny`（T-ws-6，architecture §22）；新增错误码 `APPROVAL_EXPIRED`（409）；MVP 仅开放 `membership.promote_owner`，approve 同事务执行并重用 workspace.member.changed 事件（data.change=promoted） | 补充 | CLI/Web |
+| 2026-09-09 | 第 9 轮：新增端点 PUT/DELETE `/tasks/{id}/tags/{tag_id}`（D11，attach/detach 幂等；attach 响应=Task 含 tags）；task.updated 事件 data 增补 `tag_change`/`tag_id`；session 绝对寿命 90d（超期 refresh 返回 TOKEN_EXPIRED）；撤销（session family/credential/logout）后该 actor 的 SSE 流主动断开 | 行为 | CLI/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -364,11 +390,15 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 
 ## 11. 下一轮计划
 
-1. CLI login/init 实装（消费协议快照 v1：device flow + workspace 绑定；
-   `token_provider`/`openInBrowser` 等 seam 已就位）——当前最高杠杆：打通双仓库端到端闭环
-2. agents 列表按 workspace 过滤（T-ws-7，需 agent-workspace 绑定模型）
-3. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理）
-4. 凭证/会话撤销后主动断开 SSE 连接（hub 订阅者携带身份；security.md 要求）
-5. rate limit（auth/device 端点优先；phase-6）
-6. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
-7. Web/GUI approval 裁决视图（数据源 GET /workspaces/{id}/approvals?status=requested）
+> 2026-09-09 设计复审修订：T-ws-7 撤销「需绑定模型」前提（D9，用既有表实现）；
+> 新增 D10（session 绝对上限）与 D11（tag 关联链路补全）两项设计修复。
+> 优先级原则：先闭合「已宣称完成但实际断链」的功能（D11），再做新面。
+
+1. 【✅ 第 9 轮完成】D11 tag attach/detach + D9 T-ws-7 + D10 session 上限 + 凭证/会话撤销断流
+2. CLI login/init 实装（消费协议快照 v1：device flow + workspace 绑定；
+   `token_provider`/`openInBrowser` 等 seam 已就位）——打通双仓库端到端闭环
+3. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理；
+   D11 后 tag 过滤/展示数据源才真实可用）
+4. Web/GUI approval 裁决视图（GET /workspaces/{id}/approvals?status=requested）
+5. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
+6. rate limit（auth/device 端点优先；phase-6）

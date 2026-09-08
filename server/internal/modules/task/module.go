@@ -22,6 +22,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
 )
 
 // Lease 时长钳制边界（openapi TaskClaimInput.lease_seconds 的服务端约束）。
@@ -56,6 +57,8 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/tasks/{task_id}/claim", m.claim)
 	r.Post("/tasks/{task_id}/lease/renew", m.renewLease)
 	r.Delete("/tasks/{task_id}/lease", m.release)
+	r.Put("/tasks/{task_id}/tags/{tag_id}", m.attachTag)
+	r.Delete("/tasks/{task_id}/tags/{tag_id}", m.detachTag)
 	r.Get("/tasks/{task_id}/messages", func(w http.ResponseWriter, r *http.Request) {
 		httpx.NotImplemented(w, r, "task.messages.list", "phase-4", "api/openapi.yaml /tasks/{task_id}/messages")
 	})
@@ -116,26 +119,30 @@ type leaseDTO struct {
 }
 
 type taskDTO struct {
-	ID              string    `json:"id"`
-	WorkspaceID     string    `json:"workspace_id"`
-	ParentID        *string   `json:"parent_id"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description"`
-	Status          string    `json:"status"`
-	Priority        string    `json:"priority"`
-	AssigneeActorID *string   `json:"assignee_actor_id"`
-	Revision        int64     `json:"revision"`
-	Lease           *leaseDTO `json:"lease"`
-	CreatedAt       string    `json:"created_at"`
-	UpdatedAt       string    `json:"updated_at"`
+	ID              string       `json:"id"`
+	WorkspaceID     string       `json:"workspace_id"`
+	ParentID        *string      `json:"parent_id"`
+	Title           string       `json:"title"`
+	Description     string       `json:"description"`
+	Status          string       `json:"status"`
+	Priority        string       `json:"priority"`
+	AssigneeActorID *string      `json:"assignee_actor_id"`
+	Revision        int64        `json:"revision"`
+	Tags            []tag.TagDTO `json:"tags,omitempty"`
+	Lease           *leaseDTO    `json:"lease"`
+	CreatedAt       string       `json:"created_at"`
+	UpdatedAt       string       `json:"updated_at"`
 }
 
-func toTaskDTO(t model.Task, lease *model.TaskLease) taskDTO {
+// toTaskDTO 组装任务响应；tags 由调用方按需加载（get/update/attach 填充，
+// list/search 省略以省一次 JOIN）。
+func toTaskDTO(t model.Task, lease *model.TaskLease, tags []tag.TagDTO) taskDTO {
 	dto := taskDTO{
 		ID: t.ID, WorkspaceID: t.WorkspaceID, ParentID: t.ParentID,
 		Title: t.Title, Description: t.Description,
 		Status: t.Status, Priority: t.Priority,
 		AssigneeActorID: t.AssigneeActorID, Revision: t.Revision,
+		Tags:      tags,
 		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -233,7 +240,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusCreated, toTaskDTO(t, nil))
+	httpx.WriteOK(w, r, http.StatusCreated, toTaskDTO(t, nil, nil))
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
@@ -273,7 +280,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]taskDTO, 0, len(rows))
 	for _, t := range rows {
-		items = append(items, toTaskDTO(t, nil))
+		items = append(items, toTaskDTO(t, nil, nil))
 	}
 	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, next))
 }
@@ -322,7 +329,7 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	if hasLease {
 		leasePtr = &lease
 	}
-	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*t, leasePtr))
+	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*t, leasePtr, m.loadTags(r, t.ID)))
 }
 
 func (m *Module) update(w http.ResponseWriter, r *http.Request) {
@@ -444,7 +451,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, nil))
+	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, nil, m.loadTags(r, t.ID)))
 }
 
 // checkCycle 沿 newParent 向上遍历祖先链，返回是否形成环。
@@ -575,10 +582,8 @@ func (m *Module) claim(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{
-		"task":  toTaskDTO(*fresh, claimedLease),
-		"lease": toTaskDTO(*fresh, claimedLease).Lease,
-	})
+	dto := toTaskDTO(*fresh, claimedLease, m.loadTags(r, taskID))
+	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"task": dto, "lease": dto.Lease})
 }
 
 func (m *Module) renewLease(w http.ResponseWriter, r *http.Request) {

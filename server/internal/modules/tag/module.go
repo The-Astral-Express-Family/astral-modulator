@@ -43,10 +43,15 @@ func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *ht
 
 // ---- DTO ----
 
-type tagDTO struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+// TagDTO 是 tag 的公网形状（openapi Tag schema：id/workspace_id/name）。
+// task 模块的任务 tags 字段复用本类型，避免两份手写 DTO 漂移。
+type TagDTO struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
 }
+
+type tagDTO = TagDTO
 
 type proposalDTO struct {
 	ProposalID   string   `json:"proposal_id"`
@@ -73,7 +78,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]tagDTO, 0, len(tags))
 	for _, t := range tags {
-		items = append(items, tagDTO{ID: t.ID, Name: t.Name})
+		items = append(items, tagDTO{ID: t.ID, WorkspaceID: t.WorkspaceID, Name: t.Name})
 	}
 	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }
@@ -185,7 +190,7 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 	}
 	existing := make([]tagDTO, 0, len(tags))
 	for _, t := range tags {
-		existing = append(existing, tagDTO{ID: t.ID, Name: t.Name})
+		existing = append(existing, tagDTO{ID: t.ID, WorkspaceID: t.WorkspaceID, Name: t.Name})
 	}
 	httpx.WriteOK(w, r, http.StatusCreated, proposalDTO{
 		ProposalID:   proposal.ID,

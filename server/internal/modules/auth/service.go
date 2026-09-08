@@ -24,9 +24,16 @@ type Service struct {
 	DB  *gorm.DB
 	Log *slog.Logger
 
-	AccessTTL       time.Duration // 默认 15m
-	RefreshTTL      time.Duration // 默认 30d
-	MaxSessionLife  time.Duration // refresh 生命周期上限（创建起算）
+	AccessTTL  time.Duration // 默认 15m
+	RefreshTTL time.Duration // 默认 30d（轮换滑动窗口）
+	// MaxSessionLife 是 session 的绝对寿命上限（创建起算，D10）。
+	// 必须大于 RefreshTTL 才有意义：否则轮换可无限续命，上限永不生效。
+	MaxSessionLife time.Duration
+
+	// OnRevoke 在凭证/会话被撤销后以 actorID 回调（装配层把它接到
+	// Hub.DisconnectActor，实现 security.md 的「撤销后主动断流」）。
+	// 可为 nil。
+	OnRevoke        func(actorID string)
 	DeviceTTL       time.Duration // 默认 10m
 	DevicePollEvery time.Duration // CLI 轮询间隔约定，默认 3s
 }
@@ -37,7 +44,7 @@ func NewService(db *gorm.DB, log *slog.Logger) *Service {
 		Log:             log,
 		AccessTTL:       15 * time.Minute,
 		RefreshTTL:      30 * 24 * time.Hour,
-		MaxSessionLife:  30 * 24 * time.Hour,
+		MaxSessionLife:  90 * 24 * time.Hour, // D10：封顶被盗 refresh 的最长寿命
 		DeviceTTL:       10 * time.Minute,
 		DevicePollEvery: 3 * time.Second,
 	}
@@ -302,6 +309,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, ua string) (*To
 	if max := sess.CreatedAt.Add(s.MaxSessionLife); expires.After(max) {
 		expires = max
 	}
+	// D10：整族寿命已到头 → 明确拒绝，绝不签发「出生即过期」的轮换对。
+	if !expires.After(now) {
+		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired,
+			Message: "session reached end of life; log in again"}
+	}
 	updates := map[string]any{
 		"prev_refresh_token_hash": sess.RefreshTokenHash,
 		"refresh_token_hash":      HashToken(newRefresh),
@@ -339,6 +351,7 @@ func (s *Service) revokeFamily(ctx context.Context, sess *model.Session, reason 
 		s.Log.Error("revoke family failed", "err", err)
 	}
 	s.Log.Warn("session family revoked", "reason", reason, "actor_id", sess.ActorID)
+	s.notifyRevoked(sess.ActorID)
 	// TODO(phase-1): 撤销后主动断开该 family 的 SSE 连接（security.md）。
 	// TODO(phase-2): audit 记录（audit recorder 注入后）。
 }
@@ -353,9 +366,27 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	if _, dbErr := s.dbOrError(); dbErr != nil {
 		return dbErr
 	}
-	return s.DB.WithContext(ctx).Model(&model.Session{}).
+	res := s.DB.WithContext(ctx).Model(&model.Session{}).
 		Where("refresh_token_hash = ? AND revoked_at IS NULL", HashToken(refreshToken)).
-		Update("revoked_at", time.Now()).Error
+		Update("revoked_at", time.Now())
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		var sess model.Session
+		if err := s.DB.WithContext(ctx).
+			Where("refresh_token_hash = ?", HashToken(refreshToken)).First(&sess).Error; err == nil {
+			s.notifyRevoked(sess.ActorID)
+		}
+	}
+	return nil
+}
+
+// notifyRevoked 触发撤销回调（nil 安全）。
+func (s *Service) notifyRevoked(actorID string) {
+	if s.OnRevoke != nil {
+		s.OnRevoke(actorID)
+	}
 }
 
 // MeResponse 是 /auth/me 的响应体。

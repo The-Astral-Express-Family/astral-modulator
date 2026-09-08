@@ -17,34 +17,59 @@ type Hub struct {
 }
 
 type subscriber struct {
-	id     uint64
-	filter func(Envelope) bool // workspace 过滤等
-	ch     chan Envelope
-	closed bool
+	id      uint64
+	actorID string              // 订阅者主体（撤销断流用；测试可空）
+	filter  func(Envelope) bool // workspace 过滤等
+	ch      chan Envelope
+	closed  bool
 }
 
 func NewHub() *Hub {
 	return &Hub{subs: make(map[uint64]*subscriber)}
 }
 
-// Subscribe 注册订阅者。filter 为 nil 表示接收全部事件。
-// 返回的 channel 由 Hub 在 Unsubscribe 后关闭；消费方必须持续读取或及时退出。
-func (h *Hub) Subscribe(filter func(Envelope) bool) (<-chan Envelope, func()) {
+// Subscription 描述一个订阅者：Filter 为 nil 表示接收全部事件；
+// ActorID 用于凭证/会话撤销时的主动断流（security.md）。
+type Subscription struct {
+	ActorID string
+	Filter  func(Envelope) bool
+}
+
+// Subscribe 注册订阅者。返回的 channel 由 Hub 在 Unsubscribe 或
+// DisconnectActor 后关闭；消费方必须持续读取或及时退出。
+func (h *Hub) Subscribe(sub Subscription) (<-chan Envelope, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.next++
-	sub := &subscriber{id: h.next, filter: filter, ch: make(chan Envelope, 64)}
-	h.subs[sub.id] = sub
+	s := &subscriber{id: h.next, actorID: sub.ActorID, filter: sub.Filter, ch: make(chan Envelope, 64)}
+	h.subs[s.id] = s
 	unsub := func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if !sub.closed {
-			sub.closed = true
-			delete(h.subs, sub.id)
-			close(sub.ch)
+		if !s.closed {
+			s.closed = true
+			delete(h.subs, s.id)
+			close(s.ch)
 		}
 	}
-	return sub.ch, unsub
+	return s.ch, unsub
+}
+
+// DisconnectActor 关闭该 actor 的全部订阅（凭证/会话撤销路径调用），
+// 返回断开的连接数。消费方的 channel 被关闭后自然退出流循环。
+func (h *Hub) DisconnectActor(actorID string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	disconnected := 0
+	for _, s := range h.subs {
+		if s.actorID == actorID && !s.closed {
+			s.closed = true
+			delete(h.subs, s.id)
+			close(s.ch)
+			disconnected++
+		}
+	}
+	return disconnected
 }
 
 // Publish 非阻塞分发：订阅者缓冲满时丢弃该事件并保持连接（SSE 客户端靠
