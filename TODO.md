@@ -50,6 +50,23 @@
   （CI 注入 DSN，本地自动跳过）；
 - **CI**：server job 加 postgres service 跑 migration 测试。
 
+### 第 3 轮（2026-09-07 晚）：astral-cli 对接轮
+
+astral-cli 已落地 v0.1 骨架（login/init/doctor/version 命令面、HTTP/SSE client、
+credential store、workspace binding、protocol snapshot 机制；login/init 业务逻辑
+仍是桩，等 auth client 接线）。本轮完成：
+
+- **发布 v1 协议快照**到 astral-cli `protocol/snapshots/v1/`
+  （openapi.yaml + error/event schema + MANIFEST.json，冻结于 modulator
+  commit 75269c4）。CLI 后续 device flow / init 实现即以此为准。
+- **openapi↔路由防漂移契约测试**（`server/internal/app/openapi_contract_test.go`）：
+  双向比对 openapi 全部 47 个操作与 chi 实际注册路由，任一侧漂移 CI 即失败；
+  附错误码枚举 ↔ httpx 常量一致性检查。
+- **跨仓库冒烟**：真实二进制上按 CLI contract test 的断言逐字段校验 well-known
+  快照形状 + capabilities，全部通过。
+- CLI 侧现状核对（无冲突）：kProtocolVersion=1；well-known 字段一致；CLI 仅发
+  Authorization 头（其余公共头可选，服务端不强制）。
+
 ### 第 1 轮遗留记录（已被第 2 轮覆盖的已删除）
 
 - 真实实现（第 1 轮）：发现/能力/健康/SSE 骨架，见第 2 轮清单。
@@ -191,6 +208,7 @@
 | 2026-09-07 | 第 2 轮：新增错误码 `AUTHORIZATION_PENDING`、`SLOW_DOWN`（A1，RFC 8628 语义） | 补充 | CLI |
 | 2026-09-07 | 第 2 轮：定义 ASTRAL_TOKEN 格式 `astral_<base64url>`（A4）；Bearer 可为 human access token 或 agent credential | 补充 | CLI |
 | 2026-09-07 | 第 2 轮：sessions 表 scopes 列由 TEXT[] 改 JSON text（可移植）；tasks revision 自增改应用层（D5） | 内部 | 无（schema 未发布） |
+| 2026-09-07 | 第 3 轮：v1 协议快照发布至 astral-cli protocol/snapshots/v1（冻结 modulator@75269c4，含 MANIFEST）；无语义变更 | 发布 | CLI |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
