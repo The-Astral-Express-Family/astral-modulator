@@ -2,7 +2,7 @@
 // 错误 envelope、稳定错误码、公共响应头、通用响应结构。
 //
 // 任何模块不得绕过本包手写 JSON 错误响应，否则 CLI/GUI 将无法依赖
-// 稳定的 error.code 语义（见 docs/protocol.md §4）。
+// 稳定的 error.code 语义（见 api/schemas/error.json 与 docs/protocol.md §3）。
 package httpx
 
 import (
@@ -48,7 +48,7 @@ const (
 	CodeNotImplemented = "NOT_IMPLEMENTED"
 )
 
-// Error 是 docs/protocol.md §4 定义的错误 envelope。
+// Error 是公网错误 envelope，契约见 api/schemas/error.json（语义见 docs/protocol.md §3）。
 // 字段名与顺序均为公网契约，禁止增删重命名（新增字段需评估旧客户端兼容）。
 type Error struct {
 	Code      string         `json:"code"`

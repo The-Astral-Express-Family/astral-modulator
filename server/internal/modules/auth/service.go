@@ -122,6 +122,27 @@ func HasScope(scopes map[string]bool, scope string) *httpx.APIError {
 	return &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "missing scope: " + scope}
 }
 
+// RequireWorkspaceScopes 是 workspace 级端点的标准授权前置：
+// 解析主体在该 workspace 的生效 scope，并依次给出统一语义——
+// 非成员 / credential 未绑定 → 404 WORKSPACE_NOT_FOUND（不泄露存在性）；
+// 成员但 scope 不足 → 403 INSUFFICIENT_SCOPE。
+// 通过后返回 scope 集合（handler 可复用于次级判断）。
+func (s *Service) RequireWorkspaceScopes(ctx context.Context, p *Principal, workspaceID string, need ...string) (map[string]bool, *httpx.APIError) {
+	scopes, err := s.WorkspaceScopes(ctx, p, workspaceID)
+	if err != nil {
+		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "scope resolution failed"}
+	}
+	if len(scopes) == 0 {
+		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
+	}
+	for _, sc := range need {
+		if apiErr := HasScope(scopes, sc); apiErr != nil {
+			return nil, apiErr
+		}
+	}
+	return scopes, nil
+}
+
 // ---- 注册 / 登录（human，web 侧；TODO.md D6）----
 
 type RegisterInput struct {

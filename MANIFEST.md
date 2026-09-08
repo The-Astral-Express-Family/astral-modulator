@@ -1,18 +1,34 @@
-# Astral Modulator 文档包清单
+# Astral Modulator 仓库地图
 
-将本目录内容复制到仓库根目录即可。
+## 根目录
 
-## Core docs
+- `README.md` — 项目简介与快速开始。
+- `ARCHITECTURE.md` — 架构入口指针（事实来源在 docs/ 与 api/）。
+- `TODO.md` — 进度登记簿：已完成工作、契约裁决、待办清单、CLI 联调清单。
+- `docker-compose.yml` — 开发用 PostgreSQL。
+- `Makefile` — 常用开发命令。
+
+## 契约（与 astral-cli 的唯一耦合点）
+
+- `api/openapi.yaml` — REST API 事实来源。
+- `api/schemas/` — 错误与事件 envelope 的 JSON Schema。
+- `api/README.md` — 协议发布流程。
+
+## 服务端与 Web
+
+- `server/` — Go 模块化单体（chi + GORM + goose；模块布局见 server/internal）。
+- `web/` — Vue 3 控制台。
+
+## 文档
 
 - `docs/README.md` — 文档索引与术语。
 - `docs/requirements.md` — MVP 需求、用户故事、功能/非功能要求。
-- `docs/architecture.md` — 总体架构、模块边界、技术路线与 Repo 结构。
-- `docs/protocol.md` — REST/SSE/WebSocket、错误、事件、Task/Document API 草案。
-- `docs/cli-ux.md` — CLI 命令、JSON 模式、退出码、重试与 Agent 契约。
+- `docs/architecture.md` — 总体架构、模块边界、技术路线与仓库结构。
+- `docs/protocol.md` — OpenAPI 之外的传输与语义约定。
 - `docs/sync-semantics.md` — Markdown 三方同步、revision/hash、冲突与删除语义。
 - `docs/security.md` — Actor/Credential、Scope、审批、Audit、威胁模型。
-- `docs/deployment.md` — Windows/macOS/Linux 构建、签名、包管理器与服务端部署。
-- `docs/roadmap.md` — Phase 0–6、首批 Issue、MVP Definition of Done。
+- `docs/deployment.md` — 服务端部署与数据库升级。
+- `docs/roadmap.md` — Phase 0–6、MVP Definition of Done。
 
 ## ADR
 

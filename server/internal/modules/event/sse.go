@@ -11,7 +11,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 )
 
-// SSEHandler 提供工作区事件流端点（protocol §14）：
+// SSEHandler 提供工作区事件流端点（docs/protocol.md §5）：
 //
 //	GET /api/v1/workspaces/{workspace_id}/events
 //

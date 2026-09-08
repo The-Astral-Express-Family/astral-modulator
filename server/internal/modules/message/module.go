@@ -40,15 +40,17 @@ type messageDTO struct {
 	CreatedAt   string          `json:"created_at"`
 }
 
+// requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
+func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *httpx.APIError {
+	p := auth.PrincipalFrom(r.Context())
+	_, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, wsID, need)
+	return apiErr
+}
+
 func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, wsID)
-	if err != nil || len(scopes) == 0 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"})
-		return
-	}
-	if apiErr := auth.HasScope(scopes, auth.ScopeMessageSend); apiErr != nil {
+	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeMessageSend); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -114,14 +116,9 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	if m.Hub != nil {
-		m.Hub.Publish(event.Envelope{
-			ID: ids.New(ids.Event), Type: event.TypeMessageCreated,
-			WorkspaceID: wsID, ActorID: p.ActorID,
-			OccurredAt: row.CreatedAt.UTC().Format(time.RFC3339), SchemaVersion: 1,
-			Data: map[string]any{"message_id": row.ID, "target_type": row.TargetType, "target_id": row.TargetID},
-		})
-	}
+	m.Hub.PublishDomain(event.TypeMessageCreated, wsID, p.ActorID, 0, map[string]any{
+		"message_id": row.ID, "target_type": row.TargetType, "target_id": row.TargetID,
+	})
 	httpx.WriteOK(w, r, http.StatusCreated, messageDTO{
 		ID: row.ID, WorkspaceID: row.WorkspaceID, ThreadID: row.ThreadID,
 		SenderID: row.SenderID, TargetType: row.TargetType, TargetID: row.TargetID,
@@ -133,12 +130,7 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, wsID)
-	if err != nil || len(scopes) == 0 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"})
-		return
-	}
-	if apiErr := auth.HasScope(scopes, auth.ScopeMessageRead); apiErr != nil {
+	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeMessageRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}

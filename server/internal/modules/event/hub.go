@@ -2,15 +2,17 @@ package event
 
 import (
 	"sync"
+	"time"
+
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 )
 
 // Hub 是进程内事件订阅器。SSE handler 从 Hub 订阅，业务模块通过 Hub 发布
 // （MVP 单实例直接内存转发）。
 //
-// TODO(phase-4): 接 transactional outbox ——
-//  1. 业务事务内 INSERT outbox（同事务保证不丢）；
-//  2. dispatcher 轮询/LISTEN outbox 未投递行 → hub.Publish → 置 sent_at；
-//  3. SSE resume：handler 启动时先从 outbox 重放 Last-Event-ID 之后的保留窗口，
+// TODO(phase-4): SSE resume ——
+//  1. outbox 路径已就绪（EmitTx + dispatcher，见 outbox.go）；
+//  2. SSE resume：handler 启动时先从 outbox 重放 Last-Event-ID 之后的保留窗口，
 //     再接入实时流。当前 Hub 只支持实时，不重放——CLI/GUI 断线期间的事件会缺失，
 //     联调时需接受“拉快照 + 增量”的最终一致性模型。
 type Hub struct {
@@ -65,6 +67,28 @@ func (h *Hub) Publish(env Envelope) {
 			// TODO(phase-4): 记录 dropped 计数指标；连续丢弃达到阈值时断开慢订阅者。
 		}
 	}
+}
+
+// PublishDomain 构造领域事件 envelope 并发布——模块发实时事件的标准入口
+// （nil hub 安全，调用方无需判空）。
+//
+// 仅限低延迟、可容忍极小丢失的状态类事件（workspace/presence/message）；
+// 与业务事实强关联的事件（task 生命周期、credential 生命周期）必须走
+// EmitTx 的 outbox 同事务路径。
+func (h *Hub) PublishDomain(typ, workspaceID, actorID string, resourceRevision int64, data any) {
+	if h == nil {
+		return
+	}
+	h.Publish(Envelope{
+		ID:               ids.New(ids.Event),
+		Type:             typ,
+		WorkspaceID:      workspaceID,
+		ActorID:          actorID,
+		OccurredAt:       time.Now().UTC().Format(time.RFC3339),
+		SchemaVersion:    1,
+		ResourceRevision: resourceRevision,
+		Data:             data,
+	})
 }
 
 // WorkspaceFilter 只放行指定 workspace 的事件（含 workspace_id 为空的服务器级事件）。

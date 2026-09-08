@@ -73,8 +73,8 @@ type actorDTO struct {
 	DisplayName string `json:"display_name"`
 }
 
-// requireWorkspace 组合“鉴权 + 解析 scope”，返回 (workspace, scopes, apiErr)。
-// human 非成员 / credential 未绑定 → 404（不泄露存在性）；成员但 scope 不足 → 403。
+// requireWorkspace 加载 workspace 并走标准授权前置（语义见
+// auth.RequireWorkspaceScopes：非成员 404 / scope 不足 403）。
 func (m *Module) requireWorkspace(r *http.Request, workspaceID string, need ...string) (*model.Workspace, map[string]bool, *httpx.APIError) {
 	p := auth.PrincipalFrom(r.Context())
 	var ws model.Workspace
@@ -85,17 +85,9 @@ func (m *Module) requireWorkspace(r *http.Request, workspaceID string, need ...s
 	if err != nil {
 		return nil, nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "workspace lookup failed"}
 	}
-	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, workspaceID)
-	if err != nil {
-		return nil, nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "scope resolution failed"}
-	}
-	if len(scopes) == 0 {
-		return nil, nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
-	}
-	for _, sc := range need {
-		if apiErr := auth.HasScope(scopes, sc); apiErr != nil {
-			return nil, nil, apiErr
-		}
+	scopes, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, workspaceID, need...)
+	if apiErr != nil {
+		return nil, nil, apiErr
 	}
 	return &ws, scopes, nil
 }
@@ -305,7 +297,7 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	m.emit(r, ws.ID, p.ActorID, event.TypeWorkspaceMemberChanged, 0, map[string]any{
+	m.Hub.PublishDomain(event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
 		"actor_id": in.ActorID, "role": in.Role, "change": "added",
 	})
 	httpx.WriteOK(w, r, http.StatusCreated, memberDTO{
@@ -347,7 +339,7 @@ func (m *Module) updateMember(w http.ResponseWriter, r *http.Request) {
 		Action: "workspace.member.update", Outcome: "allowed",
 		TargetType: "actor", TargetID: actorID, Details: map[string]any{"role": in.Role},
 	})
-	m.emit(r, ws.ID, p.ActorID, event.TypeWorkspaceMemberChanged, 0, map[string]any{
+	m.Hub.PublishDomain(event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
 		"actor_id": actorID, "role": in.Role, "change": "updated",
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -375,7 +367,7 @@ func (m *Module) removeMember(w http.ResponseWriter, r *http.Request) {
 		Action: "workspace.member.remove", Outcome: "allowed",
 		TargetType: "actor", TargetID: actorID,
 	})
-	m.emit(r, ws.ID, p.ActorID, event.TypeWorkspaceMemberChanged, 0, map[string]any{
+	m.Hub.PublishDomain(event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
 		"actor_id": actorID, "change": "removed",
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -507,7 +499,7 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 		Details: map[string]any{"scopes": in.Scopes},
 	})
 	if in.Workspace != "" {
-		m.emit(r, in.Workspace, p.ActorID, event.TypeSecurityCredentialCreated, 0, map[string]any{
+		m.Hub.PublishDomain(event.TypeSecurityCredentialCreated, in.Workspace, p.ActorID, 0, map[string]any{
 			"credential_id": issued.CredentialID, "actor_id": agentID,
 		})
 	}
@@ -545,7 +537,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 		TargetType: "credential", TargetID: credentialID,
 	})
 	if wsScope != "" {
-		m.emit(r, wsScope, p.ActorID, event.TypeSecurityCredentialRevoked, 0, map[string]any{
+		m.Hub.PublishDomain(event.TypeSecurityCredentialRevoked, wsScope, p.ActorID, 0, map[string]any{
 			"credential_id": credentialID, "actor_id": cred.ActorID,
 		})
 	}
@@ -553,19 +545,6 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- helpers ----
-
-// emit MVP 直接发 hub（低延迟，容忍极小概率丢失）。
-// TODO(phase-4): workspace 侧事件统一改走 outbox 事务路径。
-func (m *Module) emit(r *http.Request, wsID, actorID, typ string, rev int64, data map[string]any) {
-	if m.Hub == nil {
-		return
-	}
-	m.Hub.Publish(event.Envelope{
-		ID: ids.New(ids.Event), Type: typ, WorkspaceID: wsID, ActorID: actorID,
-		OccurredAt: time.Now().UTC().Format(time.RFC3339), SchemaVersion: 1,
-		ResourceRevision: rev, Data: data,
-	})
-}
 
 func requireHuman(r *http.Request) *httpx.APIError {
 	p := auth.PrincipalFrom(r.Context())

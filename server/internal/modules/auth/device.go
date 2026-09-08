@@ -30,8 +30,6 @@ type DeviceAuthorizationCreated struct {
 	Interval                int    `json:"interval"`
 }
 
-type deviceAuthRow = model.DeviceAuthorization
-
 // CreateDeviceAuthorization 生成待审批的 device 授权请求。
 // publicURL 用于拼 verification_uri（web 路由 /device 固定）。
 func (s *Service) CreateDeviceAuthorization(ctx context.Context, clientType, publicURL string) (*DeviceAuthorizationCreated, error) {
@@ -49,7 +47,7 @@ func (s *Service) CreateDeviceAuthorization(ctx context.Context, clientType, pub
 	if err != nil {
 		return nil, err
 	}
-	row := &deviceAuthRow{
+	row := &model.DeviceAuthorization{
 		ID:             ids.New(ids.Device),
 		DeviceCodeHash: HashToken(deviceCode),
 		UserCode:       userCode,
@@ -87,7 +85,7 @@ func (s *Service) FindByUserCode(ctx context.Context, userCode string) (*DeviceA
 		return nil, dbErr
 	}
 	userCode = strings.ToUpper(strings.TrimSpace(userCode))
-	var row deviceAuthRow
+	var row model.DeviceAuthorization
 	err := s.DB.WithContext(ctx).Where("user_code = ?", userCode).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "unknown user_code"}
@@ -112,7 +110,7 @@ func (s *Service) Deny(ctx context.Context, authorizationID, actorID string) err
 }
 
 func (s *Service) decide(ctx context.Context, authorizationID, actorID, status string) error {
-	res := s.DB.WithContext(ctx).Model(&deviceAuthRow{}).
+	res := s.DB.WithContext(ctx).Model(&model.DeviceAuthorization{}).
 		Where("id = ? AND status = 'pending' AND expires_at > ?", authorizationID, time.Now()).
 		Updates(map[string]any{"status": status, "actor_id": actorID})
 	if res.Error != nil {
@@ -124,9 +122,9 @@ func (s *Service) decide(ctx context.Context, authorizationID, actorID, status s
 	return nil
 }
 
-func (s *Service) expireIfDue(ctx context.Context, row *deviceAuthRow) {
+func (s *Service) expireIfDue(ctx context.Context, row *model.DeviceAuthorization) {
 	if row.Status == "pending" && time.Now().After(row.ExpiresAt) {
-		_ = s.DB.WithContext(ctx).Model(&deviceAuthRow{}).Where("id = ?", row.ID).Update("status", "expired").Error
+		_ = s.DB.WithContext(ctx).Model(&model.DeviceAuthorization{}).Where("id = ?", row.ID).Update("status", "expired").Error
 		row.Status = "expired"
 	}
 }
@@ -139,7 +137,7 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 	if deviceCode == "" {
 		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "missing device_code"}
 	}
-	var row deviceAuthRow
+	var row model.DeviceAuthorization
 	err := s.DB.WithContext(ctx).Where("device_code_hash = ?", HashToken(deviceCode)).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "unknown device_code"}
@@ -156,7 +154,7 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 			return nil, &httpx.APIError{Status: 400, Code: httpx.CodeSlowDown, Message: "polling too fast; back off", Retryable: boolPtr(true)}
 		}
 		// 触碰 updated_at 作为 last_poll 记录。
-		_ = s.DB.WithContext(ctx).Model(&deviceAuthRow{}).Where("id = ?", row.ID).Update("updated_at", time.Now()).Error
+		_ = s.DB.WithContext(ctx).Model(&model.DeviceAuthorization{}).Where("id = ?", row.ID).Update("updated_at", time.Now()).Error
 		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeAuthorizationPending, Message: "authorization pending", Retryable: boolPtr(true)}
 	case "denied":
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "authorization denied"}
@@ -171,7 +169,7 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 	}
 
 	// approved → 单次兑换：原子置 exchanged，抢不到说明并发已兑换。
-	res := s.DB.WithContext(ctx).Model(&deviceAuthRow{}).
+	res := s.DB.WithContext(ctx).Model(&model.DeviceAuthorization{}).
 		Where("id = ? AND status = 'approved'", row.ID).
 		Updates(map[string]any{"status": "exchanged", "exchanged_at": time.Now()})
 	if res.Error != nil {

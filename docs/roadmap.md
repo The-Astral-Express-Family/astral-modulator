@@ -1,10 +1,14 @@
 # Astral Modulator 开发路线图初稿
 
-> 状态：Draft
+> 状态：Accepted baseline（Phase 划分仍有效）
 >
 > 原则：先验证协作语义和分发链路，再扩功能。
+>
+> **当前进度**以根目录 [TODO.md](../TODO.md) 为准（Phase 0-2 已大体落地：
+> 服务端 auth/workspace/task/presence/message 全量实装、Web 控制台可登录，
+> CLI 骨架就绪待接 device flow）。
 
-## Phase 0 — Design Baseline
+## Phase 0 — Design Baseline（已完成）
 
 目标：在写业务代码前把最容易导致返工的决策做成可讨论的规格。
 
@@ -13,7 +17,6 @@
 - `docs/requirements.md`
 - `docs/architecture.md`
 - `docs/protocol.md`
-- `docs/cli-ux.md`
 - `docs/sync-semantics.md`
 - `docs/security.md`
 - `docs/deployment.md`
@@ -167,54 +170,11 @@ Exit criteria：Human 可以只通过 GUI 监控协作并完成常见干预。
 - organization/tenant；
 - OIDC federation。
 
-## 第一批 Issues 建议
+## 首批 Issues 落地情况（2026-09-07）
 
-### Docs / ADR
-
-1. `docs: define MVP personas and non-goals`
-2. `adr: choose CLI executable name`
-3. `adr: choose C++ dependency manager`
-4. `adr: choose server implementation language`
-5. `adr: choose public API and realtime transport`
-6. `spec: define task lease state machine`
-7. `spec: define document conflict semantics`
-8. `security: define agent credential lifecycle`
-
-### CLI
-
-9. `cli: bootstrap CMake and presets`
-10. `cli: add vcpkg manifest`
-11. `cli: add command skeleton`
-12. `cli: add HTTP client and error envelope`
-13. `cli: add JSON renderer and exit codes`
-14. `cli: add credential store abstraction`
-15. `cli: add event SSE prototype`
-
-### Server
-
-16. `server: bootstrap modular monolith`
-17. `server: add PostgreSQL migrations`
-18. `server: add capability endpoint`
-19. `server: implement workspace and actor models`
-20. `server: implement task claim transaction`
-21. `server: implement outbox and SSE`
-
-### Web
-
-22. `web: bootstrap monitoring console`
-23. `web: show live task and presence events`
-
-### CI/Release
-
-24. `ci: add three-OS CLI matrix`
-25. `release: create preview archives and checksums`
-26. `release: test clean-machine install`
-
-### Skills
-
-27. `skill: validate astral-install workflow`
-28. `skill: validate astral-cli machine mode`
-29. `skill: validate astral-collaboration workflow`
+原"第一批 Issues"清单中的文档/ADR 类（1-8）与 CLI 脚手架类（9-15）已全部完成；
+服务端 16-21、Web 22-23 已完成；CI/Release 24-26 完成 CI 部分（release 工作流
+与 clean-machine 验证在 astral-cli 仓库推进）。实时待办见 TODO.md。
 
 ## MVP Definition of Done
 

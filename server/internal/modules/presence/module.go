@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
@@ -37,15 +36,17 @@ type presenceDTO struct {
 	ExpiresAt       string  `json:"expires_at"`
 }
 
+// requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
+func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *httpx.APIError {
+	p := auth.PrincipalFrom(r.Context())
+	_, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, wsID, need)
+	return apiErr
+}
+
 func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, wsID)
-	if err != nil || len(scopes) == 0 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"})
-		return
-	}
-	if apiErr := auth.HasScope(scopes, auth.ScopePresenceWrite); apiErr != nil {
+	if apiErr := m.requireWorkspace(r, wsID, auth.ScopePresenceWrite); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -72,7 +73,7 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		ttl = m.Auth.PresenceMin
 	}
 	if ttl > m.Auth.PresenceMax {
-		ttl = m.Auth.PresenceMax // 服务端钳制，防“声明一周在线”（protocol §11）
+		ttl = m.Auth.PresenceMax // 服务端钳制，防“声明一周在线”（openapi PresenceInput.ttl_seconds 边界）
 	}
 	now := time.Now()
 	row := model.Presence{
@@ -81,7 +82,7 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		LastHeartbeatAt: now, ExpiresAt: now.Add(ttl),
 	}
 	// upsert（sqlite/PG 双方言：先删后插，串行写安全；TODO(phase-4): ON CONFLICT 化）。
-	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("actor_id = ?", p.ActorID).Delete(&model.Presence{}).Error; err != nil {
 			return err
 		}
@@ -91,7 +92,7 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	m.publish(r, wsID, p.ActorID, event.TypeActorPresenceChanged, map[string]any{
+	m.Hub.PublishDomain(event.TypeActorPresenceChanged, wsID, p.ActorID, 0, map[string]any{
 		"actor_id": p.ActorID, "state": in.State, "current_task_id": in.CurrentTaskID,
 	})
 	httpx.WriteOK(w, r, http.StatusOK, presenceDTO{
@@ -102,10 +103,8 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	p := auth.PrincipalFrom(r.Context())
-	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, wsID)
-	if err != nil || len(scopes) == 0 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"})
+	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeWorkspaceRead); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	var rows []model.Presence
@@ -132,14 +131,4 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items})
-}
-
-func (m *Module) publish(r *http.Request, wsID, actorID, typ string, data map[string]any) {
-	if m.Hub == nil {
-		return
-	}
-	m.Hub.Publish(event.Envelope{
-		ID: ids.New(ids.Event), Type: typ, WorkspaceID: wsID, ActorID: actorID,
-		OccurredAt: time.Now().UTC().Format(time.RFC3339), SchemaVersion: 1, Data: data,
-	})
 }

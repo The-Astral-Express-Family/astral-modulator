@@ -26,12 +26,12 @@ func (m *Module) manifest(w http.ResponseWriter, r *http.Request) {
 	// TODO(phase-5): 全量 manifest（path/revision/content_hash/size/updated_at）。
 	//  content_hash 统一 'sha256:<hex>' 格式——CLI 端本地 hash 算法必须与此一致，
 	//  这是双端对接最易出错处，联调时优先做契约测试。
-	httpx.NotImplemented(w, r, "document.manifest", "phase-5", "docs/protocol.md §13")
+	httpx.NotImplemented(w, r, "document.manifest", "phase-5", "docs/protocol.md §1；api/openapi.yaml documents")
 }
 
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	// TODO(phase-5): 取单文档（含 revision/hash）；路径非法 → VALIDATION_FAILED。
-	httpx.NotImplemented(w, r, "document.get", "phase-5", "docs/protocol.md §13")
+	httpx.NotImplemented(w, r, "document.get", "phase-5", "docs/protocol.md §1；api/openapi.yaml documents")
 }
 
 func (m *Module) push(w http.ResponseWriter, r *http.Request) {
@@ -45,10 +45,10 @@ func (m *Module) push(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) listConflicts(w http.ResponseWriter, r *http.Request) {
 	// TODO(phase-5): 未解决冲突列表（GUI 冲突视图数据源）。
-	httpx.NotImplemented(w, r, "document.conflicts.list", "phase-5", "docs/protocol.md §13")
+	httpx.NotImplemented(w, r, "document.conflicts.list", "phase-5", "docs/protocol.md §1；api/openapi.yaml documents")
 }
 
 func (m *Module) resolveConflict(w http.ResponseWriter, r *http.Request) {
 	// TODO(phase-5): 解决冲突：resolution=ours|theirs|merged|manual，产生新 revision。
-	httpx.NotImplemented(w, r, "document.conflicts.resolve", "phase-5", "docs/protocol.md §13")
+	httpx.NotImplemented(w, r, "document.conflicts.resolve", "phase-5", "docs/protocol.md §1；api/openapi.yaml documents")
 }

@@ -5,7 +5,7 @@ package event
 
 import "time"
 
-// Envelope 是 SSE/未来 WebSocket 共用的事件包装（protocol §14）。
+// Envelope 是 SSE/未来 WebSocket 共用的事件包装（docs/protocol.md §5；契约 api/schemas/event.json）。
 // 字段为公网契约，禁止重命名；新增字段必须评估旧客户端兼容。
 type Envelope struct {
 	ID               string `json:"id"`   // evt_...（= SSE id 行）
@@ -18,7 +18,7 @@ type Envelope struct {
 	Data             any    `json:"data"`
 }
 
-// 事件类型目录（protocol §14「基础事件类型」）。
+// 事件类型目录（api/schemas/event.json EventType enum）。
 const (
 	TypeWorkspaceMemberChanged    = "workspace.member.changed"
 	TypeActorPresenceChanged      = "actor.presence.changed"

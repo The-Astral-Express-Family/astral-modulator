@@ -67,9 +67,20 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - CLI 侧现状核对（无冲突）：kProtocolVersion=1；well-known 字段一致；CLI 仅发
   Authorization 头（其余公共头可选，服务端不强制）。
 
-### 第 1 轮遗留记录（已被第 2 轮覆盖的已删除）
 
-- 真实实现（第 1 轮）：发现/能力/健康/SSE 骨架，见第 2 轮清单。
+### 第 4 轮（2026-09-07 深夜）：代码/逻辑/文档 卫生清理
+
+- **去重**：事件发布 4 处重复 envelope 构造统一为 `event.Hub.PublishDomain`
+  （workspace/task/presence/message；nil hub 安全）；workspace 级授权前置
+  8 处重复模式统一为 `auth.Service.RequireWorkspaceScopes`
+  （非成员 404 / scope 不足 403 语义单点定义）。
+- **死代码移除**：`audit.Recorder` 死接口、`deviceAuthRow` 别名、
+  `ids.MustValidate`（无生产调用）、web `listTasks`（无调用方）。
+- **文档清理**：`docs/protocol.md` 瘦身为"OpenAPI 之外的传输/语义约定"
+  （删除与 openapi 冲突的 §8-13 端点草案、§6 并发双方案、过时 ID 前缀表）；
+  删除 `docs/cli-ux.md`（职责已归 astral-cli 仓库）；
+  `docs/deployment.md` 由 17 章 CLI 发行手册瘦身为纯服务端部署
+  （CLI 分发归 astral-cli）；MANIFEST/docs 索引/roadmap 同步刷新。
 
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 

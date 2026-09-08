@@ -13,7 +13,7 @@ CLI（`astral`，C++20）在姊妹仓库 [astral-cli]，两仓库只通过本仓
 
 - [docs/README.md](docs/README.md) — 文档索引与术语
 - [docs/architecture.md](docs/architecture.md) — 架构事实来源（技术选型/模块边界/数据模型）
-- [docs/protocol.md](docs/protocol.md) — 协议草案（**与本仓库 `api/openapi.yaml` 冲突时以 openapi 为准**）
+- [docs/protocol.md](docs/protocol.md) — OpenAPI 之外的传输与语义约定（请求头/SSE/限流/兼容性）
 - [docs/roadmap.md](docs/roadmap.md) — Phase 0-6 路线图
 - [TODO.md](TODO.md) — 脚手架任务登记簿 + 文档分歧裁决 + 契约变更登记
 - 根 [ARCHITECTURE.md](ARCHITECTURE.md) — 指向 docs 的简版入口

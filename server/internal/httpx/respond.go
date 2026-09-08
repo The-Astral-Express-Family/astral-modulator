@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-// Page 是 cursor 分页 envelope（docs/protocol.md §5）。
+// Page 是 cursor 分页 envelope（docs/protocol.md §3）。
 // next_cursor 为 null 表示没有更多数据；cursor 对客户端不透明。
 type Page[T any] struct {
 	Items      []T    `json:"items"`

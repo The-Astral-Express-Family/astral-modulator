@@ -1,4 +1,4 @@
-// Package ids 统一生成带前缀的不透明 ID（docs/protocol.md §3）。
+// Package ids 统一生成带前缀的不透明 ID（契约见 api/openapi.yaml 的 Id schema）。
 //
 // 格式：`<prefix>_<uuidv7>`。前缀只服务可读性，客户端不得解析 ID 内部结构。
 // 此文件是前缀唯一事实来源；新增前缀必须同步 api/openapi.yaml 的 Id 模式说明
@@ -6,14 +6,13 @@
 package ids
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
 )
 
-// 前缀注册表。protocol.md §3 已列 usr/agt/svc/ws/tsk/msg/evt，
+// 前缀注册表（protocol.md 初稿列 usr/agt/svc/ws/tsk/msg/evt，本表为超集；
 // 以下为服务端内部资源补充的前缀（已在 TODO.md「新增契约登记」处登记）：
 //
 //	srv req dev ses cred tgp tag doc cfl prs aud obx apv
@@ -51,11 +50,3 @@ func New(p Prefix) string {
 
 // Validate 校验 ID 形状（前缀 + UUIDv7）。用于入参快速失败，避免脏数据入库。
 func Validate(id string) bool { return valid.MatchString(strings.ToLower(id)) }
-
-// MustValidate 同 Validate，但返回带前缀的错误信息便于排查。
-func MustValidate(id string, expect Prefix) error {
-	if !strings.HasPrefix(id, string(expect)+"_") || !Validate(id) {
-		return fmt.Errorf("invalid %s id: %q", expect, id)
-	}
-	return nil
-}

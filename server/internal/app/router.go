@@ -39,7 +39,7 @@ type WellKnown struct {
 	} `json:"auth"`
 }
 
-// Capabilities 是 GET /api/v1/meta/capabilities 的响应（protocol §17）。
+// Capabilities 是 GET /api/v1/meta/capabilities 的响应（docs/protocol.md §7）。
 type Capabilities struct {
 	ProtocolVersion   int      `json:"protocol_version"`
 	MinimumCliVersion string   `json:"minimum_cli_version"`
@@ -94,7 +94,7 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		})
 
 		api.Get("/meta/capabilities", func(w http.ResponseWriter, req *http.Request) {
-			// features 按实现进度逐步开放；未列出即不可用（protocol §17）。
+			// features 按实现进度逐步开放；未列出即不可用（docs/protocol.md §7）。
 			// TODO(phase-3): task_lease 上线时加入并补契约测试。
 			httpx.WriteOK(w, req, http.StatusOK, Capabilities{
 				ProtocolVersion:   httpx.ProtocolVersion,

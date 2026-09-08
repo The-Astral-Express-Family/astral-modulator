@@ -14,9 +14,6 @@ func TestNewShape(t *testing.T) {
 		if !Validate(id) {
 			t.Errorf("%s: invalid id shape %q", p, id)
 		}
-		if err := MustValidate(id, p); err != nil {
-			t.Errorf("%s: %v", p, err)
-		}
 	}
 }
 

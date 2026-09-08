@@ -11,7 +11,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 )
 
-// 公共请求/响应头（docs/protocol.md §2）。
+// 公共请求/响应头（docs/protocol.md §2，未变）。
 const (
 	HeaderClient          = "X-Astral-Client"
 	HeaderClientVersion   = "X-Astral-Client-Version"

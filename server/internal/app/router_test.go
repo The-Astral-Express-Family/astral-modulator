@@ -27,12 +27,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
 
-type testServer struct {
-	ts  *httptest.Server
-	svc *auth.Service
-}
-
-func newTestServer(t *testing.T) testServer {
+func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db := testsupport.NewTestDB(t)
@@ -53,7 +48,7 @@ func newTestServer(t *testing.T) testServer {
 	}
 	ts := httptest.NewServer(NewRouter(config.Config{ServerID: "srv_test", PublicURL: "https://astral.example.com"}, log, db, mods))
 	t.Cleanup(ts.Close)
-	return testServer{ts: ts, svc: svc}
+	return ts
 }
 
 func do(t *testing.T, method, url, token string, body any) (int, map[string]any) {
@@ -94,11 +89,11 @@ func errCode(t *testing.T, body map[string]any) string {
 func TestWellKnownAndCapabilities(t *testing.T) {
 	ts := newTestServer(t)
 
-	code, wk := do(t, "GET", ts.ts.URL+"/.well-known/astral", "", nil)
+	code, wk := do(t, "GET", ts.URL+"/.well-known/astral", "", nil)
 	if code != 200 || wk["server_id"] != "srv_test" || wk["api_base"] != "/api/v1" {
 		t.Fatalf("well-known: %d %v", code, wk)
 	}
-	code, caps := do(t, "GET", ts.ts.URL+"/api/v1/meta/capabilities", "", nil)
+	code, caps := do(t, "GET", ts.URL+"/api/v1/meta/capabilities", "", nil)
 	if code != 200 || caps["protocol_version"] != float64(1) {
 		t.Fatalf("capabilities: %d %v", code, caps)
 	}
@@ -107,7 +102,7 @@ func TestWellKnownAndCapabilities(t *testing.T) {
 func TestProtectedWithoutTokenIs401(t *testing.T) {
 	ts := newTestServer(t)
 
-	code, body := do(t, "POST", ts.ts.URL+"/api/v1/workspaces", "", map[string]any{"name": "x"})
+	code, body := do(t, "POST", ts.URL+"/api/v1/workspaces", "", map[string]any{"name": "x"})
 	if code != 401 || errCode(t, body) != "AUTH_REQUIRED" {
 		t.Fatalf("want 401 AUTH_REQUIRED, got %d %v", code, body)
 	}
@@ -116,7 +111,7 @@ func TestProtectedWithoutTokenIs401(t *testing.T) {
 // TestSpikeE2E 是 roadmap Phase 1 验收的服务端等价物。
 func TestSpikeE2E(t *testing.T) {
 	ts := newTestServer(t)
-	base := ts.ts.URL + "/api/v1"
+	base := ts.URL + "/api/v1"
 
 	// 1. bootstrap 注册。
 	code, reg := do(t, "POST", base+"/auth/register", "", map[string]any{
@@ -283,7 +278,7 @@ func TestSpikeE2E(t *testing.T) {
 
 func TestRegisterBootstrapClosed(t *testing.T) {
 	ts := newTestServer(t)
-	base := ts.ts.URL + "/api/v1"
+	base := ts.URL + "/api/v1"
 	if code, _ := do(t, "POST", base+"/auth/register", "", map[string]any{
 		"email": "a@example.com", "password": "hunter2safe",
 	}); code != 201 {

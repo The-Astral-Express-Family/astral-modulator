@@ -43,7 +43,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/tasks/{task_id}/lease/renew", m.renewLease)
 	r.Delete("/tasks/{task_id}/lease", m.release)
 	r.Get("/tasks/{task_id}/messages", func(w http.ResponseWriter, r *http.Request) {
-		httpx.NotImplemented(w, r, "task.messages.list", "phase-4", "docs/protocol.md §12")
+		httpx.NotImplemented(w, r, "task.messages.list", "phase-4", "api/openapi.yaml /tasks/{task_id}/messages")
 	})
 }
 
@@ -147,11 +147,7 @@ func (m *Module) requireTask(r *http.Request, taskID string, need string) (*mode
 		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "task lookup failed"}
 	}
 	p := auth.PrincipalFrom(r.Context())
-	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, t.WorkspaceID)
-	if err != nil || len(scopes) == 0 {
-		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
-	}
-	if apiErr := auth.HasScope(scopes, need); apiErr != nil {
+	if _, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, t.WorkspaceID, need); apiErr != nil {
 		return nil, apiErr
 	}
 	return &t, nil
@@ -162,7 +158,7 @@ func (m *Module) requireTask(r *http.Request, taskID string, need string) (*mode
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	if _, _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskWrite); apiErr != nil {
+	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskWrite); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -229,7 +225,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	if _, _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskRead); apiErr != nil {
+	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -405,8 +401,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 	_ = err
-	m.publish(r, t.WorkspaceID, p.ActorID, event.TypeTaskUpdated, fresh.Revision,
-		map[string]any{"task_id": t.ID})
+	m.Hub.PublishDomain(event.TypeTaskUpdated, t.WorkspaceID, p.ActorID, fresh.Revision, map[string]any{"task_id": t.ID})
 	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, nil))
 }
 
@@ -637,30 +632,11 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 
 // ---- helpers ----
 
-func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) (*model.Workspace, map[string]bool, *httpx.APIError) {
+// requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
+func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *httpx.APIError {
 	p := auth.PrincipalFrom(r.Context())
-	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, wsID)
-	if err != nil {
-		return nil, nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "scope resolution failed"}
-	}
-	if len(scopes) == 0 {
-		return nil, nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
-	}
-	if apiErr := auth.HasScope(scopes, need); apiErr != nil {
-		return nil, nil, apiErr
-	}
-	return nil, scopes, nil
-}
-
-func (m *Module) publish(r *http.Request, wsID, actorID, typ string, rev int64, data map[string]any) {
-	if m.Hub == nil {
-		return
-	}
-	m.Hub.Publish(event.Envelope{
-		ID: ids.New(ids.Event), Type: typ, WorkspaceID: wsID, ActorID: actorID,
-		OccurredAt: time.Now().UTC().Format(time.RFC3339), SchemaVersion: 1,
-		ResourceRevision: rev, Data: data,
-	})
+	_, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, wsID, need)
+	return apiErr
 }
 
 func (m *Module) leaseSeconds(in int) int {

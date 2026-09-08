@@ -3,7 +3,6 @@
 package audit
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -13,14 +12,9 @@ import (
 
 type Module struct{}
 
-// Recorder 是业务侧写审计的接口。事务内写入由调用方保证（与业务变更同事务）。
-// TODO(phase-2): 提供基于 gorm 的实现 + details redaction（security.md 敏感字段 matcher：
-// authorization/token/credential/secret/password/cookie/api_key/private_key/device_code）。
-type Recorder interface {
-	Record(ctx context.Context, entry Entry) error
-}
-
 // Entry 是审计记录的最小单元（字段对应 00007_audit.sql）。
+// 写入用 GormRecorder（recorder.go）：业务事务内走 RecordInTx，
+// 事务外走 Record；details 落库前统一 redaction。
 type Entry struct {
 	WorkspaceID string
 	ActorID     string

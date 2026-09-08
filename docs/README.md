@@ -1,20 +1,23 @@
-# Astral Modulator 设计文档索引
+# Astral Modulator 文档索引
 
-本目录是一组面向项目启动阶段的设计初稿，目标是在写大量功能代码之前，把 **需求边界、核心领域模型、协议、同步、安全、CLI UX、三端发行与架构决策** 固化到可讨论的文档中。
+本目录承载服务端、公网协议与协作语义的设计文档。仓库当前状态（已实现内容、
+契约裁决、待办）以根目录 [TODO.md](../TODO.md) 为准；本文档描述目标设计。
 
-> 状态：Draft。除已明确标记为 Accepted 的 ADR 外，本文档均可在 Spike 后调整。
-
-## 建议阅读顺序
+## 阅读顺序
 
 1. [requirements.md](requirements.md) — 用户、场景、MVP 与非功能需求。
 2. [architecture.md](architecture.md) — 总体架构、模块边界与技术路线。
-3. [protocol.md](protocol.md) — REST/SSE/WebSocket、公网 API 与事件模型。
-4. [cli-ux.md](cli-ux.md) — `astral` CLI 的命令、输出、退出码和 Agent 契约。
+3. [../api/openapi.yaml](../api/openapi.yaml) — 公网 REST 契约唯一事实来源
+   （说明见 [../api/README.md](../api/README.md)）。
+4. [protocol.md](protocol.md) — OpenAPI 之外的传输与语义约定（请求头、SSE、限流、兼容性）。
 5. [sync-semantics.md](sync-semantics.md) — Markdown 工作区的版本、同步与冲突语义。
 6. [security.md](security.md) — 身份、凭证、RBAC/Scope、审计和威胁模型。
-7. [deployment.md](deployment.md) — Windows/macOS/Linux 的 CLI 构建、签名和分发，以及服务端部署。
-8. [roadmap.md](roadmap.md) — 从设计 Spike 到 MVP 的实施顺序和验收标准。
+7. [deployment.md](deployment.md) — 服务端部署与数据库升级（CLI 分发在 astral-cli 仓库）。
+8. [roadmap.md](roadmap.md) — Phase 0–6 实施顺序和验收标准。
 9. [adr/](adr/) — 关键技术选择与备选方案。
+
+> CLI 的命令 UX、输出契约与退出码文档在 `astral-cli` 仓库（docs/ARCHITECTURE.md）；
+> 原本暂存于此的 cli-ux.md 草稿已随双仓库拆分移除。
 
 ## 术语
 
