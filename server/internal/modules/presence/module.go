@@ -1,31 +1,145 @@
 // Package presence 模块：短生命周期展示状态（architecture §6.8）。
-// Presence 不是所有权；只有 task lease 是。
+// Presence 不是任务所有权；offline 由 expires_at 读路径派生。
 package presence
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"gorm.io/gorm"
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 )
 
-type Module struct{}
+type Module struct {
+	DB   *gorm.DB
+	Hub  *event.Hub
+	Auth *auth.Service
+}
 
 func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Put("/workspaces/{workspace_id}/presence/me", m.heartbeat)
 	r.Get("/workspaces/{workspace_id}/presence", m.list)
 }
 
+type presenceDTO struct {
+	ActorID         string  `json:"actor_id"`
+	DisplayName     string  `json:"display_name,omitempty"`
+	State           string  `json:"state"`
+	CurrentTaskID   *string `json:"current_task_id"`
+	Note            *string `json:"note"`
+	LastHeartbeatAt string  `json:"last_heartbeat_at"`
+	ExpiresAt       string  `json:"expires_at"`
+}
+
 func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
-	// TODO(phase-4): PUT presence/me。
-	//  - ttl_seconds 服务端钳制（如 30~300）；expires_at < now() 视为 offline（不落库状态）；
-	//  - 声称 working 不代表持有 lease —— 不校验也不隐含任务所有权；
-	//  - 写 outbox(actor.presence.changed)。
-	httpx.NotImplemented(w, r, "presence.heartbeat", "phase-4", "docs/protocol.md §11")
+	wsID := chi.URLParam(r, "workspace_id")
+	p := auth.PrincipalFrom(r.Context())
+	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, wsID)
+	if err != nil || len(scopes) == 0 {
+		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"})
+		return
+	}
+	if apiErr := auth.HasScope(scopes, auth.ScopePresenceWrite); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	var in struct {
+		State         string  `json:"state"`
+		CurrentTaskID *string `json:"current_task_id"`
+		Note          *string `json:"note"`
+		TTLSeconds    int     `json:"ttl_seconds"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	switch in.State {
+	case "idle", "planning", "working", "waiting", "blocked", "reviewing":
+	default:
+		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid state"})
+		return
+	}
+	ttl := time.Duration(in.TTLSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = 90 * time.Second
+	}
+	if ttl < m.Auth.PresenceMin {
+		ttl = m.Auth.PresenceMin
+	}
+	if ttl > m.Auth.PresenceMax {
+		ttl = m.Auth.PresenceMax // 服务端钳制，防“声明一周在线”（protocol §11）
+	}
+	now := time.Now()
+	row := model.Presence{
+		ActorID: p.ActorID, WorkspaceID: wsID, State: in.State,
+		CurrentTaskID: in.CurrentTaskID, Note: in.Note,
+		LastHeartbeatAt: now, ExpiresAt: now.Add(ttl),
+	}
+	// upsert（sqlite/PG 双方言：先删后插，串行写安全；TODO(phase-4): ON CONFLICT 化）。
+	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("actor_id = ?", p.ActorID).Delete(&model.Presence{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&row).Error
+	})
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	m.publish(r, wsID, p.ActorID, event.TypeActorPresenceChanged, map[string]any{
+		"actor_id": p.ActorID, "state": in.State, "current_task_id": in.CurrentTaskID,
+	})
+	httpx.WriteOK(w, r, http.StatusOK, presenceDTO{
+		ActorID: p.ActorID, State: in.State, CurrentTaskID: in.CurrentTaskID, Note: in.Note,
+		LastHeartbeatAt: now.UTC().Format(time.RFC3339), ExpiresAt: row.ExpiresAt.UTC().Format(time.RFC3339),
+	})
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
-	// TODO(phase-4): workspace 在线状态总览（GUI 首页数据源）。
-	httpx.NotImplemented(w, r, "presence.list", "phase-4", "docs/protocol.md §11")
+	wsID := chi.URLParam(r, "workspace_id")
+	p := auth.PrincipalFrom(r.Context())
+	scopes, err := m.Auth.WorkspaceScopes(r.Context(), p, wsID)
+	if err != nil || len(scopes) == 0 {
+		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"})
+		return
+	}
+	var rows []model.Presence
+	if err := m.DB.WithContext(r.Context()).Where("workspace_id = ?", wsID).Find(&rows).Error; err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	now := time.Now()
+	items := make([]presenceDTO, 0, len(rows))
+	for _, row := range rows {
+		state := row.State
+		if row.ExpiresAt.Before(now) {
+			state = "offline" // 读路径派生（不落库）
+		}
+		var actor model.Actor
+		display := ""
+		_ = m.DB.WithContext(r.Context()).Select("display_name").First(&actor, "id = ?", row.ActorID).Error
+		display = actor.DisplayName
+		items = append(items, presenceDTO{
+			ActorID: row.ActorID, DisplayName: display, State: state,
+			CurrentTaskID: row.CurrentTaskID, Note: row.Note,
+			LastHeartbeatAt: row.LastHeartbeatAt.UTC().Format(time.RFC3339),
+			ExpiresAt:       row.ExpiresAt.UTC().Format(time.RFC3339),
+		})
+	}
+	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items})
+}
+
+func (m *Module) publish(r *http.Request, wsID, actorID, typ string, data map[string]any) {
+	if m.Hub == nil {
+		return
+	}
+	m.Hub.Publish(event.Envelope{
+		ID: ids.New(ids.Event), Type: typ, WorkspaceID: wsID, ActorID: actorID,
+		OccurredAt: time.Now().UTC().Format(time.RFC3339), SchemaVersion: 1, Data: data,
+	})
 }

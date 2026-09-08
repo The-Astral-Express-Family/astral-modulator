@@ -12,10 +12,21 @@ type Actor struct {
 	DisplayName string `gorm:"size:200"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	// TODO(phase-1): human 认证方式关联字段（本地口令 hash / OIDC subject）。
+	// Human 本地登录凭证在 human_auth 表（D6）；OIDC subject 字段后续迁移再加。
 }
 
 func (Actor) TableName() string { return "actors" }
+
+// HumanAuth 见 00001_init.sql（D6 本地账号）。bcrypt hash；email 唯一。
+type HumanAuth struct {
+	ActorID      string `gorm:"primaryKey;size:40"`
+	Email        string `gorm:"uniqueIndex;size:254"`
+	PasswordHash string `gorm:"size:128"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (HumanAuth) TableName() string { return "human_auth" }
 
 // Workspace 见 00001_init.sql / architecture §6.2。
 type Workspace struct {
@@ -40,8 +51,64 @@ type WorkspaceMember struct {
 
 func (WorkspaceMember) TableName() string { return "workspace_members" }
 
+// DeviceAuthorization 见 00002_auth_sessions.sql。
+// UpdatedAt 兼作最近轮询时间戳（SLOW_DOWN 判定，A1）。
+type DeviceAuthorization struct {
+	ID             string  `gorm:"primaryKey;size:40"`
+	DeviceCodeHash string  `gorm:"size:128;index"`
+	UserCode       string  `gorm:"uniqueIndex;size:16"`
+	ClientType     string  `gorm:"size:8"`
+	Status         string  `gorm:"size:16"`
+	ActorID        *string `gorm:"size:40"`
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ExchangedAt    *time.Time
+}
+
+func (DeviceAuthorization) TableName() string { return "device_authorizations" }
+
+// Session 见 00002_auth_sessions.sql。opaque access+refresh 只存 hash；
+// prev_refresh_token_hash 命中即整族撤销（重放检测）。
+type Session struct {
+	ID                   string  `gorm:"primaryKey;size:40"`
+	ActorID              string  `gorm:"index;size:40"`
+	ClientType           string  `gorm:"size:8"`
+	RefreshTokenHash     string  `gorm:"index;size:128"`
+	PrevRefreshTokenHash *string `gorm:"size:128"`
+	FamilyID             string  `gorm:"index;size:40"`
+	AccessTokenHash      string  `gorm:"index;size:128"`
+	AccessExpiresAt      time.Time
+	CreatedAt            time.Time
+	ExpiresAt            time.Time
+	LastUsedAt           *time.Time
+	RevokedAt            *time.Time
+	UserAgent            string
+	RemoteAddr           string
+}
+
+func (Session) TableName() string { return "sessions" }
+
+// Credential 见 00002_auth_sessions.sql。Scopes 为 JSON 数组文本（可移植，见 TODO.md）。
+type Credential struct {
+	ID          string  `gorm:"primaryKey;size:40"`
+	ActorID     string  `gorm:"index;size:40"`
+	Kind        string  `gorm:"size:16"`
+	SecretHash  string  `gorm:"size:128"`
+	WorkspaceID *string `gorm:"size:40"`
+	Scopes      string  `gorm:"size:4096"`
+	CreatedBy   string  `gorm:"size:40"`
+	CreatedAt   time.Time
+	ExpiresAt   *time.Time
+	LastUsedAt  *time.Time
+	RevokedAt   *time.Time
+}
+
+func (Credential) TableName() string { return "credentials" }
+
 // Task 见 00003_task_tree.sql / architecture §12。
-// Revision 由数据库触发器递增；应用层更新必须带 WHERE revision = expected_revision。
+// Revision 由应用层在 UPDATE 中显式 +1（TODO.md D5）；乐观并发用
+// UPDATE ... WHERE revision = expected（冲突 0 行 → REVISION_CONFLICT）。
 type Task struct {
 	ID              string  `gorm:"primaryKey;size:40"`
 	WorkspaceID     string  `gorm:"index:idx_tasks_workspace_parent;size:40"`
@@ -59,6 +126,18 @@ type Task struct {
 }
 
 func (Task) TableName() string { return "tasks" }
+
+// TaskLease 见 00003_task_tree.sql。读路径必须把 expires_at < now 视为无主；
+// 过期清扫由 task 模块 sweeper 负责（发 task.lease.expired）。
+type TaskLease struct {
+	TaskID        string `gorm:"primaryKey;size:40"`
+	HolderActorID string `gorm:"size:40"`
+	ExpiresAt     time.Time
+	RenewedAt     time.Time
+	CreatedAt     time.Time
+}
+
+func (TaskLease) TableName() string { return "task_leases" }
 
 // Tag 见 00004_tags.sql / architecture §14。
 // NormalizedName = trim + NFC + case-fold，由应用层在写路径统一计算。
@@ -120,3 +199,40 @@ type AuditEntry struct {
 }
 
 func (AuditEntry) TableName() string { return "audit_log" }
+
+// Presence 见 00008_presence_messages.sql。offline 是读路径派生值，不落库。
+type Presence struct {
+	ActorID         string  `gorm:"primaryKey;size:40"`
+	WorkspaceID     string  `gorm:"index;size:40"`
+	State           string  `gorm:"size:16"`
+	CurrentTaskID   *string `gorm:"size:40"`
+	Note            *string
+	LastHeartbeatAt time.Time
+	ExpiresAt       time.Time
+}
+
+func (Presence) TableName() string { return "presence" }
+
+// Message 见 00008_presence_messages.sql。target 三类：actor/workspace/task。
+type Message struct {
+	ID          string  `gorm:"primaryKey;size:40"`
+	WorkspaceID string  `gorm:"size:40"`
+	ThreadID    *string `gorm:"size:40"`
+	TargetType  string  `gorm:"size:16"`
+	TargetID    string  `gorm:"size:48"`
+	SenderID    string  `gorm:"size:40"`
+	Body        string
+	Metadata    []byte `gorm:"type:jsonb"`
+	CreatedAt   time.Time
+}
+
+func (Message) TableName() string { return "messages" }
+
+// ServerMeta 见 00001_init.sql：服务器级持久化元数据（server_id 稳定身份等）。
+type ServerMeta struct {
+	Key       string `gorm:"primaryKey;size:64"`
+	Value     string
+	UpdatedAt time.Time
+}
+
+func (ServerMeta) TableName() string { return "server_meta" }

@@ -23,8 +23,15 @@ const CLIENT = 'web'
 // TODO(phase-1): 与服务端 version 对齐来源（读 package.json 或构建注入），避免双写。
 const CLIENT_VERSION = '0.1.0'
 
+// Bearer 来源由 session store 注入（避免 client→store 循环依赖）。
+let tokenProvider: (() => string | null) | null = null
+
+export function setAuthTokenProvider(fn: () => string | null): void {
+  tokenProvider = fn
+}
+
 function newRequestId(): string {
-  // req_ 前缀 + 时间排序随机串；服务端会原样回显。
+  // req_ 前缀 + 随机串；服务端会原样回显。
   return `req_${crypto.randomUUID()}`
 }
 
@@ -44,8 +51,9 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
   }
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey
-  // TODO(phase-1): 接入 Web session（HttpOnly Cookie 自动携带，无需手动设置；
-  // 若走 Bearer 则由 session store 提供并在此注入）。
+  // Bearer access token（内存态）；Cookie 由浏览器自动携带（HttpOnly，JS 不可读）。
+  const token = tokenProvider?.()
+  if (token) headers['Authorization'] = `Bearer ${token}`
 
   const resp = await fetch(path, {
     method: opts.method ?? 'GET',

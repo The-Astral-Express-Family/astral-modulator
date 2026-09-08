@@ -33,5 +33,4 @@ export function listTasks(workspaceId: string, params: { status?: string; limit?
   return apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks${qs ? `?${qs}` : ''}`)
 }
 
-// TODO(phase-3): searchTasks（regex+fuzzy 双参数）、claimTask、tag proposal/confirm。
-// TODO(phase-1): device flow 审批页 API（GET pending authorization by user_code + approve/deny）。
+// TODO(phase-3): searchTasks（regex+fuzzy 双参数）、tag proposal/confirm。

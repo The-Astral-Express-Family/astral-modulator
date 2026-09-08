@@ -13,6 +13,8 @@ CREATE TABLE device_authorizations (
     actor_id      TEXT REFERENCES actors(id),-- 浏览器完成登录后回填
     expires_at    TIMESTAMPTZ NOT NULL,      -- TTL 600s（architecture §8.2）
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 兼作最近轮询时间戳（SLOW_DOWN 判定，A1）；GORM 模型自动维护
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     exchanged_at  TIMESTAMPTZ
 );
 
@@ -20,11 +22,13 @@ CREATE TABLE sessions (
     id                TEXT PRIMARY KEY,      -- ses_
     actor_id          TEXT NOT NULL REFERENCES actors(id),
     client_type       TEXT NOT NULL CHECK (client_type IN ('cli','web')),
-    -- opaque rotating refresh token 的 hash；轮换时更新并推进 family
+    -- opaque rotating refresh token 的 hash；prev_* 用于重放检测（命中即撤族）。
+    -- Web 场景 refresh 放 HttpOnly Cookie，不进 JS 可读存储（architecture §8.4）。
     refresh_token_hash TEXT NOT NULL,
+    prev_refresh_token_hash TEXT,
     family_id         TEXT NOT NULL,         -- 检测旧 refresh 重放时整族撤销（§8.3）
-    -- TODO(phase-1): access token hash 与过期时间。MVP 可只存 refresh 侧 + 内存/短 TTL 校验，
-    -- 定稿前在 ADR 里明确 access 校验路径（查库 or 缓存）。
+    access_token_hash TEXT NOT NULL,         -- opaque access（A2：每请求查库校验）
+    access_expires_at TIMESTAMPTZ NOT NULL,  -- 5~15 分钟
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at        TIMESTAMPTZ NOT NULL,  -- refresh 上限 30 天，可配置收紧
     last_used_at      TIMESTAMPTZ,
@@ -35,14 +39,17 @@ CREATE TABLE sessions (
 
 CREATE INDEX idx_sessions_actor ON sessions(actor_id);
 CREATE INDEX idx_sessions_family ON sessions(family_id);
+CREATE INDEX idx_sessions_refresh ON sessions(refresh_token_hash);
+CREATE INDEX idx_sessions_access ON sessions(access_token_hash);
 
 CREATE TABLE credentials (
     id            TEXT PRIMARY KEY,          -- cred_
     actor_id      TEXT NOT NULL REFERENCES actors(id),
     kind          TEXT NOT NULL CHECK (kind IN ('agent','service')),
-    secret_hash   TEXT NOT NULL,             -- 明文只在创建响应里出现一次
+    secret_hash   TEXT NOT NULL,             -- 明文 astral_<base64url> 只返回一次（A4）
     workspace_id  TEXT REFERENCES workspaces(id), -- NULL = 全服务器范围（少见，需 scope 收紧）
-    scopes        TEXT[] NOT NULL DEFAULT '{}',   -- 见 internal/modules/auth/scopes.go
+    -- scope 列表存 JSON（可移植；D5 登记项。无需 SQL 数组查询）
+    scopes        TEXT NOT NULL DEFAULT '[]',
     created_by    TEXT NOT NULL REFERENCES actors(id),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at    TIMESTAMPTZ,

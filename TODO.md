@@ -9,7 +9,9 @@
 > - 新增契约（路径/错误码/事件/ID 前缀/env 变量）必须同步登记到「契约变更登记」；
 > - `grep -rn "TODO(phase" server web` 可找到全部代码内待办。
 
-## 0. 已完成（脚手架，2026-09-07）
+## 0. 已完成
+
+### 第 1 轮（脚手架，2026-09-07 上午）
 
 - Go 模块化单体骨架（chi + GORM + goose + slog），`go build/vet/test` 全绿；
 - `api/openapi.yaml` 全量契约 + `api/schemas/{error,event}.json`（Redocly 校验通过）；
@@ -20,6 +22,37 @@
 - Web 脚手架（Vue3+TS+Vite+Pinia+Router），api client/SSE 封装/device 审批页路由，
   `vue-tsc + vite build` 通过；
 - CI（server/web/openapi 三 job）、docker-compose 开发库、Makefile。
+
+### 第 2 轮（2026-09-07 下午）：Phase 1 Auth + Phase 2 Workspace + Phase 3 spike 核心 全量实装
+
+- **Auth 全链路**：bootstrap 注册（D6 本地账号）→ web 登录（HttpOnly Cookie）→
+  Device Flow（create → web 审批 → 轮询兑换，A1 RFC 8628 语义）→ opaque
+  access/refresh（15min/30d，轮换 + 重放检测整族撤销）→ logout；
+- **Agent credential**：签发（`astral_` 明文一次性，A4）/ 吊销 / workspace 绑定 /
+  scope 强制（403 INSUFFICIENT_SCOPE），`ASTRAL_TOKEN` Bearer 校验；
+- **授权**：Authenticate 中间件（Bearer access | Bearer credential | Cookie session
+  三来源）+ workspace 级 scope 解析（human 按 role bundle，agent 按 credential scopes）；
+- **Workspace 模块**：CRUD、`?name=` 精确解析（init 依赖）、成员管理（owner 提升显式拒绝，
+  等 approval 流）、agent identity 管理；
+- **Task 模块**：CRUD + 应用层 revision 乐观并发（D5）+ parent 校验/循环检测 +
+  **原子 claim**（事务内条件更新，roadmap spike 验收项）+ lease renew/release +
+  过期清扫器（发 task.lease.expired）；search/tags 仍为 501 桩（T-task-6/7）；
+- **Presence / Message**：heartbeat（TTL 钳制 + offline 派生）+ 发送/列表
+  （actor/workspace/task 三 target）；
+- **事件**：transactional outbox dispatcher（500ms 轮询 → hub → SSE）；
+  关键写路径同事务写 audit + outbox；
+- **server_id 固化**：首启写 server_meta，此后以库中值为准（architecture §7）；
+- **Web**：登录页、Device 审批页（查询/批准/拒绝）、session store（Cookie 续期 +
+  内存 access token + Bearer provider 注入）；
+- **测试**：auth 单测（device flow/refresh 重放/credential/cookie）、task 单测
+  （claim 竞争唯一成功/租约过期接管/revision 冲突/清扫器）、app HTTP 集成测试
+  （spike 全链路 E2E + scope 强制 + 401 边界）、postgres migration 测试
+  （CI 注入 DSN，本地自动跳过）；
+- **CI**：server job 加 postgres service 跑 migration 测试。
+
+### 第 1 轮遗留记录（已被第 2 轮覆盖的已删除）
+
+- 真实实现（第 1 轮）：发现/能力/健康/SSE 骨架，见第 2 轮清单。
 
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
@@ -32,17 +65,22 @@
 | D2 | 身份自检端点 | `GET /api/v1/auth/me` | 同上；protocol.md §8 的 `/auth/session` 废弃 |
 | D3 | Tag 确认参数拼写 | `--confirm` | 文档 typo `--comfirm` 已在 architecture §14 明确不沿用 |
 | D4 | 乐观并发 | body 内 `expected_revision`（方案 A） | protocol.md §6 MVP 推荐方案 A，CLI JSON/事件流一致性好处理 |
+| D5 | revision 自增位置 | **应用层**（UPDATE 里显式 `revision = revision + 1`），不靠 PG 触发器 | 可移植 + 可测（sqlite 测试与 PG 生产行为一致）；migration 00003 的 bump 触发器已删除，同 workspace 父子触发器保留作纵深防御 |
+| D6 | Human 浏览器登录 MVP | **本地账号**（email+password, bcrypt）+ HttpOnly Cookie session | Device Flow 需要 Human 在浏览器完成登录才能闭环；OIDC/federation 是后续项（security.md 暂缓清单）。首个 human 账号通过 bootstrap 注册创建（仅当服务器无 human 时开放） |
 
-## 2. 待裁决契约（实现前必须先定，避免返工）
+## 2. 待裁决契约
 
-| # | 问题 | 涉及 | 建议 | 状态 |
-|---|------|------|------|------|
-| M1 | Memory 工作区的公网 API 形状未在任何文档定稿 | memory 模块、astral-cli | 复用 documents 表 + 保留路径前缀（`organization/`、`projects/<ws>/`），不发明第二套协议 | open（phase-5 前裁决） |
-| A1 | Device token 轮询的 pending 语义（HTTP 状态码/错误码/慢轮询惩罚） | auth、CLI | 参考 OAuth Device Flow 惯例：400 + `authorization_pending` 语义码，需新增错误码（走契约变更登记） | open（phase-1 前裁决） |
-| A2 | access token 服务端校验路径：每请求查库 vs 短 TTL 缓存 | auth 性能 | MVP 先查库（单体内延迟可接受），预留缓存接口 | open（phase-1 前裁决） |
-| A3 | Web device 审批页所需 API 未在 openapi 定义 | web、auth | 草案见 `web/src/views/DeviceApproveView.vue` 头注释（GET by user_code + approve/deny） | open（phase-1 前裁决） |
-| T1 | task 删除/取消语义：不级联时子任务如何呈现 | task、CLI UX | 取消父任务时子任务独立存活；显式 cascade 选项后续再加 | open（phase-3 前裁决） |
-| S1 | snapshot.required 事件形状与 outbox 保留窗口时长 | events、CLI | 建议 24h 起步，按内存/磁盘预算调整 | open（phase-4 前裁决） |
+> 2026-09-07 第 2 轮：A1/A2/A3 已裁决并实现（见下表“状态”）。
+
+| # | 问题 | 裁决 | 状态 |
+|---|------|------|------|
+| M1 | Memory 工作区公网 API 形状未定稿 | （未裁决）复用 documents 表 + 保留路径前缀，phase-5 前定 | **open** |
+| A1 | Device 轮询 pending 语义 | **按 RFC 8628**：token 端点对 pending 返回 `400 AUTHORIZATION_PENDING`、轮询过快返回 `400 SLOW_DOWN`（客户端应退避）；denied→`401 TOKEN_REVOKED` 语义不复用，用 `VALIDATION_FAILED`+details 或专用码见 openapi 注释 | ✅ 已实现 |
+| A2 | access token 校验路径 | **每请求查库**（比对 sha256 hash）；MVP 单体延迟可接受；缓存接口后续再加 | ✅ 已实现 |
+| A3 | Web 审批页 API | `GET /api/v1/auth/device/authorizations?user_code=`（需 human session）+ `POST .../{id}/approve`、`POST .../{id}/deny` | ✅ 已实现 |
+| A4 | ASTRAL_TOKEN 格式 | Agent credential secret 为 `astral_<43字符base64url>` 随机串；服务端按 sha256 hash 查 credentials 表校验；请求头仍为 `Authorization: Bearer astral_...` | ✅ 已实现 |
+| T1 | task 删除/取消语义 | （未裁决，phase-3）MVP 暂不提供 DELETE，仅 cancelled 状态 | **open** |
+| S1 | snapshot.required 事件与 outbox 保留窗口 | （未裁决，phase-4） | **open** |
 
 ## 3. Phase 1 — Auth（roadmap Phase 1）
 
@@ -55,23 +93,59 @@
 - [ ] Web HttpOnly Cookie session；`/auth/me` 返回 actor
 - [ ] ASTRAL_TOKEN（Agent Bearer）校验路径
 - [ ] 审计：登录/授权失败/撤销全记录（`audit.Recorder` 接口已定）
-- [ ] 裁决并登记 A1/A2/A3
+- [x] 裁决并登记 A1/A2/A3（2026-09-07，另新增 A4/D5/D6）
+
+### 3.1 第 2 轮实施清单（2026-09-07，✅ 全部完成）
+
+- [x] T-auth-1 migration：00002 sessions 增 access_token_hash/access_expires_at；
+      scopes 从 TEXT[] 改 JSON text；00001 增 human_auth 表
+- [x] T-auth-2 tokens.go：opaque token 生成、sha256、常数时间比较
+- [x] T-auth-3 password.go：bcrypt 包装 + 强度校验
+- [x] T-auth-4 AuthService：register(bootstrap-only)/login/logout/refresh(轮换+重放撤族)/
+      device create-approve-deny-exchange(A1 语义)/me/credential 校验(A4)
+- [x] T-auth-5 Authenticate 中间件（Bearer access | ASTRAL_TOKEN credential | Cookie session）
+- [x] T-auth-6 audit.GormRecorder + redaction（security.md 敏感字段 matcher）
+- [x] T-auth-7 server_id 由 server_meta 固化（库中值优先于 env）
+- [x] T-auth-8 测试：device flow 全链路、refresh 重放撤族、credential 校验、scope 中间件
+- [x] T-auth-9 web：登录页 + /device 审批页实装（A3 API）+ session store 接 /auth/me
+- [x] T-auth-10 openapi 增补：/auth/register、/auth/login、approve/deny、新错误码
+      AUTHORIZATION_PENDING、SLOW_DOWN；已登记契约变更
+
+### 3.2 Phase 1 剩余（下轮）
+
+- [ ] user_code 防枚举限流（HTTP 层，phase-6 一并做 rate limit）
+- [ ] credential/session 撤销后主动断开 SSE 连接（依赖 hub 订阅者携带身份）
+- [ ] 认证失败写 audit（Authenticate 中间件当前只拒不记）
+- [ ] refresh 家族生命周期上限窗口测试加固（轮换滑动 vs 创建起算的边界用例）
 
 ## 4. Phase 2 — Workspace（roadmap Phase 2）
 
-- [ ] workspace CRUD + `?name=` 精确解析（astral init 依赖；404 与无权限必须可区分）
-- [ ] membership 管理；promote_owner 走 approval 状态机（migration 尚无 approvals 表，
-      建表时走契约变更登记）
-- [ ] agent actor + credential 签发/撤销（明文只返回一次）
-- [ ] Idempotency-Key 中间件（幂等窗口存储选型：库表 vs 内存 + 库持久化）
-- [ ] GORM 模型补全 + repository 层（当前只映射核心表）
+### 4.1 第 2 轮实施清单（✅ 大部分完成）
+
+- [x] T-ws-1 workspace CRUD + `?name=` 精确解析 + 成员管理（创建者自动 owner）
+- [x] T-ws-2 agent actor 创建 + credential 签发（明文一次性返回）/撤销
+- [x] T-ws-3 workspace/member/credential 变更的审计与事件（credential 事件经 outbox 的
+      仅 task 路径；workspace 侧事件当前直发 hub，见 T-task-4 统一计划）
+- [x] T-ws-4 测试：CRUD、claim 竞争、scope 强制（app 集成测试覆盖）
+- [ ] T-ws-5 Idempotency-Key 中间件（存储：库表；接口已留）
+- [ ] T-ws-6 promote_owner approval 状态机（当前显式拒绝，需建 approvals 表）
+- [ ] T-ws-7 agents 列表按 workspace 过滤（需 agent-workspace 绑定模型；
+      见 workspace/module.go listAgents TODO，审查轮 2026-09-07 登记）
 
 ## 5. Phase 3 — TODO 树 / 搜索 / Tags（roadmap Phase 3）
 
-- [ ] task CRUD + revision 乐观并发 + parent 循环检测（recursive CTE）
-- [ ] **原子 claim**（Phase 1 spike 验收项）：条件 UPDATE + 事务内 revision 校验 +
-      audit + outbox；并发竞争只有一个成功
-- [ ] lease renew/release/过期清扫器（发 `task.lease.expired`）
+### 5.1 第 2 轮实施清单
+
+- [x] T-task-1 task create/get/list/update（应用层 revision + expected_revision 乐观并发，
+      parent 同 workspace 校验 + 循环检测）
+- [x] T-task-2 **原子 claim**（roadmap spike 验收项）：事务内条件 UPDATE 抢租约，
+      只有一个成功；renew/release
+- [x] T-task-3 lease 过期清扫器（发 task.lease.expired）
+- [x] T-task-4 outbox → hub dispatcher（业务事务同事务写 outbox，后台轮询投递 SSE；
+      task 关键路径已走 outbox，workspace/presence/message 事件仍直发 hub，待统一）
+- [x] T-task-5 测试：并发 claim 唯一成功、revision 冲突、lease 过期语义、清扫器事件
+- [ ] T-task-6 search（regex→fuzzy + pg_trgm + timeout 防护）——仍 501
+- [ ] T-task-7 tags proposal/confirm——仍 501
 - [ ] 搜索：pg_trgm 索引 + regex→fuzzy 语义 + statement_timeout 防护（migration 00003 已留位）
 - [ ] tag proposal/confirm 两步流（confirm_code hash、TTL、单次使用）
 - [ ] capabilities.features 开放首个特性 `task_lease`
@@ -113,6 +187,10 @@
 | 2026-09-07 | 新增端点 `GET /workspaces/{id}/audit`（audit:read scope 与 GUI 需求隐含） | 补充 | Web |
 | 2026-09-07 | 新增开发期错误码 `NOT_IMPLEMENTED`（HTTP 501 桩专用，各 Phase 移除） | 临时 | CLI 不得依赖 |
 | 2026-09-07 | 新增 env：ASTRAL_HTTP_ADDR/ASTRAL_PUBLIC_URL/ASTRAL_DATABASE_DSN(或 DATABASE_URL)/ASTRAL_SERVER_ID/ASTRAL_AUTO_MIGRATE/ASTRAL_DEV_CORS_ORIGINS/ASTRAL_LOG_LEVEL | 补充 | 部署 |
+| 2026-09-07 | 第 2 轮：新增端点 `POST /auth/register`（bootstrap-only）、`POST /auth/login`（web 表单→Cookie session）、`GET /auth/device/authorizations?user_code=`、`POST /auth/device/authorizations/{id}/approve|deny`（A3） | 补充 | Web/CLI |
+| 2026-09-07 | 第 2 轮：新增错误码 `AUTHORIZATION_PENDING`、`SLOW_DOWN`（A1，RFC 8628 语义） | 补充 | CLI |
+| 2026-09-07 | 第 2 轮：定义 ASTRAL_TOKEN 格式 `astral_<base64url>`（A4）；Bearer 可为 human access token 或 agent credential | 补充 | CLI |
+| 2026-09-07 | 第 2 轮：sessions 表 scopes 列由 TEXT[] 改 JSON text（可移植）；tasks revision 自增改应用层（D5） | 内部 | 无（schema 未发布） |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -120,10 +198,44 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 
 1. `GET /.well-known/astral` — server_id/api_base/protocol_version（已实装 ✅）
 2. `GET /api/v1/meta/capabilities` — features 门控（已实装 ✅，features 暂为空）
-3. 错误 envelope 解析 — 所有非 2xx（已实装 ✅，含 `NOT_IMPLEMENTED` 桩）
+3. 错误 envelope 解析 — 所有非 2xx（已实装 ✅；`NOT_IMPLEMENTED` 桩仅剩
+   task.search 与 tags/memory/document 相关端点）
 4. 公共响应头回显 — `X-Astral-Request-Id`/`X-Astral-Protocol-Version`（已实装 ✅）
 5. ID 形状 `^[a-z]{2,3}_<uuidv7>` — CLI 只做透传与展示（已实装 ✅）
-6. SSE 流 + keepalive — `/api/v1/workspaces/{id}/events`（已实装 ✅，
-   但**无重放**：断线期间事件缺失，CLI 需接受快照+增量模型直至 phase-4）
-7. device flow / token / 各业务端点 — 501 桩（按 Phase 落地）
-8. `content_hash` 统一 `sha256:<hex>`（小写十六进制）— 文档同步 phase-5 联调时最易错
+6. **Device Flow 全链路（已实装 ✅，第 2 轮）**：
+   - `POST /auth/device/authorizations` `{"client_type":"cli"}` → 201
+     `{device_code, user_code, verification_uri, verification_uri_complete, expires_in:600, interval:3}`
+   - CLI 轮询 `POST /auth/device/authorizations/{device_code}/token`：
+     pending → `400 AUTHORIZATION_PENDING`(retryable)；过快 → `400 SLOW_DOWN`（退避）；
+     成功 → `200 {access_token, token_type:"Bearer", expires_in:900, refresh_token, actor_id}`；
+     denied/expired/reused → 401
+   - **刷新**：`POST /auth/token/refresh` body `{refresh_token}` → 新对（rotating）；
+     旧值重放 → `401 TOKEN_REVOKED` 且整族失效 —— CLI 收到此码必须重新 login
+   - 401 处理顺序（astral-cli §13）与服务端行为已对齐：先试 refresh 一次，再重放原请求
+7. `POST /auth/logout` body `{refresh_token}` → 204（CLI logout 用）
+8. **ASTRAL_TOKEN（A4）**：credential secret 形如 `astral_xxxxx`，直接作
+   `Authorization: Bearer` 值；失效返回 401（TOKEN_REVOKED=被吊销 / TOKEN_EXPIRED=过期）
+9. **workspace init 语义（已实装 ✅）**：
+   - `GET /api/v1/workspaces?name=<exact-or-slug>`：空 items = 不存在或不可见
+     （CLI 可提示 `--create`）；命中 → items[0]
+   - `POST /api/v1/workspaces` `{name, slug?}` → 201；409 `WORKSPACE_NAME_TAKEN`
+   - `GET /api/v1/workspaces/{id}` 校验最终绑定；非成员 404
+10. **task claim（已实装 ✅）**：`POST /tasks/{id}/claim`
+    `{expected_revision, lease_seconds}` → 200 `{task, lease}`；
+    竞争失败 → 409 `TASK_ALREADY_CLAIMED`；过期后需重新 claim
+    （renew 对过期租约返回 409 `TASK_LEASE_EXPIRED`）
+11. **SSE（已实装 ✅，无重放）**：`GET /api/v1/workspaces/{id}/events`，
+    keepalive 注释行 15s；断线期间事件缺失，CLI 需接受快照+增量模型直至 phase-4
+    （Last-Event-ID 重放 + snapshot.required）
+12. `content_hash` 统一 `sha256:<hex>`（小写十六进制）— phase-5 文档同步联调时最易错
+
+## 11. 第 3 轮计划（roadmap Phase 3 收尾 + Phase 4）
+
+1. T-task-6 搜索：pg_trgm 索引 + regex→fuzzy 管线 + statement_timeout（需 postgres，
+   CI 已具备）；CLI `todo search --regex/--fuzzy` 可对接
+2. T-task-7 tags proposal/confirm（confirm_code hash + TTL + 单次使用）
+3. 事件统一走 outbox（workspace/presence/message 从直发 hub 迁移）+ SSE 重放窗口 + S1 裁决
+4. Idempotency-Key 中间件（T-ws-5）：库表存储 + 窗口清理
+5. approvals 表 + promote_owner 状态机（T-ws-6）
+6. capabilities.features 开放 `task_lease`（claim 稳定后）+ 双源一致性 CI 检查
+   （openapi enum vs httpx/errors.go vs schemas/*.json）

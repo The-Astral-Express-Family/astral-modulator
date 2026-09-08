@@ -12,6 +12,11 @@ export const router = createRouter({
       component: () => import('../views/DashboardView.vue'),
     },
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/LoginView.vue'),
+    },
+    {
       path: '/device',
       name: 'device-approve',
       component: () => import('../views/DeviceApproveView.vue'),

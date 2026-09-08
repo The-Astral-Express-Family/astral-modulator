@@ -74,6 +74,57 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Capabilities" }
 
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Bootstrap 注册首个 Human（仅当服务器无 human 时开放；D6）
+      security: []
+      operationId: registerBootstrap
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 72, description: 需含字母与数字 }
+                display_name: { type: string }
+      responses:
+        "201":
+          description: 已创建（返回 actor）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "403": { $ref: "#/components/responses/Error" }   # 已有 human，注册关闭
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Human 本地登录（浏览器侧，D6）。成功后设置 HttpOnly 会话 Cookie
+      security: []
+      operationId: loginLocal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: "已登录（Set-Cookie: astral_session）"
+          headers:
+            Set-Cookie: { schema: { type: string }, description: "HttpOnly, SameSite=Lax, Secure(HTTPS)" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Error" }
+
   /auth/device/authorizations:
     post:
       tags: [auth]
@@ -96,6 +147,19 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DeviceAuthorization" }
         "429": { $ref: "#/components/responses/RateLimited" }
+    get:
+      tags: [auth]
+      summary: 审批页按 user_code 查询待授权请求（A3，需 human session）
+      operationId: findDeviceAuthorization
+      parameters:
+        - { name: user_code, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 授权请求视图（不含 device_code）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceAuthorizationView" }
+        "404": { $ref: "#/components/responses/Error" }
 
   /auth/device/authorizations/{device_code}/token:
     post:
@@ -111,8 +175,37 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TokenPair" }
-        "400": { $ref: "#/components/responses/Error" }   # pending/慢轮询约定见 TODO.md #A1
+        "400":
+          description: |
+            pending（AUTHORIZATION_PENDING）或轮询过快（SLOW_DOWN，客户端应退避）。
+            两者均 retryable=true（A1，RFC 8628 语义）。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
         "401": { $ref: "#/components/responses/Error" }   # denied / expired / reused
+
+  /auth/device/authorizations/{id}/approve:
+    post:
+      tags: [auth]
+      summary: 批准 device 授权（浏览器侧 human session，A3）
+      operationId: approveDeviceAuthorization
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 已批准，CLI 下次轮询将获得 token }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /auth/device/authorizations/{id}/deny:
+    post:
+      tags: [auth]
+      summary: 拒绝 device 授权（浏览器侧 human session，A3）
+      operationId: denyDeviceAuthorization
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 已拒绝 }
+        "409": { $ref: "#/components/responses/Error" }
+
 
   /auth/token/refresh:
     post:
@@ -837,6 +930,7 @@ components:
         - SERVER_NOT_FOUND
         - WORKSPACE_NOT_FOUND
         - WORKSPACE_ALREADY_BOUND
+        - WORKSPACE_NAME_TAKEN
         - TASK_NOT_FOUND
         - TASK_ALREADY_CLAIMED
         - TASK_LEASE_EXPIRED
@@ -847,6 +941,8 @@ components:
         - RATE_LIMITED
         - CLIENT_VERSION_UNSUPPORTED
         - VALIDATION_FAILED
+        - AUTHORIZATION_PENDING   # device flow 轮询（A1/RFC 8628），HTTP 400 + retryable
+        - SLOW_DOWN               # device flow 轮询过快（A1），HTTP 400 + retryable
         - INTERNAL_ERROR
         - NOT_IMPLEMENTED   # 仅脚手架阶段（HTTP 501），正式端点不得返回
 
@@ -909,6 +1005,17 @@ components:
         expires_in: { type: integer, description: 5~15 分钟 }
         refresh_token: { type: string, description: rotating；重放触发整族撤销 }
         actor_id: { $ref: "#/components/schemas/Id" }
+
+    DeviceAuthorizationView:
+      type: object
+      required: [id, user_code, client_type, status, created_at, expires_at]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        user_code: { type: string }
+        client_type: { type: string, enum: [cli, web] }
+        status: { type: string, enum: [pending, approved, denied, exchanged, expired] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
 
     Me:
       type: object
@@ -1189,9 +1296,15 @@ components:
       required: [credential_id, secret, scopes]
       properties:
         credential_id: { $ref: "#/components/schemas/Id" }
-        secret: { type: string, description: 一次性明文；服务端只存 hash，丢失只能重签 }
+        secret:
+          type: string
+          description: |
+            一次性明文，格式 `astral_<43字符base64url>`（A4）。CLI/Agent 以
+            `ASTRAL_TOKEN` 或 `Authorization: Bearer astral_...` 使用；
+            服务端只存 sha256 hash，丢失只能重签。
         scopes: { type: array, items: { type: string } }
-        expires_at: { $ref: "#/components/schemas/DateTimeOrNull" }
+        expires_at:
+          $ref: "#/components/schemas/DateTimeOrNull"
 
     AuditEntry:
       type: object

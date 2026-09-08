@@ -10,6 +10,20 @@ on:
 jobs:
   server:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: astral
+          POSTGRES_PASSWORD: astral
+          POSTGRES_DB: astral
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U astral -d astral"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     defaults:
       run:
         working-directory: server
@@ -25,9 +39,12 @@ jobs:
         run: go vet ./...
       - name: build
         run: go build ./...
-      - name: test
+      - name: unit tests
         run: go test ./... -count=1
-      # TODO(phase-2): 起 PostgreSQL service 跑集成测试（goose up + task claim 并发用例）。
+      - name: postgres migration test
+        env:
+          ASTRAL_TEST_POSTGRES_DSN: postgres://astral:astral@localhost:5433/astral?sslmode=disable
+        run: go test ./tests/... -count=1 -v
 
   web:
     runs-on: ubuntu-latest

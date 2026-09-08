@@ -1,4 +1,4 @@
-// astral-server 入口。模块装配在 internal/app；本文件只做配置、生命周期与信号处理。
+// astral-server 入口。装配见 internal/app；本文件只做配置、依赖构造与生命周期。
 package main
 
 import (
@@ -11,10 +11,20 @@ import (
 	"syscall"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/app"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/document"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/memory"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/message"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/presence"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/task"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/workspace"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
@@ -30,38 +40,75 @@ func run() error {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(log)
 
-	if cfg.ServerID == "" {
-		cfg.ServerID = ids.New(ids.Server)
-		log.Warn("ASTRAL_SERVER_ID not set; generated ephemeral server_id (dev only). " +
-			"Restarting will invalidate CLI bindings — set ASTRAL_SERVER_ID or persist via server_meta (phase-1).")
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 可选数据库：DSN 为空时以无存储模式启动（healthz ok / readyz 503 / 业务端点 501）。
-	var db app.DB
+	// 可选数据库：DSN 为空时以无存储模式启动（healthz ok / readyz 503 / 受保护端点 401）。
+	var db *gorm.DB
+	var authSvc *auth.Service
+	hub := event.NewHub()
+	mods := &app.Modules{
+		Auth:     &auth.Module{PublicURL: cfg.PublicURL},
+		Tag:      &tag.Module{},
+		Memory:   &memory.Module{},
+		Document: &document.Module{},
+		Audit:    &audit.Module{},
+		Events:   &event.SSEHandler{Hub: hub},
+	}
+
 	if cfg.DatabaseDSN != "" {
 		gormDB, err := store.Open(ctx, cfg.DatabaseDSN, cfg.AutoMigrate, log)
 		if err != nil {
 			return err
 		}
-		db = app.PingDB{Pinger: func() error { return store.Ping(context.Background(), gormDB) }}
-		// TODO(phase-1): 从 server_meta 读取/固化稳定 server_id，覆盖 cfg.ServerID。
-		_ = gormDB
+		db = gormDB
+		// server_id 固化：库中值优先于 env（architecture §7 稳定身份）。
+		serverID, err := store.EnsureServerID(ctx, gormDB, cfg.ServerID)
+		if err != nil {
+			return err
+		}
+		if serverID != cfg.ServerID {
+			log.Info("server_id loaded from server_meta (env value ignored)", "server_id", serverID)
+		}
+		cfg.ServerID = serverID
+
+		recorder := &audit.GormRecorder{DB: gormDB}
+		authSvc = auth.NewService(gormDB, log)
+		wsMod := &workspace.Module{DB: gormDB, Audit: recorder, Hub: hub, Auth: authSvc}
+		taskMod := &task.Module{DB: gormDB, Audit: recorder, Hub: hub, Auth: authSvc}
+		msgMod := &message.Module{DB: gormDB, Hub: hub, Auth: authSvc}
+		presMod := &presence.Module{DB: gormDB, Hub: hub, Auth: authSvc}
+
+		mods.Auth.Svc = authSvc
+		mods.Workspace = wsMod
+		mods.Task = taskMod
+		mods.Message = msgMod
+		mods.Presence = presMod
+
+		// outbox → SSE dispatcher（architecture §19）。
+		event.StartDispatcher(ctx, gormDB, hub, log, 500*time.Millisecond)
+		// 过期租约清扫（architecture §17）。
+		taskMod.StartSweeper(ctx.Done(), 30*time.Second)
 	} else {
-		log.Warn("ASTRAL_DATABASE_DSN empty; running without storage (stub mode)")
+		log.Warn("ASTRAL_DATABASE_DSN empty; running without storage (stub mode): protected endpoints will 401")
+		// 桩模式也装配一个无 DB 的 service，保证路由可注册、行为可预期（查询会失败）。
+		authSvc = auth.NewService(nil, log)
+		mods.Auth.Svc = authSvc
+		// 业务模块在桩模式不注册 DB 依赖 —— 路由仍注册（401 后才到 500），
+		// 文档化的行为以有数据库模式为准。
+		mods.Workspace = &workspace.Module{Auth: authSvc}
+		mods.Task = &task.Module{Auth: authSvc}
+		mods.Message = &message.Module{Auth: authSvc}
+		mods.Presence = &presence.Module{Auth: authSvc}
 	}
 
-	hub := event.NewHub()
-	handler := app.NewRouter(cfg, log, db, hub)
+	handler := app.NewRouter(cfg, log, db, mods)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
-		// TODO(phase-4): SSE 长连接下 WriteTimeout 必须为 0 或足够大；
-		// 当前桩阶段先禁用写超时，联调 SSE 时避免被掐断。
+		// SSE 长连接：不设 WriteTimeout，IdleTimeout 兜底（见 config 注释）。
 		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 	}

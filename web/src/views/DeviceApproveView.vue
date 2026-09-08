@@ -1,31 +1,95 @@
 <script setup lang="ts">
-// Device Flow 人类审批页：CLI 发起登录后，verification_uri 指向 /device?code=ABCD-EFGH。
-// 本页是 CLI 登录闭环的服务端配套，Phase 1 必须实装（roadmap Phase 1）。
-//
-// 流程（architecture §8.2）：
-//   1. 用户打开 CLI 给出的 URL（或手输 user_code）；
-//   2. 浏览器完成人类登录（本页 redirect 到登录，TODO(phase-1)）；
-//   3. 展示 device 授权请求详情，用户 Approve / Deny；
-//   4. 服务端把 device_authorization 标记 approved/denied，CLI 轮询后拿到 token。
-//
-// TODO(phase-1): 需要的 API（尚未在 openapi 定稿，定稿时同步登记）：
-//   GET  /api/v1/auth/device/authorizations?user_code=...  （取 pending 请求详情）
-//   POST /api/v1/auth/device/authorizations/{id}/approve
-//   POST /api/v1/auth/device/authorizations/{id}/deny
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+// Device Flow 人类审批页（architecture §8.2 / TODO.md A3）：
+// CLI 发起登录后 verification_uri 指向 /device?code=XXXX-XXXX。
+// 需先登录（未登录跳转 /login 并带 redirect）。
+import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { AstralApiError } from '../api/client'
+import {
+  approveDeviceAuthorization,
+  denyDeviceAuthorization,
+  findDeviceAuthorization,
+} from '../api/modules/auth'
+import type { DeviceAuthorizationView } from '../api/modules/auth'
+import { useSessionStore } from '../stores/session'
 
+const session = useSessionStore()
 const route = useRoute()
-const userCode = computed(() => (typeof route.query.code === 'string' ? route.query.code : ''))
+const router = useRouter()
+
+const view = ref<DeviceAuthorizationView | null>(null)
+const manualCode = ref('')
+const error = ref<string | null>(null)
+const notice = ref<string | null>(null)
+const busy = ref(false)
+
+function userCodeFromQuery(): string {
+  return typeof route.query.code === 'string' ? route.query.code : ''
+}
+
+async function lookup(code: string): Promise<void> {
+  error.value = null
+  notice.value = null
+  view.value = null
+  if (!session.isLoggedIn) {
+    void router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  try {
+    view.value = await findDeviceAuthorization(code)
+  } catch (e) {
+    error.value = e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
+  }
+}
+
+async function decide(approve: boolean): Promise<void> {
+  if (!view.value) return
+  busy.value = true
+  try {
+    if (approve) {
+      await approveDeviceAuthorization(view.value.id)
+      notice.value = '已批准。请回到 CLI 终端，它会在几秒内完成登录。'
+    } else {
+      await denyDeviceAuthorization(view.value.id)
+      notice.value = '已拒绝。该设备授权请求已终止。'
+    }
+  } catch (e) {
+    error.value = e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+onMounted(() => {
+  const code = userCodeFromQuery()
+  if (code) void lookup(code)
+})
 </script>
 
 <template>
   <h2>设备授权</h2>
-  <div class="card">
-    <p>user_code: <code>{{ userCode || '（未提供，请输入 CLI 显示的代码）' }}</code></p>
-    <p class="muted">
-      确认这个代码与 CLI 终端显示一致后批准。批准后 CLI 将获得访问凭证。
+
+  <div class="card" style="max-width: 520px">
+    <p>
+      输入 CLI 显示的代码：
+      <input v-model="manualCode" placeholder="XXXX-XXXX" style="width: 160px" />
+      <button :disabled="busy" @click="lookup(manualCode)">查询</button>
     </p>
-    <!-- TODO(phase-1): 登录门槛 + 授权请求详情（client type、发起时间）+ Approve/Deny 按钮。 -->
+
+    <p v-if="error" style="color: #b3261e">{{ error }}</p>
+    <p v-if="notice" style="color: #1b7f3b">{{ notice }}</p>
+
+    <div v-if="view && !notice">
+      <p>
+        请求代码：<code style="font-size: 1.4em">{{ view.user_code }}</code>
+      </p>
+      <p>客户端类型：{{ view.client_type }}</p>
+      <p class="muted">
+        请核对代码与 CLI 终端显示完全一致。批准后 CLI 将获得访问本服务器的凭证；
+        如有疑问请拒绝。
+      </p>
+      <button :disabled="busy" @click="decide(true)">批准</button>
+      <button :disabled="busy" style="margin-left: 8px" @click="decide(false)">拒绝</button>
+    </div>
   </div>
 </template>

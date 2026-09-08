@@ -29,6 +29,7 @@
         "SERVER_NOT_FOUND",
         "WORKSPACE_NOT_FOUND",
         "WORKSPACE_ALREADY_BOUND",
+        "WORKSPACE_NAME_TAKEN",
         "TASK_NOT_FOUND",
         "TASK_ALREADY_CLAIMED",
         "TASK_LEASE_EXPIRED",
@@ -39,10 +40,12 @@
         "RATE_LIMITED",
         "CLIENT_VERSION_UNSUPPORTED",
         "VALIDATION_FAILED",
+        "AUTHORIZATION_PENDING",
+        "SLOW_DOWN",
         "INTERNAL_ERROR",
         "NOT_IMPLEMENTED"
       ],
-      "notes": "NOT_IMPLEMENTED 仅存在于脚手架阶段（HTTP 501 桩），各 Phase 落地后对应端点移除；CLI 不得依赖"
+      "notes": "AUTHORIZATION_PENDING/SLOW_DOWN 为 device flow 轮询语义（A1，RFC 8628，HTTP 400 + retryable）。NOT_IMPLEMENTED 仅存在于脚手架阶段（HTTP 501 桩），各 Phase 落地后对应端点移除；CLI 不得依赖"
     }
   }
 }

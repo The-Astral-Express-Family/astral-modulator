@@ -4,9 +4,11 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { getWorkspace } from '../api/modules/core'
 import { subscribeEvents } from '../api/sse'
+import { useSessionStore } from '../stores/session'
 import type { EventEnvelope, Workspace } from '../api/types'
 
 const route = useRoute()
+const session = useSessionStore()
 const workspaceId = route.params.workspaceId as string
 const workspace = ref<Workspace | null>(null)
 const events = ref<EventEnvelope[]>([])
@@ -14,10 +16,11 @@ const sseState = ref<'connecting' | 'open' | 'closed'>('connecting')
 let unsubscribe: (() => void) | null = null
 
 onMounted(async () => {
+  await session.boot()
   try {
     workspace.value = await getWorkspace(workspaceId)
   } catch {
-    workspace.value = null // 桩阶段预期 501；UI 显示占位
+    workspace.value = null // 401 未登录 / 404 无权限；UI 显示占位
   }
   unsubscribe = subscribeEvents({
     workspaceId,

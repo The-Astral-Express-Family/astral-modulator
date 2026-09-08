@@ -27,7 +27,7 @@ CREATE INDEX idx_tasks_workspace_status ON tasks(workspace_id, status);
 --   CREATE INDEX idx_tasks_title_trgm ON tasks USING gin (title gin_trgm_ops);
 --   放到搜索实现时一并加，并配套 statement_timeout 防危险 regex（architecture §13）。
 
--- 同 workspace 父子约束：拒绝跨 workspace parent。
+-- 同 workspace 父子约束：拒绝跨 workspace parent（应用层先校验给友好错误，此为纵深防御）。
 CREATE OR REPLACE FUNCTION assert_task_parent_same_workspace() RETURNS trigger AS $$
 BEGIN
     IF NEW.parent_id IS NOT NULL THEN
@@ -43,20 +43,8 @@ CREATE TRIGGER trg_task_parent_same_workspace
 BEFORE INSERT OR UPDATE OF parent_id ON tasks
 FOR EACH ROW EXECUTE FUNCTION assert_task_parent_same_workspace();
 
--- revision 递增触发器：任何业务更新自动 +1，防止应用层遗漏。
--- 注意：claim/release 走条件更新（WHERE revision = expected_revision），
--- 冲突时更新 0 行，由应用层翻译为 REVISION_CONFLICT。
-CREATE OR REPLACE FUNCTION bump_task_revision() RETURNS trigger AS $$
-BEGIN
-    NEW.revision := OLD.revision + 1;
-    NEW.updated_at := now();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_task_revision
-BEFORE UPDATE ON tasks
-FOR EACH ROW EXECUTE FUNCTION bump_task_revision();
+-- 注意：revision 自增在应用层 UPDATE 内显式执行（TODO.md D5：可移植可测），
+-- 不使用触发器。乐观并发：UPDATE ... WHERE id=$1 AND revision=$expected。
 
 CREATE TABLE task_leases (
     task_id        TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
@@ -70,8 +58,6 @@ CREATE TABLE task_leases (
 
 -- +goose Down
 DROP TABLE IF EXISTS task_leases;
-DROP TRIGGER IF EXISTS trg_task_revision ON tasks;
-DROP FUNCTION IF EXISTS bump_task_revision();
 DROP TRIGGER IF EXISTS trg_task_parent_same_workspace ON tasks;
 DROP FUNCTION IF EXISTS assert_task_parent_same_workspace();
 DROP TABLE IF EXISTS tasks;

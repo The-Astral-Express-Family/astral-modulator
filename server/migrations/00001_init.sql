@@ -50,7 +50,18 @@ CREATE TABLE workspace_members (
 
 CREATE INDEX idx_workspace_members_actor ON workspace_members(actor_id);
 
+-- Human 本地登录（D6：MVP 浏览器侧本地账号，OIDC 后续；见 TODO.md D6）。
+-- 口令只存 bcrypt hash；email 唯一。
+CREATE TABLE human_auth (
+    actor_id      TEXT PRIMARY KEY REFERENCES actors(id) ON DELETE CASCADE,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- +goose Down
+DROP TABLE IF EXISTS human_auth;
 DROP TABLE IF EXISTS workspace_members;
 DROP TABLE IF EXISTS workspaces;
 DROP TABLE IF EXISTS actors;

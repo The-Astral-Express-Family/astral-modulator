@@ -1,8 +1,10 @@
 package httpx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 )
 
@@ -31,12 +33,23 @@ func NotImplemented(w http.ResponseWriter, r *http.Request, feature, phase, docR
 	})
 }
 
-// DecodeJSON 严格解析请求体（不允许未知字段静默通过由各 handler 决定，
-// 此处只负责大小限制与语法错误 → VALIDATION_FAILED）。
+// DecodeJSON 解析请求体到 dst。空 body 视为合法（全可选字段的端点）；
+// 语法错误 → VALIDATION_FAILED。
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(dst); err != nil {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		WriteError(w, r, &APIError{
+			Status:  http.StatusBadRequest,
+			Code:    CodeValidationFailed,
+			Message: "read body failed: " + err.Error(),
+		})
+		return false
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return true
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
 		WriteError(w, r, &APIError{
 			Status:  http.StatusBadRequest,
 			Code:    CodeValidationFailed,
