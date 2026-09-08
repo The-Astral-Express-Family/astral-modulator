@@ -32,6 +32,9 @@ const (
 	TypeMessageCreated            = "message.created"
 	TypeSecurityCredentialCreated = "security.credential.created"
 	TypeSecurityCredentialRevoked = "security.credential.revoked"
+	TypeTagCreated                = "tag.created"
+	TypeTagRenamed                = "tag.renamed"
+	TypeTagDeleted                = "tag.deleted"
 	TypeHumanOverride             = "human.override"
 )
 

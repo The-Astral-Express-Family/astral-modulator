@@ -33,10 +33,8 @@ type Module struct {
 func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/workspaces/{workspace_id}/tasks", m.create)
 	r.Get("/workspaces/{workspace_id}/tasks", m.list)
-	// search 保持 501 桩（regex→fuzzy + pg_trgm 属下轮，见 TODO.md T-task-6）。
-	r.Get("/workspaces/{workspace_id}/tasks/search", func(w http.ResponseWriter, r *http.Request) {
-		httpx.NotImplemented(w, r, "task.search", "phase-3", "docs/architecture.md §13")
-	})
+	// search 已实装（regex→fuzzy 管线见 search.go，决策 TODO.md D7）。
+	r.Get("/workspaces/{workspace_id}/tasks/search", m.search)
 	r.Get("/tasks/{task_id}", m.get)
 	r.Patch("/tasks/{task_id}", m.update)
 	r.Post("/tasks/{task_id}/claim", m.claim)
@@ -270,6 +268,35 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursorPtr(next)})
 }
 
+// search：regex 过滤 → fuzzy 排序（architecture §13 语义；CLI --regex/--fuzzy 双参数）。
+func (m *Module) search(w http.ResponseWriter, r *http.Request) {
+	wsID := chi.URLParam(r, "workspace_id")
+	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskRead); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	q := r.URL.Query()
+	if q.Get("regex") == "" && q.Get("fuzzy") == "" {
+		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed,
+			Message: "at least one of regex/fuzzy is required"})
+		return
+	}
+	results, next, apiErr := m.Search(r.Context(), wsID, SearchParams{
+		Regex:    q.Get("regex"),
+		Fuzzy:    q.Get("fuzzy"),
+		ParentID: q.Get("parent_id"),
+		Tag:      q.Get("tag"),
+		Status:   q.Get("status"),
+		Limit:    parseLimit(q.Get("limit"), 50, 200),
+		Cursor:   q.Get("cursor"),
+	})
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": results, "next_cursor": nextCursorPtr(next)})
+}
+
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	t, apiErr := m.requireTask(r, chi.URLParam(r, "task_id"), auth.ScopeTaskRead)
 	if apiErr != nil {
@@ -393,15 +420,21 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	var fresh model.Task
 	_ = m.DB.WithContext(r.Context()).First(&fresh, "id = ?", t.ID).Error
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		return audit.RecordInTx(tx, audit.Entry{
+		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: t.WorkspaceID, ActorID: p.ActorID,
 			Action: "task.update", Outcome: "allowed",
 			TargetType: "task", TargetID: t.ID,
 			Details: map[string]any{"new_revision": fresh.Revision},
-		})
+		}); err != nil {
+			return err
+		}
+		return event.EmitTx(tx, event.TypeTaskUpdated, t.WorkspaceID, p.ActorID, fresh.Revision,
+			map[string]any{"task_id": t.ID})
 	})
-	_ = err
-	m.Hub.PublishDomain(event.TypeTaskUpdated, t.WorkspaceID, p.ActorID, fresh.Revision, map[string]any{"task_id": t.ID})
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
 	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, nil))
 }
 

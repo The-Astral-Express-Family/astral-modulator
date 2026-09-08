@@ -170,6 +170,16 @@ type TagProposal struct {
 
 func (TagProposal) TableName() string { return "tag_proposals" }
 
+// TaskTag 见 00004_tags.sql：task 与 tag 多对多关联。
+type TaskTag struct {
+	TaskID  string `gorm:"primaryKey;size:40"`
+	TagID   string `gorm:"primaryKey;size:40"`
+	AddedBy string `gorm:"size:40"`
+	AddedAt time.Time
+}
+
+func (TaskTag) TableName() string { return "task_tags" }
+
 // OutboxEvent 见 00006_outbox.sql / architecture §19。
 // 业务事务内 INSERT；dispatcher 读取后置 sent_at 并推给 SSE hub。
 type OutboxEvent struct {

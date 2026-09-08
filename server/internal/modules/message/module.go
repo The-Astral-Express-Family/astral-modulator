@@ -112,13 +112,18 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		SenderID: p.ActorID, Body: in.Body, Metadata: meta,
 		CreatedAt: time.Now(),
 	}
-	if err := m.DB.WithContext(r.Context()).Create(&row).Error; err != nil {
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		return event.EmitTx(tx, event.TypeMessageCreated, wsID, p.ActorID, 0, map[string]any{
+			"message_id": row.ID, "target_type": row.TargetType, "target_id": row.TargetID,
+		})
+	})
+	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	m.Hub.PublishDomain(event.TypeMessageCreated, wsID, p.ActorID, 0, map[string]any{
-		"message_id": row.ID, "target_type": row.TargetType, "target_id": row.TargetID,
-	})
 	httpx.WriteOK(w, r, http.StatusCreated, messageDTO{
 		ID: row.ID, WorkspaceID: row.WorkspaceID, ThreadID: row.ThreadID,
 		SenderID: row.SenderID, TargetType: row.TargetType, TargetID: row.TargetID,

@@ -286,20 +286,22 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&mem).Error; err != nil {
 			return err
 		}
-		return audit.RecordInTx(tx, audit.Entry{
+		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: ws.ID, ActorID: p.ActorID,
 			Action: "workspace.member.add", Outcome: "allowed",
 			TargetType: "actor", TargetID: in.ActorID,
 			Details: map[string]any{"role": in.Role},
+		}); err != nil {
+			return err
+		}
+		return event.EmitTx(tx, event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
+			"actor_id": in.ActorID, "role": in.Role, "change": "added",
 		})
 	})
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	m.Hub.PublishDomain(event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
-		"actor_id": in.ActorID, "role": in.Role, "change": "added",
-	})
 	httpx.WriteOK(w, r, http.StatusCreated, memberDTO{
 		Actor: actorDTO{ID: actor.ID, Kind: actor.Kind, DisplayName: actor.DisplayName}, Role: in.Role,
 	})
@@ -323,25 +325,31 @@ func (m *Module) updateMember(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid role (owner requires approval flow)"})
 		return
 	}
-	res := m.DB.WithContext(r.Context()).Model(&model.WorkspaceMember{}).
-		Where("workspace_id = ? AND actor_id = ?", ws.ID, actorID).
-		Update("role", in.Role)
-	if res.Error != nil {
-		httpx.RespondError(w, r, res.Error)
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.WorkspaceMember{}).
+			Where("workspace_id = ? AND actor_id = ?", ws.ID, actorID).
+			Update("role", in.Role)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "member not found"}
+		}
+		if err := audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: ws.ID, ActorID: p.ActorID,
+			Action: "workspace.member.update", Outcome: "allowed",
+			TargetType: "actor", TargetID: actorID, Details: map[string]any{"role": in.Role},
+		}); err != nil {
+			return err
+		}
+		return event.EmitTx(tx, event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
+			"actor_id": actorID, "role": in.Role, "change": "updated",
+		})
+	})
+	if err != nil {
+		httpx.RespondError(w, r, err)
 		return
 	}
-	if res.RowsAffected == 0 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "member not found"})
-		return
-	}
-	_ = m.Audit.Record(r.Context(), audit.Entry{
-		WorkspaceID: ws.ID, ActorID: p.ActorID,
-		Action: "workspace.member.update", Outcome: "allowed",
-		TargetType: "actor", TargetID: actorID, Details: map[string]any{"role": in.Role},
-	})
-	m.Hub.PublishDomain(event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
-		"actor_id": actorID, "role": in.Role, "change": "updated",
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -353,23 +361,29 @@ func (m *Module) removeMember(w http.ResponseWriter, r *http.Request) {
 	}
 	p := auth.PrincipalFrom(r.Context())
 	actorID := chi.URLParam(r, "actor_id")
-	res := m.DB.WithContext(r.Context()).Where("workspace_id = ? AND actor_id = ?", ws.ID, actorID).Delete(&model.WorkspaceMember{})
-	if res.Error != nil {
-		httpx.RespondError(w, r, res.Error)
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("workspace_id = ? AND actor_id = ?", ws.ID, actorID).Delete(&model.WorkspaceMember{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "member not found"}
+		}
+		if err := audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: ws.ID, ActorID: p.ActorID,
+			Action: "workspace.member.remove", Outcome: "allowed",
+			TargetType: "actor", TargetID: actorID,
+		}); err != nil {
+			return err
+		}
+		return event.EmitTx(tx, event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
+			"actor_id": actorID, "change": "removed",
+		})
+	})
+	if err != nil {
+		httpx.RespondError(w, r, err)
 		return
 	}
-	if res.RowsAffected == 0 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "member not found"})
-		return
-	}
-	_ = m.Audit.Record(r.Context(), audit.Entry{
-		WorkspaceID: ws.ID, ActorID: p.ActorID,
-		Action: "workspace.member.remove", Outcome: "allowed",
-		TargetType: "actor", TargetID: actorID,
-	})
-	m.Hub.PublishDomain(event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
-		"actor_id": actorID, "change": "removed",
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -492,16 +506,25 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	_ = m.Audit.Record(r.Context(), audit.Entry{
-		WorkspaceID: in.Workspace, ActorID: p.ActorID,
-		Action: "credential.create", Outcome: "allowed",
-		TargetType: "credential", TargetID: issued.CredentialID,
-		Details: map[string]any{"scopes": in.Scopes},
+	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: in.Workspace, ActorID: p.ActorID,
+			Action: "credential.create", Outcome: "allowed",
+			TargetType: "credential", TargetID: issued.CredentialID,
+			Details: map[string]any{"scopes": in.Scopes},
+		}); err != nil {
+			return err
+		}
+		if in.Workspace != "" {
+			return event.EmitTx(tx, event.TypeSecurityCredentialCreated, in.Workspace, p.ActorID, 0, map[string]any{
+				"credential_id": issued.CredentialID, "actor_id": agentID,
+			})
+		}
+		return nil
 	})
-	if in.Workspace != "" {
-		m.Hub.PublishDomain(event.TypeSecurityCredentialCreated, in.Workspace, p.ActorID, 0, map[string]any{
-			"credential_id": issued.CredentialID, "actor_id": agentID,
-		})
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
 	}
 	httpx.WriteOK(w, r, http.StatusCreated, issued)
 }
@@ -531,15 +554,24 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	_ = m.Audit.Record(r.Context(), audit.Entry{
-		WorkspaceID: wsScope, ActorID: p.ActorID,
-		Action: "credential.revoke", Outcome: "allowed",
-		TargetType: "credential", TargetID: credentialID,
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: wsScope, ActorID: p.ActorID,
+			Action: "credential.revoke", Outcome: "allowed",
+			TargetType: "credential", TargetID: credentialID,
+		}); err != nil {
+			return err
+		}
+		if wsScope != "" {
+			return event.EmitTx(tx, event.TypeSecurityCredentialRevoked, wsScope, p.ActorID, 0, map[string]any{
+				"credential_id": credentialID, "actor_id": cred.ActorID,
+			})
+		}
+		return nil
 	})
-	if wsScope != "" {
-		m.Hub.PublishDomain(event.TypeSecurityCredentialRevoked, wsScope, p.ActorID, 0, map[string]any{
-			"credential_id": credentialID, "actor_id": cred.ActorID,
-		})
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

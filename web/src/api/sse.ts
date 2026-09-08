@@ -93,5 +93,8 @@ export const KNOWN_EVENT_TYPES = [
   'message.created',
   'security.credential.created',
   'security.credential.revoked',
+  'tag.created',
+  'tag.renamed',
+  'tag.deleted',
   'human.override',
 ] as const

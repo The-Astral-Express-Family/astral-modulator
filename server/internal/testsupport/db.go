@@ -30,7 +30,7 @@ func NewTestDB(t *testing.T) *gorm.DB {
 		&model.Workspace{}, &model.WorkspaceMember{},
 		&model.DeviceAuthorization{}, &model.Session{}, &model.Credential{},
 		&model.Task{}, &model.TaskLease{},
-		&model.Tag{}, &model.TagProposal{},
+		&model.Tag{}, &model.TagProposal{}, &model.TaskTag{},
 		&model.OutboxEvent{}, &model.AuditEntry{},
 		&model.Presence{}, &model.Message{},
 	); err != nil {

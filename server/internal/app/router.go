@@ -95,11 +95,11 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 
 		api.Get("/meta/capabilities", func(w http.ResponseWriter, req *http.Request) {
 			// features 按实现进度逐步开放；未列出即不可用（docs/protocol.md §7）。
-			// TODO(phase-3): task_lease 上线时加入并补契约测试。
+			// task_lease：原子 claim + lease renew/release 已实装（见 task 模块测试）。
 			httpx.WriteOK(w, req, http.StatusOK, Capabilities{
 				ProtocolVersion:   httpx.ProtocolVersion,
 				MinimumCliVersion: "0.1.0",
-				Features:          []string{},
+				Features:          []string{"task_lease"},
 			})
 		})
 

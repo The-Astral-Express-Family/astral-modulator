@@ -82,6 +82,23 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   `docs/deployment.md` 由 17 章 CLI 发行手册瘦身为纯服务端部署
   （CLI 分发归 astral-cli）；MANIFEST/docs 索引/roadmap 同步刷新。
 
+### 第 5 轮（2026-09-07 深夜）：Phase 3 收尾 —— 搜索 / Tags / 事件统一
+
+- **task 搜索实装**（原 501 桩）：语义固定为 权限 → 结构化（parent/tag/status）→
+  regex 过滤 → fuzzy 排序 → 分页；实现路径见裁决 D7（Go RE2 + trigram，
+  候选集封顶 2000）。`GET /workspaces/{id}/tasks/search` 需要 regex 或 fuzzy 至少其一。
+- **tags 两步确认实装**（原 501 桩）：
+  - 规范化：trim + NFKC + 小写（`tag.NormalizeName`，唯一性基于规范化名）；
+  - propose：确定性重名预检（精确，非模糊相似度）、confirm_code 只存 hash、
+    TTL 120s、绑定 actor/workspace/action/name、响应带全量 existing_tags；
+  - confirm：单次使用原子置位、code 常数时间比对、同事务复查唯一约束（TOCTOU 兜底）、
+    create/rename/delete 一体落地，audit + outbox 同事务；
+  - 新增 `TaskTag` GORM 模型（此前只有 SQL 表）。
+- **事件路径统一**：全部领域事件经 EmitTx 写 outbox（同事务），dispatcher 投递 hub；
+  删除 PublishDomain 直发路径。代价：SSE 事件可见延迟 ≤500ms 轮询间隔（已登记）。
+- **capabilities.features** 开放 `task_lease`。
+- 事件枚举三处同步（types.go / event.json / web sse.ts）——自动一致性检查列入下轮。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -94,6 +111,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | D3 | Tag 确认参数拼写 | `--confirm` | 文档 typo `--comfirm` 已在 architecture §14 明确不沿用 |
 | D4 | 乐观并发 | body 内 `expected_revision`（方案 A） | protocol.md §6 MVP 推荐方案 A，CLI JSON/事件流一致性好处理 |
 | D5 | revision 自增位置 | **应用层**（UPDATE 里显式 `revision = revision + 1`），不靠 PG 触发器 | 可移植 + 可测（sqlite 测试与 PG 生产行为一致）；migration 00003 的 bump 触发器已删除，同 workspace 父子触发器保留作纵深防御 |
+| D7 | task 搜索实现路径 | **Go 侧过滤排序**（RE2 regex + 字符 trigram 相似度），候选集结构化过滤后封顶 2000 行 | RE2 线性时间天然免疫 ReDoS（架构文档担心的 POSIX regex 拖库问题不存在）；MVP 规模下内存排序足够且 sqlite/PG 可移植可测。回迁 pg_trgm/POSIX SQL 的触发条件：单 workspace 任务量到万级或出现搜索延迟 SLO（实现隔离在 task/search.go，语义不变） |
 | D6 | Human 浏览器登录 MVP | **本地账号**（email+password, bcrypt）+ HttpOnly Cookie session | Device Flow 需要 Human 在浏览器完成登录才能闭环；OIDC/federation 是后续项（security.md 暂缓清单）。首个 human 账号通过 bootstrap 注册创建（仅当服务器无 human 时开放） |
 
 ## 2. 待裁决契约
@@ -172,8 +190,9 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - [x] T-task-4 outbox → hub dispatcher（业务事务同事务写 outbox，后台轮询投递 SSE；
       task 关键路径已走 outbox，workspace/presence/message 事件仍直发 hub，待统一）
 - [x] T-task-5 测试：并发 claim 唯一成功、revision 冲突、lease 过期语义、清扫器事件
-- [ ] T-task-6 search（regex→fuzzy + pg_trgm + timeout 防护）——仍 501
-- [ ] T-task-7 tags proposal/confirm——仍 501
+- [x] T-task-6 search：regex(RE2)→fuzzy(trigram) 管线 + 游标分页（D7；实现 task/search.go）
+- [x] T-task-7 tags proposal/confirm（normalize NFKC+case-fold、confirm_code hash/TTL 120s/
+      单次使用、事务内唯一约束复查；新增 tag.created/renamed/deleted 事件）
 - [ ] 搜索：pg_trgm 索引 + regex→fuzzy 语义 + statement_timeout 防护（migration 00003 已留位）
 - [ ] tag proposal/confirm 两步流（confirm_code hash、TTL、单次使用）
 - [ ] capabilities.features 开放首个特性 `task_lease`
@@ -220,6 +239,9 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-07 | 第 2 轮：定义 ASTRAL_TOKEN 格式 `astral_<base64url>`（A4）；Bearer 可为 human access token 或 agent credential | 补充 | CLI |
 | 2026-09-07 | 第 2 轮：sessions 表 scopes 列由 TEXT[] 改 JSON text（可移植）；tasks revision 自增改应用层（D5） | 内部 | 无（schema 未发布） |
 | 2026-09-07 | 第 3 轮：v1 协议快照发布至 astral-cli protocol/snapshots/v1（冻结 modulator@75269c4，含 MANIFEST）；无语义变更 | 发布 | CLI |
+| 2026-09-07 | 第 5 轮：新增事件类型 `tag.created`/`tag.renamed`/`tag.deleted`（architecture §14 要求 tag 变更写 outbox；types.go/event.json/web 三处已同步） | 补充 | CLI/Web |
+| 2026-09-07 | 第 5 轮：capabilities.features 开放 `task_lease`（原子 claim 稳定并有并发测试覆盖） | 补充 | CLI |
+| 2026-09-07 | 第 5 轮：事件路径统一——全部领域事件经 EmitTx outbox（PublishDomain 直发已移除），SSE 事件延迟 ≤ dispatcher 轮询间隔（500ms） | 行为 | CLI/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -258,13 +280,13 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
     （Last-Event-ID 重放 + snapshot.required）
 12. `content_hash` 统一 `sha256:<hex>`（小写十六进制）— phase-5 文档同步联调时最易错
 
-## 11. 第 3 轮计划（roadmap Phase 3 收尾 + Phase 4）
+## 11. 下一轮计划（Phase 4 收尾 + Phase 2 遗留）
 
-1. T-task-6 搜索：pg_trgm 索引 + regex→fuzzy 管线 + statement_timeout（需 postgres，
-   CI 已具备）；CLI `todo search --regex/--fuzzy` 可对接
-2. T-task-7 tags proposal/confirm（confirm_code hash + TTL + 单次使用）
-3. 事件统一走 outbox（workspace/presence/message 从直发 hub 迁移）+ SSE 重放窗口 + S1 裁决
-4. Idempotency-Key 中间件（T-ws-5）：库表存储 + 窗口清理
-5. approvals 表 + promote_owner 状态机（T-ws-6）
-6. capabilities.features 开放 `task_lease`（claim 稳定后）+ 双源一致性 CI 检查
-   （openapi enum vs httpx/errors.go vs schemas/*.json）
+1. Idempotency-Key 中间件（T-ws-5）：库表存储 + 窗口清理，接入 contract 列出的写端点
+2. approvals 表 + promote_owner 状态机（T-ws-6）
+3. SSE resume：Last-Event-ID 从 outbox 重放 + `snapshot.required` 控制事件 + S1 裁决
+   （outbox 已是唯一事件源，重放只剩 handler 侧工作）
+4. agents 列表按 workspace 过滤（T-ws-7，需绑定模型）
+5. Web 任务树视图（消费 search API + SSE 实时刷新）与 CLI `todo search --regex/--fuzzy` 对接
+6. 双源一致性 CI 检查扩展：事件枚举（types.go vs event.json vs sse.ts）
+   ——路由与错误码检查已就位（openapi_contract_test.go）

@@ -86,15 +86,17 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("actor_id = ?", p.ActorID).Delete(&model.Presence{}).Error; err != nil {
 			return err
 		}
-		return tx.Create(&row).Error
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		return event.EmitTx(tx, event.TypeActorPresenceChanged, wsID, p.ActorID, 0, map[string]any{
+			"actor_id": p.ActorID, "state": in.State, "current_task_id": in.CurrentTaskID,
+		})
 	})
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	m.Hub.PublishDomain(event.TypeActorPresenceChanged, wsID, p.ActorID, 0, map[string]any{
-		"actor_id": p.ActorID, "state": in.State, "current_task_id": in.CurrentTaskID,
-	})
 	httpx.WriteOK(w, r, http.StatusOK, presenceDTO{
 		ActorID: p.ActorID, State: in.State, CurrentTaskID: in.CurrentTaskID, Note: in.Note,
 		LastHeartbeatAt: now.UTC().Format(time.RFC3339), ExpiresAt: row.ExpiresAt.UTC().Format(time.RFC3339),
