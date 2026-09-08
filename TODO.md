@@ -158,6 +158,21 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - **协议变更**：见 §9 登记表 2026-09-09 各条（NOT_FOUND、次级资源 404 码、
   task 列表排序/cursor、presence 语义、私信可达性校验）。
 
+### 第 8 轮（2026-09-09）：T-ws-6 approvals 状态机（promote_owner）
+
+- migration 00011_approvals（apv_ 前缀；requested -> approved|rejected|expired -> executed）；
+- 端点：POST/GET `/workspaces/{id}/approvals`、POST `/approvals/{id}/approve|deny`
+  （openapi 契约 + approval DTO/ApprovalPage；新增错误码 `APPROVAL_EXPIRED`，三方已同步）；
+- 语义：MVP 仅开放 `membership.promote_owner`；发起需 workspace:manage_members，
+  目标须为非 owner 成员；同 (action,target) 只允许一条 pending；
+  裁决仅限 workspace **owner**（maintainer 持 manage_members 亦不可）；TTL 72h 惰性过期；
+  **approve 与 promote 同事务**（成员 role 变更 + status=executed + audit + member.changed 事件，
+  任一失败整体回滚）；裁决单次使用（条件更新防并发双裁决）；
+  D8 裁决：MVP 允许发起人自批（单 owner workspace 的唯一出路；双人裁决列为后续收紧项）；
+- addMember/updateMember 的 owner 分支改为 400 引导走 approvals 端点；
+- 测试：approve 原子提升 / maintainer 无权裁决 / 裁决单次使用 / 过期 409 /
+  owner 目标与非成员目标拒绝。go build/vet/test、redocly lint、路由与错误码契约门全绿。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -172,6 +187,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | D5 | revision 自增位置 | **应用层**（UPDATE 里显式 `revision = revision + 1`），不靠 PG 触发器 | 可移植 + 可测（sqlite 测试与 PG 生产行为一致）；migration 00003 的 bump 触发器已删除，同 workspace 父子触发器保留作纵深防御 |
 | D7 | task 搜索实现路径 | **Go 侧过滤排序**（RE2 regex + 字符 trigram 相似度），候选集结构化过滤后封顶 2000 行 | RE2 线性时间天然免疫 ReDoS（架构文档担心的 POSIX regex 拖库问题不存在）；MVP 规模下内存排序足够且 sqlite/PG 可移植可测。回迁 pg_trgm/POSIX SQL 的触发条件：单 workspace 任务量到万级或出现搜索延迟 SLO（实现隔离在 task/search.go，语义不变） |
 | D6 | Human 浏览器登录 MVP | **本地账号**（email+password, bcrypt）+ HttpOnly Cookie session | Device Flow 需要 Human 在浏览器完成登录才能闭环；OIDC/federation 是后续项（security.md 暂缓清单）。首个 human 账号通过 bootstrap 注册创建（仅当服务器无 human 时开放） |
+| D8 | approval 裁决人约束 | MVP 允许发起人**自批**（审批人须为 owner） | 单 owner workspace 若强制双人裁决，首位新 owner 永远无法产生（死锁）。approval 的 MVP 目标是显式生命周期 + TTL + 可审计，而非双人控制；收紧为「他人裁决」的触发条件：出现多 owner 的生产 workspace 或安全事件 |
 
 ## 2. 待裁决契约
 
@@ -228,7 +244,8 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - [x] T-ws-5 Idempotency-Key 中间件（`internal/idempotency`：库表存储、24h 窗口、
       仅缓存 2xx、actor+endpoint+key 主键、并发同键回读重放；挂载于鉴权后，
       携带头即激活）
-- [ ] T-ws-6 promote_owner approval 状态机（当前显式拒绝，需建 approvals 表）
+- [x] T-ws-6 promote_owner approval 状态机（第 8 轮实装：approvals 表 + approve/deny +
+      同事务 promote；D8 登记 MVP 允许自批，双人裁决为后续收紧项）
 - [ ] T-ws-7 agents 列表按 workspace 过滤（需 agent-workspace 绑定模型；
       见 workspace/module.go listAgents TODO，审查轮 2026-09-07 登记）
 
@@ -305,6 +322,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-09 | 第 7 轮：presence 语义定为 (actor, workspace) 一行：同一 actor 在多个 workspace 各自心跳，互不覆盖（migration 00010 主键变更） | 行为 | CLI/Web |
 | 2026-09-09 | 第 7 轮：私信发送校验收件人「本 workspace 可达」（成员 或 绑定 credential 的 agent）；不可达返回 404 NOT_FOUND | 行为 | CLI/Web |
 | 2026-09-09 | 第 7 轮：refresh 并发轮换改条件更新：输家收到 401（token 已被替换），不再误触整族撤销 | 行为 | CLI |
+| 2026-09-09 | 第 8 轮：新增端点 POST/GET `/workspaces/{id}/approvals`、POST `/approvals/{id}/approve|deny`（T-ws-6，architecture §22）；新增错误码 `APPROVAL_EXPIRED`（409）；MVP 仅开放 `membership.promote_owner`，approve 同事务执行并重用 workspace.member.changed 事件（data.change=promoted） | 补充 | CLI/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -346,11 +364,11 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 
 ## 11. 下一轮计划
 
-1. approvals 表 + promote_owner 状态机（T-ws-6，高风险动作审批落地；ID 前缀 apv 已预留）
+1. CLI login/init 实装（消费协议快照 v1：device flow + workspace 绑定；
+   `token_provider`/`openInBrowser` 等 seam 已就位）——当前最高杠杆：打通双仓库端到端闭环
 2. agents 列表按 workspace 过滤（T-ws-7，需 agent-workspace 绑定模型）
 3. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理）
-4. CLI login/init 实装（消费协议快照 v1：device flow + workspace 绑定；
-   `token_provider`/`openInBrowser` 等 seam 已就位）
-5. 凭证/会话撤销后主动断开 SSE 连接（hub 订阅者携带身份；security.md 要求）
-6. rate limit（auth/device 端点优先；phase-6）
-7. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
+4. 凭证/会话撤销后主动断开 SSE 连接（hub 订阅者携带身份；security.md 要求）
+5. rate limit（auth/device 端点优先；phase-6）
+6. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
+7. Web/GUI approval 裁决视图（数据源 GET /workspaces/{id}/approvals?status=requested）

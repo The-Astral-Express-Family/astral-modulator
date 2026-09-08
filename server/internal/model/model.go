@@ -263,3 +263,22 @@ type IdempotencyKey struct {
 }
 
 func (IdempotencyKey) TableName() string { return "idempotency_keys" }
+
+// Approval 见 00011_approvals.sql / architecture §22：高风险动作的
+// server-side approval 状态机（requested -> approved|rejected|expired -> executed）。
+// approve 与业务执行同事务完成（MVP：membership.promote_owner）。
+type Approval struct {
+	ID            string  `gorm:"primaryKey;size:40"`
+	WorkspaceID   string  `gorm:"index:idx_approvals_ws_status;size:40"`
+	Action        string  `gorm:"size:64"`
+	TargetActorID string  `gorm:"size:40"`
+	Payload       []byte  `gorm:"type:jsonb"`
+	Status        string  `gorm:"index:idx_approvals_ws_status;size:16"`
+	RequestedBy   string  `gorm:"size:40"`
+	DecidedBy     *string `gorm:"size:40"`
+	DecidedAt     *time.Time
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+}
+
+func (Approval) TableName() string { return "approvals" }

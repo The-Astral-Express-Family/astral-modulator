@@ -33,7 +33,7 @@ func NewTestDB(t *testing.T) *gorm.DB {
 		&model.Tag{}, &model.TagProposal{}, &model.TaskTag{},
 		&model.OutboxEvent{}, &model.AuditEntry{},
 		&model.Presence{}, &model.Message{},
-		&model.IdempotencyKey{},
+		&model.IdempotencyKey{}, &model.Approval{},
 	); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}

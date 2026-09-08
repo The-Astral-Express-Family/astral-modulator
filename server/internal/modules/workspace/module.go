@@ -42,6 +42,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/workspaces/{workspace_id}/agents", m.createAgent)
 	r.Post("/agents/{agent_id}/credentials", m.createCredential)
 	r.Delete("/agents/{agent_id}/credentials/{credential_id}", m.revokeCredential)
+	m.registerApprovalRoutes(r)
 }
 
 // ---- DTO ----
@@ -285,8 +286,8 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Role == "owner" {
-		// architecture §22：owner 提升高风险动作走 approval 状态机（未实装，先拒绝）。
-		httpx.WriteError(w, r, &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "owner assignment requires approval flow (not yet implemented)"})
+		// architecture §22：owner 提升走 approval 状态机（workspace/approval.go）。
+		httpx.WriteError(w, r, httpx.Invalid("owner assignment requires approval: POST /workspaces/{id}/approvals"))
 		return
 	}
 	var actor model.Actor
@@ -334,8 +335,13 @@ func (m *Module) updateMember(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	if !validRole(in.Role) || in.Role == "owner" {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid role (owner requires approval flow)"})
+	if !validRole(in.Role) {
+		httpx.WriteError(w, r, httpx.Invalid("invalid role"))
+		return
+	}
+	if in.Role == "owner" {
+		// architecture §22：owner 变更走 approval 状态机，不经本端点。
+		httpx.WriteError(w, r, httpx.Invalid("owner change requires approval: POST /workspaces/{id}/approvals"))
 		return
 	}
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {

@@ -45,6 +45,9 @@ const (
 	// CodeWorkspaceNameTaken：workspace name/slug 唯一约束冲突（409）。
 	CodeWorkspaceNameTaken = "WORKSPACE_NAME_TAKEN"
 
+	// CodeApprovalExpired：approval 已过期或已裁决（409）。
+	CodeApprovalExpired = "APPROVAL_EXPIRED"
+
 	// CodeNotImplemented 仅用于脚手架阶段的未实现端点（HTTP 501）。
 	// 它不属于稳定公网错误码集合；各 Phase 完成后对应端点必须移除此响应。
 	// CLI/GUI 不得依赖此 code 做正式逻辑。
