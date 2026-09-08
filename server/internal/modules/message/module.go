@@ -2,7 +2,9 @@
 package message
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -19,7 +21,6 @@ import (
 
 type Module struct {
 	DB   *gorm.DB
-	Hub  *event.Hub
 	Auth *auth.Service
 }
 
@@ -38,6 +39,15 @@ type messageDTO struct {
 	Body        string          `json:"body"`
 	Metadata    json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt   string          `json:"created_at"`
+}
+
+func toMessageDTO(row model.Message) messageDTO {
+	return messageDTO{
+		ID: row.ID, WorkspaceID: row.WorkspaceID, ThreadID: row.ThreadID,
+		SenderID: row.SenderID, TargetType: row.TargetType, TargetID: row.TargetID,
+		Body: row.Body, Metadata: json.RawMessage(row.Metadata),
+		CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+	}
 }
 
 // requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
@@ -68,7 +78,7 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Body = strings.TrimSpace(in.Body)
 	if in.Body == "" || len(in.Body) > 20000 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "body required (1-20000 chars)"})
+		httpx.WriteError(w, r, httpx.Invalid("body required (1-20000 chars)"))
 		return
 	}
 	if in.Target.ID == "" {
@@ -78,9 +88,26 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 	}
 	switch in.Target.Type {
 	case "actor":
+		// 私信收件人必须在本 workspace 可达，否则收件人永远读不到这条消息：
+		//   - workspace 成员（human）；或
+		//   - agent/service：持有效 credential 且绑定本 workspace（未绑定 = 全局）。
 		var actor model.Actor
-		if err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", in.Target.ID).Error; err != nil {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "target actor not found"})
+		err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", in.Target.ID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.WriteError(w, r, httpx.NotFound("target actor not found"))
+			return
+		}
+		if err != nil {
+			httpx.RespondError(w, r, err)
+			return
+		}
+		reachable, err := m.reachableInWorkspace(r.Context(), wsID, in.Target.ID)
+		if err != nil {
+			httpx.RespondError(w, r, err)
+			return
+		}
+		if !reachable {
+			httpx.WriteError(w, r, httpx.NotFound("target actor is not reachable in this workspace"))
 			return
 		}
 	case "workspace":
@@ -88,18 +115,23 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 	case "task":
 		var t model.Task
 		if err := m.DB.WithContext(r.Context()).First(&t, "id = ?", in.Target.ID).Error; err != nil || t.WorkspaceID != wsID {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "target task not found in workspace"})
+			httpx.WriteError(w, r, httpx.NotFound("target task not found in workspace"))
 			return
 		}
 	default:
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "target.type must be actor|workspace|task"})
+		httpx.WriteError(w, r, httpx.Invalid("target.type must be actor|workspace|task"))
 		return
 	}
 	var thread *string
 	if in.ThreadID != nil && *in.ThreadID != "" {
 		var parent model.Message
-		if err := m.DB.WithContext(r.Context()).First(&parent, "id = ?", *in.ThreadID).Error; err != nil {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "thread_id not found"})
+		err := m.DB.WithContext(r.Context()).First(&parent, "id = ?", *in.ThreadID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.WriteError(w, r, httpx.NotFound("thread_id not found"))
+			return
+		}
+		if err != nil {
+			httpx.RespondError(w, r, err)
 			return
 		}
 		thread = in.ThreadID
@@ -110,7 +142,6 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		ID: ids.New(ids.Message), WorkspaceID: wsID, ThreadID: thread,
 		TargetType: in.Target.Type, TargetID: in.Target.ID,
 		SenderID: p.ActorID, Body: in.Body, Metadata: meta,
-		CreatedAt: time.Now(),
 	}
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&row).Error; err != nil {
@@ -124,12 +155,28 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusCreated, messageDTO{
-		ID: row.ID, WorkspaceID: row.WorkspaceID, ThreadID: row.ThreadID,
-		SenderID: row.SenderID, TargetType: row.TargetType, TargetID: row.TargetID,
-		Body: row.Body, Metadata: json.RawMessage(row.Metadata),
-		CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
-	})
+	httpx.WriteOK(w, r, http.StatusCreated, toMessageDTO(row))
+}
+
+// reachableInWorkspace 判断 actor 能否读到本 workspace 的私信：
+// 成员关系（human 常规路径）或有效 credential 绑定（agent 路径；
+// credential 未绑定 workspace 视为全局 agent，可达）。
+func (m *Module) reachableInWorkspace(ctx context.Context, wsID, actorID string) (bool, error) {
+	var member int64
+	if err := m.DB.WithContext(ctx).Model(&model.WorkspaceMember{}).
+		Where("workspace_id = ? AND actor_id = ?", wsID, actorID).Count(&member).Error; err != nil {
+		return false, err
+	}
+	if member > 0 {
+		return true, nil
+	}
+	var bound int64
+	if err := m.DB.WithContext(ctx).Model(&model.Credential{}).
+		Where("actor_id = ? AND revoked_at IS NULL AND (workspace_id IS NULL OR workspace_id = ?)", actorID, wsID).
+		Count(&bound).Error; err != nil {
+		return false, err
+	}
+	return bound > 0, nil
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
@@ -139,13 +186,15 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
-	// 可见性（MVP）：workspace 广播对本 workspace 成员可见；actor 私信仅收发双方；
-	// task thread 消息只限本 workspace 的任务（子查询约束，防跨 workspace 读）。
+	// 可见性（MVP）：三条分支都以 workspace_id 收口——
+	//   workspace 广播：本 workspace 成员可见；
+	//   actor 私信：仅限本 workspace 内、收发双方（防跨 workspace 读他处私信）；
+	//   task thread：只限本 workspace 的任务（子查询约束）。
 	query := m.DB.WithContext(r.Context()).Model(&model.Message{}).
 		Where("(workspace_id = ? AND target_type = 'workspace') "+
-			"OR (target_type = 'actor' AND (target_id = ? OR sender_id = ?)) "+
+			"OR (workspace_id = ? AND target_type = 'actor' AND (target_id = ? OR sender_id = ?)) "+
 			"OR (target_type = 'task' AND target_id IN (SELECT id FROM tasks WHERE workspace_id = ?))",
-			wsID, p.ActorID, p.ActorID, wsID)
+			wsID, wsID, p.ActorID, p.ActorID, wsID)
 	if v := r.URL.Query().Get("thread_id"); v != "" {
 		query = query.Where("thread_id = ?", v)
 	}
@@ -153,18 +202,13 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("target_id = ?", v)
 	}
 	var rows []model.Message
-	if err := query.Order("created_at DESC, id DESC").Limit(100).Find(&rows).Error; err != nil {
+	if err := query.Order("id DESC").Limit(100).Find(&rows).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
 	items := make([]messageDTO, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, messageDTO{
-			ID: row.ID, WorkspaceID: row.WorkspaceID, ThreadID: row.ThreadID,
-			SenderID: row.SenderID, TargetType: row.TargetType, TargetID: row.TargetID,
-			Body: row.Body, Metadata: json.RawMessage(row.Metadata),
-			CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
-		})
+		items = append(items, toMessageDTO(row))
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": nil})
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }

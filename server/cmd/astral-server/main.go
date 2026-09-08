@@ -77,10 +77,10 @@ func run() error {
 
 		recorder := &audit.GormRecorder{DB: gormDB}
 		authSvc = auth.NewService(gormDB, log)
-		wsMod := &workspace.Module{DB: gormDB, Audit: recorder, Hub: hub, Auth: authSvc}
-		taskMod := &task.Module{DB: gormDB, Audit: recorder, Hub: hub, Auth: authSvc}
-		msgMod := &message.Module{DB: gormDB, Hub: hub, Auth: authSvc}
-		presMod := &presence.Module{DB: gormDB, Hub: hub, Auth: authSvc}
+		wsMod := &workspace.Module{DB: gormDB, Audit: recorder, Auth: authSvc}
+		taskMod := &task.Module{DB: gormDB, Auth: authSvc, Log: log}
+		msgMod := &message.Module{DB: gormDB, Auth: authSvc}
+		presMod := &presence.Module{DB: gormDB, Auth: authSvc}
 
 		mods.Auth.Svc = authSvc
 		mods.Workspace = wsMod
@@ -98,7 +98,7 @@ func run() error {
 		idem.DB = gormDB
 		idempotency.StartCleanup(ctx, gormDB, log, time.Hour)
 		// 过期租约清扫（architecture §17）。
-		taskMod.StartSweeper(ctx.Done(), 30*time.Second)
+		taskMod.StartSweeper(ctx, 30*time.Second)
 	} else {
 		log.Warn("ASTRAL_DATABASE_DSN empty; running without storage (stub mode): protected endpoints will 401")
 		// 桩模式也装配一个无 DB 的 service，保证路由可注册、行为可预期（查询会失败）。

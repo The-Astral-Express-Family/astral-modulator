@@ -4,7 +4,7 @@
 // 需先登录（未登录跳转 /login 并带 redirect）。
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AstralApiError } from '../api/client'
+import { formatApiError } from '../api/client'
 import {
   approveDeviceAuthorization,
   denyDeviceAuthorization,
@@ -38,7 +38,7 @@ async function lookup(code: string): Promise<void> {
   try {
     view.value = await findDeviceAuthorization(code)
   } catch (e) {
-    error.value = e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
+    error.value = formatApiError(e)
   }
 }
 
@@ -54,7 +54,7 @@ async function decide(approve: boolean): Promise<void> {
       notice.value = '已拒绝。该设备授权请求已终止。'
     }
   } catch (e) {
-    error.value = e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
+    error.value = formatApiError(e)
   } finally {
     busy.value = false
   }

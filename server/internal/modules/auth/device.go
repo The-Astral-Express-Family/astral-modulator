@@ -88,7 +88,7 @@ func (s *Service) FindByUserCode(ctx context.Context, userCode string) (*DeviceA
 	var row model.DeviceAuthorization
 	err := s.DB.WithContext(ctx).Where("user_code = ?", userCode).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "unknown user_code"}
+		return nil, httpx.NotFound("unknown user_code")
 	}
 	if err != nil {
 		return nil, err
@@ -162,6 +162,12 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "device authorization expired"}
 	case "exchanged":
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "device_code already used"}
+	case "approved":
+		// 唯一继续走兑换流程的状态。
+	default:
+		// 未知状态值 = 数据被外部改动或代码漏分支，按服务端错误处理，
+		// 绝不能落到 approved 兑换路径。
+		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "unknown authorization status"}
 	}
 
 	if row.ActorID == nil {

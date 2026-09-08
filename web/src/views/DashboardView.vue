@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 总览页：服务器信息 + 登录态 + workspace 入口。
 import { onMounted, ref } from 'vue'
-import { AstralApiError } from '../api/client'
+import { formatApiError } from '../api/client'
 import { listWorkspaces } from '../api/modules/core'
 import { useSessionStore } from '../stores/session'
 import type { Workspace } from '../api/types'
@@ -16,7 +16,7 @@ onMounted(async () => {
   try {
     workspaces.value = (await listWorkspaces()).items
   } catch (e) {
-    error.value = e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
+    error.value = formatApiError(e)
   }
 })
 </script>

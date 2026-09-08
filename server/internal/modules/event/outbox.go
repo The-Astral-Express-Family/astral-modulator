@@ -8,14 +8,21 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/background"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 )
 
 // EmitTx 在业务事务内写入 outbox（architecture §19：与业务变更同事务，
 // 保证事件不丢、不虚发）。payload 是 envelope 的 data 字段。
+//
+// 落库形状是 {resource_revision, data} 包装（envelopeFromRow 负责还原）：
+// resource_revision 是 dispatcher 拼装 envelope 时的元数据，不单独加列。
 func EmitTx(tx *gorm.DB, typ string, workspaceID, actorID string, resourceRevision int64, data any) error {
-	raw, err := json.Marshal(data)
+	raw, err := json.Marshal(map[string]any{
+		"resource_revision": resourceRevision,
+		"data":              data,
+	})
 	if err != nil {
 		return err
 	}
@@ -33,36 +40,16 @@ func EmitTx(tx *gorm.DB, typ string, workspaceID, actorID string, resourceRevisi
 		a := actorID
 		row.ActorID = &a
 	}
-	// resource_revision 编码进 payload 顶部由 dispatcher 拼装 envelope 时使用；
-	// 为避免 outbox 表加列，这里把 envelope 元数据整体存 payload，
-	// data 内容单独编一层。
-	envelope := map[string]any{
-		"resource_revision": resourceRevision,
-		"data":              json.RawMessage(raw),
-	}
-	envelopeRaw, err := json.Marshal(envelope)
-	if err != nil {
-		return err
-	}
-	row.Payload = envelopeRaw
 	return tx.Create(&row).Error
 }
 
 // StartDispatcher 周期读取未投递 outbox，发布到本实例 hub 并标记 sent_at。
-// MVP 单实例轮询；TODO(phase-4): LISTEN/NOTIFY 降低延迟 + Last-Event-ID 重放窗口。
+// MVP 单实例轮询（500ms，见 main 装配）；跨实例广播需求出现后再上
+// LISTEN/NOTIFY 或消息总线（architecture §19 的触发条件）。
 func StartDispatcher(ctx context.Context, db *gorm.DB, hub *Hub, log *slog.Logger, every time.Duration) {
-	go func() {
-		ticker := time.NewTicker(every)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				pollOnce(ctx, db, hub, log)
-			}
-		}
-	}()
+	background.RunEvery(ctx, every, func(ctx context.Context) {
+		pollOnce(ctx, db, hub, log)
+	})
 }
 
 // PollOnce 执行一次 outbox 投递（导出供测试与外部调度复用）。

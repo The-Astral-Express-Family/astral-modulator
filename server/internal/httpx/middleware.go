@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -36,7 +38,7 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 			reqID = ids.New(ids.Request)
 		}
 		w.Header().Set(HeaderRequestID, reqID)
-		w.Header().Set(HeaderProtocolVersion, "1")
+		w.Header().Set(HeaderProtocolVersion, strconv.Itoa(ProtocolVersion))
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyRequestID{}, reqID)))
 	}
 	return http.HandlerFunc(fn)
@@ -50,9 +52,33 @@ func RequestIDFrom(ctx context.Context) string {
 	return ""
 }
 
-// Recover 把 panic 归一为 500 envelope，避免裸连接重置。
-func Recover(next http.Handler) http.Handler {
-	return middleware.Recoverer(next)
+// Recover 把 panic 归一为 500 错误 envelope（契约层不允许任何响应绕过
+// error.code 语义，包括 panic 路径）。已开始写响应体时只记日志，不再追加。
+// http.ErrAbortHandler 按净跳过（与 net/http 约定一致）。
+func Recover(log *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			defer func() {
+				if rec := recover(); rec != nil && rec != http.ErrAbortHandler {
+					log.Error("panic recovered",
+						"err", rec,
+						"request_id", RequestIDFrom(r.Context()),
+						"method", r.Method, "path", r.URL.Path,
+						"stack", string(debug.Stack()),
+					)
+					if ww.BytesWritten() == 0 {
+						WriteError(ww, r, &APIError{
+							Status:  http.StatusInternalServerError,
+							Code:    CodeInternalError,
+							Message: "internal error",
+						})
+					}
+				}
+			}()
+			next.ServeHTTP(ww, r)
+		})
+	}
 }
 
 // Logger 输出结构化访问日志（method/path/status/耗时/request_id/client）。

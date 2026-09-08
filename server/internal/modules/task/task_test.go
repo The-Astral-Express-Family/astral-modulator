@@ -12,7 +12,6 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
@@ -36,7 +35,7 @@ func setup(t *testing.T) *fixture {
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	hub := event.NewHub()
-	m := &Module{DB: db, Audit: &audit.GormRecorder{DB: db}, Hub: hub, Auth: svc}
+	m := &Module{DB: db, Auth: svc}
 
 	human := &model.Actor{ID: "usr_h1", Kind: "human", DisplayName: "H"}
 	agentA := &model.Actor{ID: "agt_a1", Kind: "agent", DisplayName: "A"}
@@ -201,7 +200,7 @@ func TestSweeperExpiresLeases(t *testing.T) {
 		Update("expires_at", time.Now().Add(-time.Second)).Error; err != nil {
 		t.Fatal(err)
 	}
-	f.m.sweepOnce()
+	f.m.sweepOnce(context.Background())
 	// 事件走 outbox（同事务写入），手动投递一次到 hub。
 	event.PollOnce(context.Background(), f.db, f.hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
 

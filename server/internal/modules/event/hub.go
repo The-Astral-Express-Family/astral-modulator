@@ -7,11 +7,9 @@ import (
 // Hub 是进程内事件订阅器。SSE handler 从 Hub 订阅。
 // Hub 的唯一喂食来源是 outbox dispatcher（outbox.go）——所有领域事件一律
 // EmitTx 同事务写入 outbox，再由 dispatcher 投递，保证不丢、可重放、顺序稳定；
-// 业务模块不得直接 Publish。
+// 业务模块不得直接 Publish。断线补发（resume）由 sse.go 的 replay 负责。
 //
-// TODO(phase-4): SSE resume —— dispatcher 之外，SSE handler 启动时先从 outbox
-// 重放 Last-Event-ID 之后的保留窗口，再接入实时流。当前断线期间的事件会缺失，
-// CLI/GUI 需接受“拉快照 + 增量”的最终一致性模型。
+// TODO(phase-6): dropped 事件计数指标；连续丢弃达到阈值时断开慢订阅者。
 type Hub struct {
 	mu   sync.RWMutex
 	subs map[uint64]*subscriber

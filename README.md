@@ -14,7 +14,7 @@ CLI（`astral`，C++20）在姊妹仓库 [astral-cli]，两仓库只通过本仓
 - [docs/README.md](docs/README.md) — 文档索引与术语
 - [docs/architecture.md](docs/architecture.md) — 架构事实来源（技术选型/模块边界/数据模型）
 - [docs/protocol.md](docs/protocol.md) — OpenAPI 之外的传输与语义约定（请求头/SSE/限流/兼容性）
-- [docs/roadmap.md](docs/roadmap.md) — Phase 0-6 路线图
+- [docs/roadmap.md](docs/roadmap.md) — 里程碑视图（实施 Phase 划分见 architecture.md §27）
 - [TODO.md](TODO.md) — 脚手架任务登记簿 + 文档分歧裁决 + 契约变更登记
 - 根 [ARCHITECTURE.md](ARCHITECTURE.md) — 指向 docs 的简版入口
 
@@ -36,8 +36,8 @@ skills/         Agent 技能（astral-install / astral-cli / astral-collaboratio
 
 ## 快速开始（开发）
 
-前置：Go ≥ 1.27、Node ≥ 24。数据库可选（无 DB 时以桩模式启动：发现/能力/健康/SSE 可用，
-业务端点返回 501 NOT_IMPLEMENTED envelope）。
+前置：Go ≥ 1.27、Node ≥ 24。数据库可选（无 DB 时以桩模式启动：发现/能力/健康可用，
+受保护端点返回 401、readyz 返回 503；document/memory/audit 等未实装端点为 501）。
 
 ```bash
 # 1. 服务端（桩模式，监听 :8080）
@@ -64,7 +64,7 @@ go run ./cmd/astral-server               # 启动时自动 goose up（ASTRAL_AUT
 | `ASTRAL_HTTP_ADDR` | `:8080` | 监听地址 |
 | `ASTRAL_PUBLIC_URL` | — | canonical URL（写入 /.well-known） |
 | `ASTRAL_DATABASE_DSN` / `DATABASE_URL` | — | PostgreSQL DSN；空 = 桩模式 |
-| `ASTRAL_SERVER_ID` | 随机+警告 | 稳定服务器身份；phase-1 后由 server_meta 固化 |
+| `ASTRAL_SERVER_ID` | 随机 | 稳定服务器身份；首启固化进 server_meta，此后库中值优先 |
 | `ASTRAL_AUTO_MIGRATE` | `true` | 启动时 goose up；**生产多实例必须关闭** |
 | `ASTRAL_DEV_CORS_ORIGINS` | — | 开发期浏览器跨域白名单（生产同源应留空） |
 

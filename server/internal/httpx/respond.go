@@ -10,9 +10,19 @@ import (
 
 // Page 是 cursor 分页 envelope（docs/protocol.md §3）。
 // next_cursor 为 null 表示没有更多数据；cursor 对客户端不透明。
+// 用 NewPage 组装（空串归一为 null）。
 type Page[T any] struct {
-	Items      []T    `json:"items"`
-	NextCursor string `json:"next_cursor"`
+	Items      []T `json:"items"`
+	NextCursor any `json:"next_cursor"`
+}
+
+// NewPage 组装分页 envelope；nextCursor 为空串时序列化为 null。
+func NewPage[T any](items []T, nextCursor string) Page[T] {
+	p := Page[T]{Items: items}
+	if nextCursor != "" {
+		p.NextCursor = nextCursor
+	}
+	return p
 }
 
 // NotImplemented 是脚手架阶段的占位响应：HTTP 501 + NOT_IMPLEMENTED envelope。

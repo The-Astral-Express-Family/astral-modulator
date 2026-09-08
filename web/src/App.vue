@@ -37,7 +37,7 @@ async function logout(): Promise<void> {
     </aside>
     <main class="content">
       <p v-if="session.bootError" class="card">
-        无法连接 astral-server：{{ session.bootError }}（请确认 server 已在 :8080 监听）
+        无法连接 astral-server：{{ session.bootError }}（请确认服务端已启动，且开发代理指向正确端口）
       </p>
       <RouterView />
     </main>

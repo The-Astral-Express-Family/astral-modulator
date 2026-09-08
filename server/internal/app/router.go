@@ -67,7 +67,7 @@ type Modules struct {
 // NewRouter 构建完整 http.Handler。db 为 nil 表示无数据库开发模式。
 func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) http.Handler {
 	r := chi.NewRouter()
-	r.Use(httpx.Recover)
+	r.Use(httpx.Recover(log))
 	r.Use(httpx.Logger(log))
 	r.Use(httpx.RequestIDMiddleware)
 	if len(cfg.DevCORSOrigins) > 0 {
@@ -83,11 +83,7 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.NotFound(func(w http.ResponseWriter, req *http.Request) {
-			httpx.WriteError(w, req, &httpx.APIError{
-				Status:  http.StatusNotFound,
-				Code:    httpx.CodeInternalError,
-				Message: "no such endpoint under /api/v1",
-			})
+			httpx.WriteError(w, req, httpx.NotFound("no such endpoint under /api/v1"))
 		})
 		api.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 			httpx.WriteError(w, req, &httpx.APIError{

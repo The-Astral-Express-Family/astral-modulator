@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Workspace 总览：presence + 任务概览 + 实时事件（Phase 2-4 逐步实装）。
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getWorkspace } from '../api/modules/core'
 import { subscribeEvents } from '../api/sse'
@@ -9,29 +9,36 @@ import type { EventEnvelope, Workspace } from '../api/types'
 
 const route = useRoute()
 const session = useSessionStore()
-const workspaceId = route.params.workspaceId as string
+// 路由参数保持响应式：/workspaces/a → /workspaces/b 组件复用时正确重载。
+const workspaceId = computed(() => route.params.workspaceId as string)
 const workspace = ref<Workspace | null>(null)
 const events = ref<EventEnvelope[]>([])
 const sseState = ref<'connecting' | 'open' | 'closed'>('connecting')
 let unsubscribe: (() => void) | null = null
 
-onMounted(async () => {
+async function load(): Promise<void> {
   await session.boot()
   try {
-    workspace.value = await getWorkspace(workspaceId)
+    workspace.value = await getWorkspace(workspaceId.value)
   } catch {
     workspace.value = null // 401 未登录 / 404 无权限；UI 显示占位
   }
+  unsubscribe?.()
   unsubscribe = subscribeEvents({
-    workspaceId,
+    workspaceId: workspaceId.value,
     onEvent: (env) => {
       events.value.unshift(env)
       if (events.value.length > 50) events.value.pop()
     },
     onStateChange: (s) => (sseState.value = s),
   })
-})
+}
 
+onMounted(load)
+watch(workspaceId, () => {
+  events.value = []
+  void load()
+})
 onUnmounted(() => unsubscribe?.())
 </script>
 
@@ -40,7 +47,7 @@ onUnmounted(() => unsubscribe?.())
   <div class="card">
     <p>id: <code>{{ workspaceId }}</code></p>
     <p class="muted">
-      {{ workspace ? workspace.name : '详情端点尚未实现（桩阶段）' }}
+      {{ workspace ? workspace.name : '（无权访问或不存在）' }}
     </p>
     <p>SSE 状态：{{ sseState }}（事件流端点已实装，事件产生于业务模块落地后）</p>
   </div>

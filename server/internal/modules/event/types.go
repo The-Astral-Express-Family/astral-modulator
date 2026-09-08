@@ -1,6 +1,6 @@
 // Package event 是领域事件模块（architecture §6.9）。
 // 事件 envelope 与 type 目录的契约事实来源是 api/schemas/event.json；
-// 本文件常量必须与其保持同步（TODO(phase-2): 用 codegen/contract test 消除手工同步）。
+// 本文件常量由 TestEventTypesSync 与 web/src/api/sse.ts 三方强制同步。
 package event
 
 import "time"
@@ -19,6 +19,8 @@ type Envelope struct {
 }
 
 // 事件类型目录（api/schemas/event.json EventType enum）。
+// TypeDocumentUpdated/TypeDocumentConflict/TypeHumanOverride 属契约预留：
+// document sync（phase-5）与 human override（phase-6）实装前无 emit 方。
 const (
 	TypeWorkspaceMemberChanged    = "workspace.member.changed"
 	TypeActorPresenceChanged      = "actor.presence.changed"
@@ -43,10 +45,8 @@ const (
 	TypeSnapshotRequired = "snapshot.required"
 )
 
-// SSE 传输常量。
+// SSE 传输常量（outbox 保留窗口 RetentionWindow 见 retention.go）。
 const (
 	// KeepaliveInterval 服务器无事件时的注释心跳间隔，防止中间层断开空闲连接。
 	KeepaliveInterval = 15 * time.Second
-	// RetentionWindow 是 outbox 行保留窗口（S1 裁决 = 24h）；
-	// 超窗游标 → snapshot.required（见 retention.go 的清扫器与 sse.go 的重放）。
 )

@@ -2,7 +2,7 @@
 
 > 本文件是脚手架阶段的**任务与契约登记中心**。代码内 `TODO(phase-x)` 注释负责
 > 局部上下文，本文件负责全局视图：哪些端点/契约/决策还没落地、依据哪份文档、
-> 归属哪个 Phase（Phase 划分见 docs/roadmap.md）。
+> 归属哪个 Phase（实施 Phase 划分见 docs/architecture.md §27；roadmap.md 是里程碑视图）。
 >
 > 维护规则：
 > - 完成一项就划掉并注明 PR/commit，不要静默删除（保留裁决痕迹）；
@@ -114,6 +114,50 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   web sse.ts 三方互比，CI 防漂移（与路由/错误码检查同属契约门）。
 - snapshot.required 纳入 event.json 契约 + web 订阅清单。
 
+### 第 7 轮（2026-09-09）：代码 / 逻辑 / 文档 卫生轮（双仓库）
+
+- **正确性修复（server）**：
+  - message list 私信可见性补 `workspace_id` 收口（跨 workspace 私信泄露）；
+    send 对 actor 目标补「本 workspace 可达」校验（成员 或 绑定 credential）；
+  - lease 清扫器改条件删除（`expires_at < now`），快照后已续租的行不再被误删；
+  - task.release 条件更新检查 RowsAffected，0 行回滚并返回 REVISION_CONFLICT；
+  - task.update 业务写与 audit/outbox 合并单事务（原先分离提交，失败窗口会卡死客户端重试）；
+  - SSE 补发与实时流重叠期重复投递修复（replay 返回去重前沿）；
+  - logout 补桩模式 nil-DB 防护；Recover 中间件改为契约 JSON envelope（带日志）；
+  - /api/v1 未知路由 404 改用新码 `NOT_FOUND`（原先返回 retryable=true 的
+    INTERNAL_ERROR）；各次级资源 404（成员/凭证/tag/proposal/actor）统一 NOT_FOUND；
+  - Claim/Login 区分「查无此行」与「DB 故障」（后者 500 + 日志，不再伪装成 404/401）。
+- **去重与死代码**：
+  - audit+outbox 序列三种写法并存 → createAgent 改事务内 RecordInTx、workspace.update 补审计；
+  - `httpx.NewPage` 统一分页 envelope（删除 task 内 nextCursorPtr/手写 map）；
+  - `revisionConflict` / `httpx.NotFound` / `Invalid` / `Conflict` 构造器消除 ~30 处字面量；
+  - 新增 `internal/background.RunEvery`，4 份 ticker 循环归一；
+  - task 列表 cursor 简化为 id（UUIDv7 时间序，单列比较 sqlite/PG 行为一致，
+    替换原 RFC3339Nano 与 sqlite 存储格式不匹配导致的分页序错乱）；
+  - EmitTx 双重序列化死代码、`httpx.Page` 死类型、`ids.Validate`、
+    模块 Hub/Audit 死字段（task/message/presence/workspace/tag）、presence 手动 TTL 常量
+    从 auth.Service 归位各模块；
+  - `auth.Refresh` 改条件轮换（并发双刷新不再互相踩踏/误撤族）；
+    ExchangeDeviceToken 状态机补 default；
+  - presence 主键改 (actor_id, workspace_id)（migration 00010；同 actor 多 workspace
+    presence 不再互相覆盖）+ list N+1 修复；
+  - credential last_used 更新按分钟节流；RequireWorkspaceScopes 记录底层错误。
+- **过时 TODO 注释清理**：config/server_meta、hub/SSE resume、outbox/LISTEN、
+  errors.go contract test、types.go codegen、task 包头（均已完成，注释删除或改写）。
+- **web**：SSE 重连携带 lastSeenId（原先重连丢事件）；access token 到期前静默续期
+  （与注释承诺一致）；types.ts 补齐 4 个漂移错误码并接入 AstralApiError；
+  删除死类型（Task/Tag/Lease/Me/register 等）；formatApiError 收敛 4 处复制粘贴；
+  WorkspaceOverview 路由参数响应式。
+- **astral-cli**：cacheDir 尊重 ASTRAL_HOME；删除死代码 versionString；
+  login/logout/whoami 桩骨架合一；randomSuffix+原子写提取 platform/atomic_file；
+  parseTargetSpec 接入 normalizeServerUrl（原先只测不用）；sse.cpp 死条件删除；
+  openInBrowser 改 fork/exec 消除 shell 拼接面；MANIFEST.json 三处过时描述对齐 revisions。
+- **文档**：roadmap.md 里程碑与 architecture §27 的 Phase 编号冲突消除；
+  architecture §5/§13 pg_trgm/POSIX 表述对齐 D7；§25 仓库结构对齐实际；
+  本文件（TODO.md）勾选实况、修正 Phase 指向与 501 桩清单。
+- **协议变更**：见 §9 登记表 2026-09-09 各条（NOT_FOUND、次级资源 404 码、
+  task 列表排序/cursor、presence 语义、私信可达性校验）。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -143,17 +187,10 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | T1 | task 删除/取消语义 | （未裁决，phase-3）MVP 暂不提供 DELETE，仅 cancelled 状态 | **open** |
 | S1 | snapshot.required 事件与 outbox 保留窗口 | **已裁决并实装**：保留窗口 24h（`event.RetentionWindow`，清扫器每小时清理）；游标超窗下发 `snapshot.required`（reason=cursor_expired）后断流；已纳入 event.json 契约 | ✅ 已实现 |
 
-## 3. Phase 1 — Auth（roadmap Phase 1）
+## 3. Phase 1 — Auth（architecture §27 Phase 1）
 
-- [ ] device flow 全链路：create → 浏览器审批（web /device 页）→ 轮询兑换
-      （`server/internal/modules/auth/module.go`、migration 00002）
-- [ ] opaque access/refresh：签发、轮换、重放检测撤族、logout/revoke
-- [ ] `server_meta` 固化 server_id（启动时读库覆盖 env；`cmd/astral-server/main.go` 已留 TODO）
-- [ ] `Authenticate` 中间件实装并接入 app.router 各写操作组（当前桩阶段放行）
-- [ ] `RequireScopes` 实装；scope 常量与 role bundle 已就绪（`auth/scopes.go`）
-- [ ] Web HttpOnly Cookie session；`/auth/me` 返回 actor
-- [ ] ASTRAL_TOKEN（Agent Bearer）校验路径
-- [ ] 审计：登录/授权失败/撤销全记录（`audit.Recorder` 接口已定）
+- [x] device flow 全链路 / opaque access+refresh / Authenticate 中间件 / RequireScopes /
+      Web Cookie session / ASTRAL_TOKEN 校验 / server_meta 固化（第 2 轮全量实装，清单见 3.1）
 - [x] 裁决并登记 A1/A2/A3（2026-09-07，另新增 A4/D5/D6）
 
 ### 3.1 第 2 轮实施清单（2026-09-07，✅ 全部完成）
@@ -179,7 +216,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - [ ] 认证失败写 audit（Authenticate 中间件当前只拒不记）
 - [ ] refresh 家族生命周期上限窗口测试加固（轮换滑动 vs 创建起算的边界用例）
 
-## 4. Phase 2 — Workspace（roadmap Phase 2）
+## 4. Phase 2 — Workspace（architecture §27 Phase 2）
 
 ### 4.1 第 2 轮实施清单（✅ 大部分完成）
 
@@ -195,7 +232,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - [ ] T-ws-7 agents 列表按 workspace 过滤（需 agent-workspace 绑定模型；
       见 workspace/module.go listAgents TODO，审查轮 2026-09-07 登记）
 
-## 5. Phase 3 — TODO 树 / 搜索 / Tags（roadmap Phase 3）
+## 5. Phase 3 — TODO 树 / 搜索 / Tags（architecture §27 Phase 3）
 
 ### 5.1 第 2 轮实施清单
 
@@ -210,28 +247,30 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - [x] T-task-6 search：regex(RE2)→fuzzy(trigram) 管线 + 游标分页（D7；实现 task/search.go）
 - [x] T-task-7 tags proposal/confirm（normalize NFKC+case-fold、confirm_code hash/TTL 120s/
       单次使用、事务内唯一约束复查；新增 tag.created/renamed/deleted 事件）
-- [ ] 搜索：pg_trgm 索引 + regex→fuzzy 语义 + statement_timeout 防护（migration 00003 已留位）
-- [ ] tag proposal/confirm 两步流（confirm_code hash、TTL、单次使用）
-- [ ] capabilities.features 开放首个特性 `task_lease`
+- [x] capabilities.features 开放首个特性 `task_lease`
+- [ ] pg_trgm 回迁路径（D7 触发条件：单 workspace 任务量到万级或搜索延迟 SLO；
+      语义不变，实现替换点在 task/search.go）
 - [ ] 裁决并登记 T1
 
-## 6. Phase 4 — Presence / Message / Events（roadmap Phase 4）
+## 6. Phase 4 — Presence / Message / Events（architecture §27 Phase 4）
 
-- [ ] presence heartbeat + TTL 钳制 + offline 派生
-- [ ] messaging（target 三类 + thread + 私信可见性）
-- [ ] **outbox dispatcher**：业务事务写 outbox → 轮询/LISTEN → hub.Publish → sent_at
-- [ ] SSE resume：Last-Event-ID 重放 + snapshot.required（hub.go/sse.go 已留 TODO）
+- [x] presence heartbeat + TTL 钳制 + offline 读路径派生（第 2 轮）
+- [x] messaging：send/list（target 三类 + thread；第 2 轮；私信跨 workspace 可见性在第 7 轮收紧）
+- [x] **outbox dispatcher**：业务事务写 outbox → 轮询 → hub → SSE（第 2 轮；LISTEN/NOTIFY
+      待多实例需求出现，见 architecture §19 触发条件）
+- [x] SSE resume：Last-Event-ID 重放 + snapshot.required（第 6 轮，S1 裁决落定）
+- [x] 裁决并登记 S1
 - [ ] 凭证 revoke 后主动断流（hub 订阅者需携带 actor/credential 标识）
-- [ ] 裁决并登记 S1
+- [ ] messaging thread 树形聚合视图（GUI/CLI 消费侧，随任务视图一并做）
 
-## 7. Phase 5 — Memory / Document Sync（roadmap Phase 5）
+## 7. Phase 5 — Memory / Document Sync（architecture §27 Phase 5）
 
 - [ ] manifest/get/push 三方同步 + conflict artifact（禁止 last-write-wins）
 - [ ] diff3 合并选型（sync-semantics.md）
 - [ ] path canonicalize + 越界/secrets 路径防护
 - [ ] memory agent 整理流程 + 人工 review policy（裁决 M1 后开工）
 
-## 8. Phase 6 — Web GUI / Hardening（roadmap Phase 6）
+## 8. Phase 6 — Web GUI / Hardening（architecture §27 Phase 6）
 
 - [ ] 生产模式 server 托管 `web/dist`（同源，去 CORS）
 - [ ] GUI 各视图：任务树/Tag 管理/presence/消息/冲突/成员/凭证/审计
@@ -261,6 +300,11 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-07 | 第 5 轮：事件路径统一——全部领域事件经 EmitTx outbox（PublishDomain 直发已移除），SSE 事件延迟 ≤ dispatcher 轮询间隔（500ms） | 行为 | CLI/Web |
 | 2026-09-09 | 第 6 轮：新增控制事件 `snapshot.required`（SSE resume 超窗，reason=cursor_expired；不在领域事件语义内） | 补充 | CLI/Web |
 | 2026-09-09 | 第 6 轮：SSE resume 正式可用（保留窗口 24h，S1 裁决落定）；Idempotency-Key 语义实装（同 actor+endpoint+key 24h 内重放首次 2xx） | 行为 | CLI/Web |
+| 2026-09-09 | 第 7 轮：新增错误码 `NOT_FOUND`（HTTP 404，非 retryable）：/api/v1 未知路由，及无专用码的次级资源不存在（成员/凭证/tag/proposal/actor/thread 等）。原先这些场景返回 `VALIDATION_FAILED`（404/409）或 `INTERNAL_ERROR`（未知路由） | 补充 | CLI/Web |
+| 2026-09-09 | 第 7 轮：task 列表排序定为 `id DESC`（UUIDv7 创建序，毫秒精度），cursor 即末行 id；search cursor 语义不变 | 行为 | CLI/Web |
+| 2026-09-09 | 第 7 轮：presence 语义定为 (actor, workspace) 一行：同一 actor 在多个 workspace 各自心跳，互不覆盖（migration 00010 主键变更） | 行为 | CLI/Web |
+| 2026-09-09 | 第 7 轮：私信发送校验收件人「本 workspace 可达」（成员 或 绑定 credential 的 agent）；不可达返回 404 NOT_FOUND | 行为 | CLI/Web |
+| 2026-09-09 | 第 7 轮：refresh 并发轮换改条件更新：输家收到 401（token 已被替换），不再误触整族撤销 | 行为 | CLI |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -268,8 +312,8 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 
 1. `GET /.well-known/astral` — server_id/api_base/protocol_version（已实装 ✅）
 2. `GET /api/v1/meta/capabilities` — features 门控（已实装 ✅，features 暂为空）
-3. 错误 envelope 解析 — 所有非 2xx（已实装 ✅；`NOT_IMPLEMENTED` 桩仅剩
-   task.search 与 tags/memory/document 相关端点）
+3. 错误 envelope 解析 — 所有非 2xx（已实装 ✅；`NOT_IMPLEMENTED` 501 桩仅剩
+   task.messages.list（phase-4）、document/memory（phase-5）、audit.list（phase-6））
 4. 公共响应头回显 — `X-Astral-Request-Id`/`X-Astral-Protocol-Version`（已实装 ✅）
 5. ID 形状 `^[a-z]{2,3}_<uuidv7>` — CLI 只做透传与展示（已实装 ✅）
 6. **Device Flow 全链路（已实装 ✅，第 2 轮）**：
@@ -294,16 +338,19 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
     `{expected_revision, lease_seconds}` → 200 `{task, lease}`；
     竞争失败 → 409 `TASK_ALREADY_CLAIMED`；过期后需重新 claim
     （renew 对过期租约返回 409 `TASK_LEASE_EXPIRED`）
-11. **SSE（已实装 ✅，无重放）**：`GET /api/v1/workspaces/{id}/events`，
-    keepalive 注释行 15s；断线期间事件缺失，CLI 需接受快照+增量模型直至 phase-4
-    （Last-Event-ID 重放 + snapshot.required）
+11. **SSE（已实装 ✅，含断线重放）**：`GET /api/v1/workspaces/{id}/events`，
+    keepalive 注释行 15s；`Last-Event-ID` 头或 `last_event_id` query 携带游标，
+    保留窗口 24h，超窗收 `snapshot.required`（reason=cursor_expired）后须重拉快照；
+    事件消费必须幂等（重放/补发可能重复）
 12. `content_hash` 统一 `sha256:<hex>`（小写十六进制）— phase-5 文档同步联调时最易错
 
 ## 11. 下一轮计划
 
-1. approvals 表 + promote_owner 状态机（T-ws-6，高风险动作审批落地）
+1. approvals 表 + promote_owner 状态机（T-ws-6，高风险动作审批落地；ID 前缀 apv 已预留）
 2. agents 列表按 workspace 过滤（T-ws-7，需 agent-workspace 绑定模型）
 3. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理）
-4. 凭证/会话撤销后主动断开 SSE 连接（hub 订阅者携带身份；security.md 要求）
-5. rate limit（auth/device 端点优先；phase-6）
-6. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
+4. CLI login/init 实装（消费协议快照 v1：device flow + workspace 绑定；
+   `token_provider`/`openInBrowser` 等 seam 已就位）
+5. 凭证/会话撤销后主动断开 SSE 连接（hub 订阅者携带身份；security.md 要求）
+6. rate limit（auth/device 端点优先；phase-6）
+7. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求

@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -78,13 +80,13 @@ func collectChiRoutes(t *testing.T) map[string]bool {
 	hub := event.NewHub()
 	mods := &Modules{
 		Auth:      &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
-		Workspace: &workspace.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
-		Task:      &task.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
+		Workspace: &workspace.Module{DB: db, Audit: recorder, Auth: svc},
+		Task:      &task.Module{DB: db, Auth: svc},
 		Tag:       &tag.Module{},
 		Memory:    &memory.Module{},
 		Document:  &document.Module{},
-		Message:   &message.Module{DB: db, Hub: hub, Auth: svc},
-		Presence:  &presence.Module{DB: db, Hub: hub, Auth: svc},
+		Message:   &message.Module{DB: db, Auth: svc},
+		Presence:  &presence.Module{DB: db, Auth: svc},
 		Audit:     &audit.Module{},
 		Events:    &event.SSEHandler{Hub: hub, DB: db},
 	}
@@ -168,23 +170,43 @@ func TestOpenapiErrorCodesMatchHttpx(t *testing.T) {
 	for _, c := range doc.Components.Schemas.ErrorCode.Enum {
 		specCodes[c] = true
 	}
-	// httpx 侧常量清单：新增错误码时必须同步 openapi（反之亦然）。
-	httpxCodes := []string{
-		"AUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_REVOKED", "INSUFFICIENT_SCOPE",
-		"SERVER_NOT_FOUND", "WORKSPACE_NOT_FOUND", "WORKSPACE_ALREADY_BOUND",
-		"WORKSPACE_NAME_TAKEN", "TASK_NOT_FOUND", "TASK_ALREADY_CLAIMED",
-		"TASK_LEASE_EXPIRED", "TAG_PROPOSAL_EXPIRED", "TAG_ALREADY_EXISTS",
-		"REVISION_CONFLICT", "DOCUMENT_CONFLICT", "RATE_LIMITED",
-		"CLIENT_VERSION_UNSUPPORTED", "VALIDATION_FAILED",
-		"AUTHORIZATION_PENDING", "SLOW_DOWN", "INTERNAL_ERROR", "NOT_IMPLEMENTED",
+	httpxCodes := parseHttpxErrorCodes(t)
+	if len(httpxCodes) == 0 {
+		t.Fatal("failed to parse httpx error codes; parser broken?")
 	}
 	for _, code := range httpxCodes {
 		if !specCodes[code] {
 			t.Errorf("httpx 错误码 %q 缺席 openapi ErrorCode enum", code)
 		}
 	}
+	for code := range specCodes {
+		if !slices.Contains(httpxCodes, code) {
+			t.Errorf("openapi 错误码 %q 在 httpx 中不存在", code)
+		}
+	}
 	if len(doc.Components.Schemas.ErrorCode.Enum) != len(httpxCodes) {
 		t.Errorf("openapi enum 有 %d 个错误码，httpx 清单 %d 个；两清单必须一致",
 			len(doc.Components.Schemas.ErrorCode.Enum), len(httpxCodes))
 	}
+}
+
+// parseHttpxErrorCodes 直接解析 internal/httpx/errors.go 的字符串常量，
+// 避免“契约门”自身再维护一份易漂移的手工清单。
+func parseHttpxErrorCodes(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "httpx", "errors.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := regexp.MustCompile(`Code\w+\s*=\s*"([A-Z_]+)"`)
+	seen := map[string]bool{}
+	var codes []string
+	for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			codes = append(codes, m[1])
+		}
+	}
+	sort.Strings(codes)
+	return codes
 }

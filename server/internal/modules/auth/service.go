@@ -19,18 +19,16 @@ import (
 
 // Service 承载全部认证/授权业务（device flow、session、credential、scope）。
 // Handler 层薄；测试直接打 Service（sqlite 内存库）。
+// 只承载 auth 领域的时长配置；task lease / presence TTL 归各自模块。
 type Service struct {
 	DB  *gorm.DB
 	Log *slog.Logger
 
-	AccessTTL                time.Duration // 默认 15m
-	RefreshTTL               time.Duration // 默认 30d
-	MaxSessionLife           time.Duration // refresh 生命周期上限（创建起算）
-	DeviceTTL                time.Duration // 默认 10m
-	DevicePollEvery          time.Duration // CLI 轮询间隔约定，默认 3s
-	LeaseDefault             time.Duration // task lease 默认时长
-	LeaseMin, LeaseMax       time.Duration
-	PresenceMin, PresenceMax time.Duration
+	AccessTTL       time.Duration // 默认 15m
+	RefreshTTL      time.Duration // 默认 30d
+	MaxSessionLife  time.Duration // refresh 生命周期上限（创建起算）
+	DeviceTTL       time.Duration // 默认 10m
+	DevicePollEvery time.Duration // CLI 轮询间隔约定，默认 3s
 }
 
 func NewService(db *gorm.DB, log *slog.Logger) *Service {
@@ -42,11 +40,6 @@ func NewService(db *gorm.DB, log *slog.Logger) *Service {
 		MaxSessionLife:  30 * 24 * time.Hour,
 		DeviceTTL:       10 * time.Minute,
 		DevicePollEvery: 3 * time.Second,
-		LeaseDefault:    5 * time.Minute,
-		LeaseMin:        30 * time.Second,
-		LeaseMax:        time.Hour,
-		PresenceMin:     30 * time.Second,
-		PresenceMax:     5 * time.Minute,
 	}
 }
 
@@ -130,6 +123,7 @@ func HasScope(scopes map[string]bool, scope string) *httpx.APIError {
 func (s *Service) RequireWorkspaceScopes(ctx context.Context, p *Principal, workspaceID string, need ...string) (map[string]bool, *httpx.APIError) {
 	scopes, err := s.WorkspaceScopes(ctx, p, workspaceID)
 	if err != nil {
+		s.Log.Error("scope resolution failed", "actor_id", p.ActorID, "workspace_id", workspaceID, "err", err)
 		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "scope resolution failed"}
 	}
 	if len(scopes) == 0 {
@@ -200,6 +194,11 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (re
 	email = strings.ToLower(strings.TrimSpace(email))
 	var ha model.HumanAuth
 	if e := s.DB.WithContext(ctx).Where("email = ?", email).First(&ha).Error; e != nil {
+		if !errors.Is(e, gorm.ErrRecordNotFound) {
+			// 查库失败不能伪装成“凭证错误”（那会引导用户反复改密码）。
+			s.Log.Error("login lookup failed", "err", e)
+			return "", nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "login failed"}
+		}
 		// 不区分“无此邮箱/口令错误”，避免枚举。
 		return "", nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid credentials"}
 	}
@@ -311,8 +310,16 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, ua string) (*To
 		"expires_at":              expires,
 		"last_used_at":            now,
 	}
-	if err := s.DB.WithContext(ctx).Model(&model.Session{}).Where("id = ?", sess.ID).Updates(updates).Error; err != nil {
-		return nil, err
+	// 条件轮换：WHERE 里带旧 hash。并发双刷新时只有一方成功；
+	// 失败方拿到的是刚被轮换掉的 token，按无效处理（不撤族——赢的那方
+	// 是合法客户端，不能被并发输家连坐）。
+	res := s.DB.WithContext(ctx).Model(&model.Session{}).
+		Where("id = ? AND refresh_token_hash = ?", sess.ID, hash).Updates(updates)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "refresh token superseded by a newer one"}
 	}
 	return &TokenPair{
 		AccessToken:  newAccess,
@@ -340,6 +347,11 @@ func (s *Service) revokeFamily(ctx context.Context, sess *model.Session, reason 
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	if refreshToken == "" {
 		return nil
+	}
+	// logout 是公共端点：桩模式（无库）下不能像受保护端点那样被
+	// Authenticate 挡住，必须显式防 nil。
+	if _, dbErr := s.dbOrError(); dbErr != nil {
+		return dbErr
 	}
 	return s.DB.WithContext(ctx).Model(&model.Session{}).
 		Where("refresh_token_hash = ? AND revoked_at IS NULL", HashToken(refreshToken)).
@@ -414,12 +426,15 @@ func (s *Service) authenticateCredential(ctx context.Context, secret string) (*P
 	if err := s.DB.WithContext(ctx).First(&actor, "id = ?", cred.ActorID).Error; err != nil {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "credential actor missing"}
 	}
-	// last_used 异步更新，失败不影响请求。
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = s.DB.WithContext(bgCtx).Model(&model.Credential{}).Where("id = ?", cred.ID).Update("last_used_at", time.Now()).Error
-	}()
+	// last_used 异步更新，失败不影响请求；按分钟节流，避免每请求一条
+	// UPDATE（高频 agent 场景下是纯写放大）。
+	if cred.LastUsedAt == nil || time.Since(*cred.LastUsedAt) > time.Minute {
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = s.DB.WithContext(bgCtx).Model(&model.Credential{}).Where("id = ?", cred.ID).Update("last_used_at", time.Now()).Error
+		}()
+	}
 	return &Principal{ActorID: cred.ActorID, Kind: actor.Kind, AuthKind: "credential", Credential: &cred}, nil
 }
 

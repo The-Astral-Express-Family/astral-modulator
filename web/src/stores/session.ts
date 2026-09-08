@@ -1,6 +1,8 @@
 // 会话 store：Web 会话模型（architecture §8.4 / TODO.md D6）。
 // refresh token 存 HttpOnly Cookie（JS 不可读）；access token 存内存，
-// 过期前用 Cookie 静默续期。access 通过 tokenRef 注入 apiFetch 的 Bearer 头。
+// 到期前 60s 用 Cookie 静默续期（renewal timer）。access 通过
+// currentAccessToken 注入 apiFetch 的 Bearer 头；即使续期间隙错过，
+// 服务端对无 Bearer 请求也会回退 Cookie session 鉴权。
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -12,6 +14,7 @@ import type { Actor, Capabilities, WellKnown } from '../api/types'
 // access token 内存态（模块级，刷新页面即失效——符合文档要求不进 JS 可读持久存储）。
 let accessToken: string | null = null
 let accessExpiresAt = 0
+let renewalTimer: ReturnType<typeof setTimeout> | null = null
 
 export function currentAccessToken(): string | null {
   if (accessToken && Date.now() < accessExpiresAt - 30_000) return accessToken
@@ -24,6 +27,34 @@ setAuthTokenProvider(currentAccessToken)
 function setAccessToken(pair: { access_token: string; expires_in: number }): void {
   accessToken = pair.access_token
   accessExpiresAt = Date.now() + pair.expires_in * 1000
+}
+
+// scheduleRenewal 到期前 60s 静默续期；失败不打断用户（Cookie 兜底），
+// 下一次 API 401 时由登录页流程处理。
+function scheduleRenewal(): void {
+  if (renewalTimer) clearTimeout(renewalTimer)
+  if (!accessToken) return
+  const delay = Math.max(accessExpiresAt - Date.now() - 60_000, 1_000)
+  renewalTimer = setTimeout(() => {
+    renewalTimer = null
+    if (!accessToken) return
+    authApi
+      .refreshWithCookie()
+      .then(setAccessToken)
+      .then(scheduleRenewal)
+      .catch(() => {
+        // 续期失败（Cookie 失效/网络）：保留当前 token 至自然过期，
+        // 后续请求走服务端 Cookie 回退或 401。
+      })
+  }, delay)
+}
+
+function clearSession(): void {
+  if (renewalTimer) {
+    clearTimeout(renewalTimer)
+    renewalTimer = null
+  }
+  accessToken = null
 }
 
 export const useSessionStore = defineStore('session', () => {
@@ -48,6 +79,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const pair = await authApi.refreshWithCookie()
       setAccessToken(pair)
+      scheduleRenewal()
       const me = await authApi.getMe()
       actor.value = me.actor
     } catch {
@@ -63,6 +95,7 @@ export const useSessionStore = defineStore('session', () => {
     await authApi.login(email, password)
     const pair = await authApi.refreshWithCookie()
     setAccessToken(pair)
+    scheduleRenewal()
     const me = await authApi.getMe()
     actor.value = me.actor
   }
@@ -71,7 +104,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       await authApi.logout()
     } finally {
-      accessToken = null
+      clearSession()
       actor.value = null
     }
   }

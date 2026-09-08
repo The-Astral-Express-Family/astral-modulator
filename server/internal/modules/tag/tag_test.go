@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
@@ -29,7 +28,7 @@ func setup(t *testing.T) *fixture {
 	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, discardLogger())
-	m := &Module{DB: db, Audit: &audit.GormRecorder{DB: db}, Auth: svc}
+	m := &Module{DB: db, Auth: svc}
 
 	human := &model.Actor{ID: "usr_h1", Kind: "human", DisplayName: "H"}
 	if err := db.Create(human).Error; err != nil {

@@ -24,9 +24,8 @@ import (
 const proposalTTL = 120 * time.Second // 只够“三思”，不够挂机
 
 type Module struct {
-	DB    *gorm.DB
-	Audit *audit.GormRecorder
-	Auth  *auth.Service
+	DB   *gorm.DB
+	Auth *auth.Service
 }
 
 func (m *Module) RegisterRoutes(r chi.Router) {
@@ -76,7 +75,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	for _, t := range tags {
 		items = append(items, tagDTO{ID: t.ID, Name: t.Name})
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": nil})
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }
 
 // propose：两步确认第一步。不创建正式 tag；返回全量 existing_tags 供比对。
@@ -116,7 +115,7 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 		var target model.Tag
 		err := m.DB.WithContext(r.Context()).First(&target, "id = ? AND workspace_id = ?", *in.TargetTagID, wsID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "target tag not found"})
+			httpx.WriteError(w, r, httpx.NotFound("target tag not found"))
 			return
 		}
 		if err != nil {
@@ -156,7 +155,7 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 		TargetTagID:     in.TargetTagID,
 		ConfirmCodeHash: auth.HashToken(code),
 		Status:          "pending",
-		RequestID:       strPtr(r.Header.Get("X-Astral-Request-Id")),
+		RequestID:       strPtr(r.Header.Get(httpx.HeaderRequestID)),
 		ExpiresAt:       now.Add(proposalTTL),
 		CreatedAt:       now,
 	}
@@ -212,7 +211,7 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 		var proposal model.TagProposal
 		e := tx.First(&proposal, "id = ?", proposalID).Error
 		if errors.Is(e, gorm.ErrRecordNotFound) {
-			return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "proposal not found"}
+			return httpx.NotFound("proposal not found")
 		}
 		if e != nil {
 			return e
@@ -272,7 +271,7 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 				return res.Error
 			}
 			if res.RowsAffected == 0 {
-				return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "target tag not found"}
+				return httpx.NotFound("target tag not found")
 			}
 			tag.ID, tag.Name = *proposal.TargetTagID, name
 			evType = event.TypeTagRenamed
@@ -282,7 +281,7 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 				return res.Error
 			}
 			if res.RowsAffected == 0 {
-				return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "target tag not found"}
+				return httpx.NotFound("target tag not found")
 			}
 			tag.ID, tag.Name = *proposal.TargetTagID, name
 			evType = event.TypeTagDeleted

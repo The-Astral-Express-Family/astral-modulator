@@ -12,7 +12,7 @@
 
 | 契约 | 服务端实现 | 备注 |
 |---|---|---|
-| 错误码 enum | `server/internal/httpx/errors.go` | TODO(phase-2) contract test 防漂移 |
+| 错误码 enum | `server/internal/httpx/errors.go` | openapi_contract_test 双向防漂移 |
 | 事件 enum/envelope | `server/internal/modules/event/types.go` | 同上 |
 | ID 前缀 | `server/internal/ids/ids.go` | 新前缀需登记 TODO.md |
 | 路由 | 各模块 `RegisterRoutes` | 路径必须与 openapi 一字不差 |

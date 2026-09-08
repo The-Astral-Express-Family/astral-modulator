@@ -28,7 +28,8 @@
 - `docs/sync-semantics.md` — Markdown 三方同步、revision/hash、冲突与删除语义。
 - `docs/security.md` — Actor/Credential、Scope、审批、Audit、威胁模型。
 - `docs/deployment.md` — 服务端部署与数据库升级。
-- `docs/roadmap.md` — Phase 0–6、MVP Definition of Done。
+- `docs/看我看我.md` — 人工维护的原始构想笔记（AI 协作者只读，不修改不删减）。
+- `docs/roadmap.md` — 里程碑视图与 MVP Definition of Done（实施 Phase 划分见 architecture.md §27）。
 
 ## ADR
 

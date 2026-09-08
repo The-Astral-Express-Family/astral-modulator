@@ -21,6 +21,11 @@ func PrincipalFrom(ctx context.Context) *Principal {
 	return nil
 }
 
+// WithPrincipal 把主体注入 context（Authenticate 中间件与各模块测试共用）。
+func WithPrincipal(ctx context.Context, p *Principal) context.Context {
+	return context.WithValue(ctx, ctxKeyPrincipal{}, p)
+}
+
 // Authenticate 是 HTTP 中间件：解析三种凭证来源（Bearer access /
 // Bearer credential / Cookie session），把 Principal 放入 context。
 // 失败统一走 httpx 错误 envelope（CLI 依赖稳定 error.code）。
@@ -37,6 +42,6 @@ func (s *Service) Authenticate(next http.Handler) http.Handler {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyPrincipal{}, p)))
+		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 	})
 }

@@ -1,8 +1,10 @@
 // Package presence 模块：短生命周期展示状态（architecture §6.8）。
-// Presence 不是任务所有权；offline 由 expires_at 读路径派生。
+// Presence 按 (actor, workspace) 一行：同一 actor 可在多个 workspace 各自
+// heartbeat，互不影响。不是任务所有权；offline 由 expires_at 读路径派生。
 package presence
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -15,9 +17,15 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 )
 
+// TTL 钳制边界（openapi PresenceInput.ttl_seconds 的服务端约束）。
+var (
+	TTLDefault = 90 * time.Second
+	TTLMin     = 30 * time.Second
+	TTLMax     = 5 * time.Minute
+)
+
 type Module struct {
 	DB   *gorm.DB
-	Hub  *event.Hub
 	Auth *auth.Service
 }
 
@@ -62,28 +70,20 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 	switch in.State {
 	case "idle", "planning", "working", "waiting", "blocked", "reviewing":
 	default:
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid state"})
+		httpx.WriteError(w, r, httpx.Invalid("invalid state"))
 		return
 	}
-	ttl := time.Duration(in.TTLSeconds) * time.Second
-	if ttl <= 0 {
-		ttl = 90 * time.Second
-	}
-	if ttl < m.Auth.PresenceMin {
-		ttl = m.Auth.PresenceMin
-	}
-	if ttl > m.Auth.PresenceMax {
-		ttl = m.Auth.PresenceMax // 服务端钳制，防“声明一周在线”（openapi PresenceInput.ttl_seconds 边界）
-	}
+	ttl := clampTTL(in.TTLSeconds)
 	now := time.Now()
 	row := model.Presence{
 		ActorID: p.ActorID, WorkspaceID: wsID, State: in.State,
 		CurrentTaskID: in.CurrentTaskID, Note: in.Note,
 		LastHeartbeatAt: now, ExpiresAt: now.Add(ttl),
 	}
-	// upsert（sqlite/PG 双方言：先删后插，串行写安全；TODO(phase-4): ON CONFLICT 化）。
+	// upsert（sqlite/PG 双方言：先删后插，串行写安全；TODO(phase-6): ON CONFLICT 化）。
+	// 删除只限本 workspace：actor 在其它 workspace 的 presence 不受影响。
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("actor_id = ?", p.ActorID).Delete(&model.Presence{}).Error; err != nil {
+		if err := tx.Where("actor_id = ? AND workspace_id = ?", p.ActorID, wsID).Delete(&model.Presence{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&row).Error; err != nil {
@@ -103,6 +103,8 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// list 按 expires_at 读路径派生 offline；actor 展示名一次 IN 查询取回。
+// 已过期的行保留（GUI 需要“刚离开”的展示），派生为 offline。
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeWorkspaceRead); apiErr != nil {
@@ -114,6 +116,22 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
+	actorIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		actorIDs = append(actorIDs, row.ActorID)
+	}
+	names := map[string]string{}
+	if len(actorIDs) > 0 {
+		var actors []model.Actor
+		if err := m.DB.WithContext(r.Context()).Select("id", "display_name").
+			Where("id IN ?", actorIDs).Find(&actors).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.RespondError(w, r, err)
+			return
+		}
+		for _, a := range actors {
+			names[a.ID] = a.DisplayName
+		}
+	}
 	now := time.Now()
 	items := make([]presenceDTO, 0, len(rows))
 	for _, row := range rows {
@@ -121,16 +139,26 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		if row.ExpiresAt.Before(now) {
 			state = "offline" // 读路径派生（不落库）
 		}
-		var actor model.Actor
-		display := ""
-		_ = m.DB.WithContext(r.Context()).Select("display_name").First(&actor, "id = ?", row.ActorID).Error
-		display = actor.DisplayName
 		items = append(items, presenceDTO{
-			ActorID: row.ActorID, DisplayName: display, State: state,
+			ActorID: row.ActorID, DisplayName: names[row.ActorID], State: state,
 			CurrentTaskID: row.CurrentTaskID, Note: row.Note,
 			LastHeartbeatAt: row.LastHeartbeatAt.UTC().Format(time.RFC3339),
 			ExpiresAt:       row.ExpiresAt.UTC().Format(time.RFC3339),
 		})
 	}
 	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items})
+}
+
+func clampTTL(in int) time.Duration {
+	ttl := time.Duration(in) * time.Second
+	if ttl <= 0 {
+		ttl = TTLDefault
+	}
+	if ttl < TTLMin {
+		ttl = TTLMin
+	}
+	if ttl > TTLMax {
+		ttl = TTLMax // 服务端钳制，防“声明一周在线”
+	}
+	return ttl
 }

@@ -137,8 +137,9 @@ v0.1：
 
 - TODO 树使用 adjacency list：`parent_id`；
 - Tag 使用标准关系表；
-- 模糊检索使用 `pg_trgm`；
-- 路径查询先用 recursive CTE；
+- 搜索按 D7 在应用层实现：Go RE2（regex 过滤）+ 字符 trigram（fuzzy 排序），
+  候选集封顶；`pg_trgm`/POSIX SQL 只作为规模触发后的回迁路径（见 §13）；
+- 路径查询先用 recursive CTE（当前循环检测为应用层遍历）；
 - 真遇到深树性能问题后，再考虑 materialized path / `ltree`；
 - 不提前引入 MongoDB/Elastic。
 
@@ -519,13 +520,15 @@ fuzzy
   -> pagination
 ```
 
-PostgreSQL：
+实现决策（TODO.md D7）：regex 与 fuzzy 都在 Go 应用层完成——
 
-- regex：POSIX regex；
-- fuzzy：`pg_trgm` similarity / `%` operator；
-- 常用 searchable text 可建立 trigram GIN/GiST index。
+- regex：Go `regexp`（RE2，线性时间，天然免疫 ReDoS；
+  原先担心的 POSIX regex 拖垮数据库问题在此路径上不存在）；
+- fuzzy：字符 trigram Jaccard 相似度（与 pg_trgm 语义近似）；
+- 结构化过滤在 SQL 内完成，候选集封顶（当前 2000 行）后进入内存过滤排序。
 
-必须设置输入长度、超时与 statement timeout，防止用户 regex 拖垮数据库。
+回迁 `pg_trgm`/POSIX SQL + statement_timeout 的触发条件：单 workspace 任务量到万级
+或出现搜索延迟 SLO。实现隔离在 `task/search.go`，语义不变。
 
 API 示例：
 
@@ -937,20 +940,22 @@ Web 不承担 CLI 多平台发行。
 │  ├─ roadmap.md
 │  └─ adr/
 ├─ server/
-│  ├─ cmd/astral-server/
+│  ├─ cmd/astral-server/          # 入口：配置、依赖装配、生命周期
 │  ├─ internal/
-│  │  ├─ auth/
-│  │  ├─ workspace/
-│  │  ├─ task/
-│  │  ├─ tag/
-│  │  ├─ memory/
-│  │  ├─ document/
-│  │  ├─ message/
-│  │  ├─ presence/
-│  │  ├─ event/
-│  │  └─ audit/
-│  ├─ migrations/
-│  └─ tests/
+│  │  ├─ app/                     # 路由装配 + openapi/事件 契约测试门
+│  │  ├─ background/              # 周期任务统一 goroutine
+│  │  ├─ config/
+│  │  ├─ httpx/                   # HTTP 契约层（错误 envelope/公共头/分页）
+│  │  ├─ idempotency/
+│  │  ├─ ids/
+│  │  ├─ model/                   # GORM 模型（与 migrations 手工同步）
+│  │  ├─ store/                   # 连接 + goose migration + server_meta
+│  │  ├─ testsupport/
+│  │  └─ modules/
+│  │     ├─ audit/  auth/  document/  event/  memory/
+│  │     ├─ message/  presence/  tag/  task/  workspace/
+│  ├─ migrations/                 # goose 版本化 SQL（embed）
+│  └─ tests/                      # app 级 HTTP 集成测试
 ├─ web/
 ├─ api/
 │  ├─ openapi.yaml

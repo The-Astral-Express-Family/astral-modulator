@@ -22,9 +22,9 @@ type Config struct {
 	// 服务可启动、healthz 可用，但一切依赖存储的端点返回 NOT_IMPLEMENTED/INTERNAL_ERROR，
 	// readyz 返回 503。
 	DatabaseDSN string
-	// ServerID 稳定服务器身份。为空时启动会生成临时 ID 并打 warning（仅限开发）。
-	// TODO(phase-1): 首次连库后持久化到 server_meta 表，之后以库中值为准，
-	// 环境变量只作为首启注入，避免每次重启变化导致 CLI 重复登录态。
+	// ServerID 稳定服务器身份。为空时首启生成新 ID；首启后固化进
+	// server_meta 表，之后以库中值为准（store.EnsureServerID），
+	// 环境变量只作为首启注入。
 	ServerID string
 	// AutoMigrate 启动时执行 goose up（默认 true，方便开发）。
 	// 生产多实例部署必须关闭，由部署流程显式执行 migration（deployment.md §14）。

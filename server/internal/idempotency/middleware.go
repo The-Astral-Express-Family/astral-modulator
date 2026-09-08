@@ -6,12 +6,15 @@
 //   - 挂载在鉴权之后：actor 身份来自 Principal，公共端点天然不受影响；
 //   - 只缓存 2xx 响应（4xx/5xx 可安全重试执行）；超过 bodyCacheLimit 的
 //     成功响应不缓存（执行照常）；
-//   - 并发同键：DB 主键兜底，后到者重读首到者已存响应。
+//   - 并发同键：仅做响应级去重（后到者重读首到者已存响应重放），不做
+//     执行互斥——并发双方都会完整执行业务，副作用不重复消除依赖端点
+//     自身的天然幂等（事务内唯一约束/条件更新）。
 package idempotency
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -19,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/background"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
@@ -99,7 +103,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		next.ServeHTTP(ww, r)
 
 		// 只缓存 2xx。
-		if ww.status < 200 || ww.status > 299 || ww.bodyTooBig || ww.status == 0 {
+		if ww.status < 200 || ww.status > 299 || ww.bodyTooBig {
 			return
 		}
 		row := model.IdempotencyKey{
@@ -138,6 +142,10 @@ func (m *Middleware) lookup(r *http.Request, actorID, endpoint, key string, now 
 			actorID, endpoint, key, now.Add(-RetentionWindow)).
 		First(&row).Error
 	if err != nil {
+		// miss 是正常路径；真实 DB 故障不能静默当 miss，记日志留排查线索。
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			m.Log.Warn("idempotency lookup failed", "err", err)
+		}
 		return cachedResponse{}, false
 	}
 	return cachedResponse{StatusCode: row.StatusCode, ContentType: row.ContentType, Body: row.Body}, true
@@ -156,24 +164,15 @@ func chiRoutePattern(r *http.Request) string {
 
 // StartCleanup 周期清理超窗幂等键。由 app 装配启动。
 func StartCleanup(ctx context.Context, db *gorm.DB, log *slog.Logger, every time.Duration) {
-	go func() {
-		ticker := time.NewTicker(every)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				res := db.Where("created_at < ?", time.Now().Add(-RetentionWindow)).
-					Delete(&model.IdempotencyKey{})
-				if res.Error != nil {
-					log.Error("idempotency cleanup failed", "err", res.Error)
-					continue
-				}
-				if res.RowsAffected > 0 {
-					log.Info("idempotency keys cleaned", "rows", res.RowsAffected)
-				}
-			}
+	background.RunEvery(ctx, every, func(ctx context.Context) {
+		res := db.WithContext(ctx).Where("created_at < ?", time.Now().Add(-RetentionWindow)).
+			Delete(&model.IdempotencyKey{})
+		if res.Error != nil {
+			log.Error("idempotency cleanup failed", "err", res.Error)
+			return
 		}
-	}()
+		if res.RowsAffected > 0 {
+			log.Info("idempotency keys cleaned", "rows", res.RowsAffected)
+		}
+	})
 }

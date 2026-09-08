@@ -5,6 +5,7 @@ package workspace
 import (
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,7 +23,6 @@ import (
 type Module struct {
 	DB    *gorm.DB
 	Audit *audit.GormRecorder
-	Hub   *event.Hub
 	// Auth 提供 scope 解析与 credential 签发/吊销。
 	Auth *auth.Service
 }
@@ -172,7 +172,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	for _, ws := range rows {
 		items = append(items, toWorkspaceDTO(ws))
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": nil})
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }
 
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +197,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	updates := map[string]any{"updated_at": time.Now()}
+	updates := map[string]any{}
 	if in.Name != nil {
 		n := strings.TrimSpace(*in.Name)
 		if n == "" {
@@ -214,13 +214,26 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		}
 		updates["slug"] = s
 	}
-	if err := m.DB.WithContext(r.Context()).Model(&model.Workspace{}).Where("id = ?", ws.ID).Updates(updates).Error; err != nil {
-		writeDBError(w, r, err, "workspace name/slug already taken", httpx.CodeWorkspaceNameTaken)
-		return
-	}
+	p := auth.PrincipalFrom(r.Context())
+	// 变更与审计同事务（architecture §6.10）；workspace 改名不发领域事件
+	// （无对应事件类型，绑定 id 不受改名影响，客户端无需事件通知）。
 	var fresh model.Workspace
-	if err := m.DB.WithContext(r.Context()).First(&fresh, "id = ?", ws.ID).Error; err != nil {
-		httpx.RespondError(w, r, err)
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Workspace{}).Where("id = ?", ws.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&fresh, "id = ?", ws.ID).Error; err != nil {
+			return err
+		}
+		return audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: ws.ID, ActorID: p.ActorID,
+			Action: "workspace.update", Outcome: "allowed",
+			TargetType: "workspace", TargetID: ws.ID,
+			Details: map[string]any{"fields": updatedFields(updates)},
+		})
+	})
+	if err != nil {
+		writeDBError(w, r, err, "workspace name/slug already taken", httpx.CodeWorkspaceNameTaken)
 		return
 	}
 	httpx.WriteOK(w, r, http.StatusOK, toWorkspaceDTO(fresh))
@@ -250,7 +263,7 @@ func (m *Module) listMembers(w http.ResponseWriter, r *http.Request) {
 			Role:  mem.Role,
 		})
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": nil})
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }
 
 func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +291,7 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 	}
 	var actor model.Actor
 	if err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", in.ActorID).Error; err != nil {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "actor not found"})
+		httpx.WriteError(w, r, httpx.NotFound("actor not found"))
 		return
 	}
 	mem := model.WorkspaceMember{WorkspaceID: ws.ID, ActorID: in.ActorID, Role: in.Role}
@@ -333,7 +346,7 @@ func (m *Module) updateMember(w http.ResponseWriter, r *http.Request) {
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
-			return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "member not found"}
+			return httpx.NotFound("member not found")
 		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: ws.ID, ActorID: p.ActorID,
@@ -367,7 +380,7 @@ func (m *Module) removeMember(w http.ResponseWriter, r *http.Request) {
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
-			return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "member not found"}
+			return httpx.NotFound("member not found")
 		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: ws.ID, ActorID: p.ActorID,
@@ -408,7 +421,7 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
 	for _, a := range actors {
 		items = append(items, actorDTO{ID: a.ID, Kind: a.Kind, DisplayName: a.DisplayName})
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": nil})
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }
 
 func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
@@ -441,15 +454,21 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 		prefix = ids.Service
 	}
 	actor := model.Actor{ID: ids.New(prefix), Kind: in.Kind, DisplayName: in.DisplayName}
-	if err := m.DB.WithContext(r.Context()).Create(&actor).Error; err != nil {
+	// agent actor 创建不发领域事件（无对应事件类型，待契约补充）；审计随事务落库。
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&actor).Error; err != nil {
+			return err
+		}
+		return audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: ws.ID, ActorID: p.ActorID,
+			Action: "agent.create", Outcome: "allowed",
+			TargetType: "actor", TargetID: actor.ID,
+		})
+	})
+	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	_ = m.Audit.Record(r.Context(), audit.Entry{
-		WorkspaceID: ws.ID, ActorID: p.ActorID,
-		Action: "agent.create", Outcome: "allowed",
-		TargetType: "actor", TargetID: actor.ID,
-	})
 	httpx.WriteOK(w, r, http.StatusCreated, actorDTO{ID: actor.ID, Kind: actor.Kind, DisplayName: actor.DisplayName})
 }
 
@@ -458,7 +477,7 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "agent_id")
 	var actor model.Actor
 	if err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", agentID).Error; err != nil {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "agent not found"})
+		httpx.WriteError(w, r, httpx.NotFound("agent not found"))
 		return
 	}
 	if actor.Kind != "agent" && actor.Kind != "service" {
@@ -534,7 +553,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 	credentialID := chi.URLParam(r, "credential_id")
 	var cred model.Credential
 	if err := m.DB.WithContext(r.Context()).First(&cred, "id = ?", credentialID).Error; err != nil {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "credential not found"})
+		httpx.WriteError(w, r, httpx.NotFound("credential not found"))
 		return
 	}
 	wsScope := ""
@@ -611,6 +630,16 @@ func slugify(s string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+// updatedFields 返回 updates map 的键名列表（审计用，不落变更值）。
+func updatedFields(updates map[string]any) []string {
+	keys := make([]string, 0, len(updates))
+	for k := range updates {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func writeDBError(w http.ResponseWriter, r *http.Request, err error, conflictMsg, conflictCode string) {

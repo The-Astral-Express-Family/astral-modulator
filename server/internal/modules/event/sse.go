@@ -100,9 +100,11 @@ func (h *SSEHandler) stream(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		default:
-			if replayErr := h.replay(w, flusher, workspaceID, lastEventID); replayErr != nil {
-				fmt.Fprintf(w, ": replay interrupted (%v)\n\n", replayErr)
-				flusher.Flush()
+			// 重放推进去重前沿：replay 与缓冲中的实时投递有重叠区间，
+			// 补发到哪一行，实时流就从哪一行之后放行（见下方循环过滤）。
+			lastReplayed := h.replay(w, flusher, workspaceID, lastEventID)
+			if lastReplayed != "" {
+				lastEventID = lastReplayed
 			}
 		}
 	}
@@ -172,7 +174,9 @@ func (h *SSEHandler) cursorHasGap(r *http.Request, workspaceID, cursor string) (
 }
 
 // replay 按 id 升序批量补发 (cursor, +inf) 的已投递事件。
-func (h *SSEHandler) replay(w http.ResponseWriter, flusher http.Flusher, workspaceID, cursor string) error {
+// 返回实际补发到的最后一行 id：查询出错或客户端断开时为止损边界，
+// 调用方用它推进实时流的去重前沿，并输出注释行说明中断。
+func (h *SSEHandler) replay(w http.ResponseWriter, flusher http.Flusher, workspaceID, cursor string) (last string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	for {
@@ -181,7 +185,9 @@ func (h *SSEHandler) replay(w http.ResponseWriter, flusher http.Flusher, workspa
 			Where("id > ? AND workspace_id = ?", cursor, workspaceID).
 			Order("id ASC").Limit(replayBatch).Find(&rows).Error
 		if err != nil {
-			return err
+			fmt.Fprintf(w, ": replay interrupted (%v)\n\n", err)
+			flusher.Flush()
+			return last
 		}
 		for _, row := range rows {
 			env, convErr := envelopeFromRow(row)
@@ -189,12 +195,12 @@ func (h *SSEHandler) replay(w http.ResponseWriter, flusher http.Flusher, workspa
 				continue
 			}
 			if !writeEvent(w, flusher, env) {
-				return errors.New("client disconnected during replay")
+				return last // 客户端断开
 			}
-			cursor = row.ID
+			cursor, last = row.ID, row.ID
 		}
 		if len(rows) < replayBatch {
-			return nil
+			return last
 		}
 	}
 }

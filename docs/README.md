@@ -6,14 +6,15 @@
 ## 阅读顺序
 
 1. [requirements.md](requirements.md) — 用户、场景、MVP 与非功能需求。
-2. [architecture.md](architecture.md) — 总体架构、模块边界与技术路线。
+2. [architecture.md](architecture.md) — 总体架构、模块边界、技术路线与
+   实施 Phase 划分（§27，Phase 编号唯一事实来源）。
 3. [../api/openapi.yaml](../api/openapi.yaml) — 公网 REST 契约唯一事实来源
    （说明见 [../api/README.md](../api/README.md)）。
 4. [protocol.md](protocol.md) — OpenAPI 之外的传输与语义约定（请求头、SSE、限流、兼容性）。
 5. [sync-semantics.md](sync-semantics.md) — Markdown 工作区的版本、同步与冲突语义。
 6. [security.md](security.md) — 身份、凭证、RBAC/Scope、审计和威胁模型。
 7. [deployment.md](deployment.md) — 服务端部署与数据库升级（CLI 分发在 astral-cli 仓库）。
-8. [roadmap.md](roadmap.md) — Phase 0–6 实施顺序和验收标准。
+8. [roadmap.md](roadmap.md) — 里程碑视图（Spike/MVP/Sync/分发/GUI）与 MVP Definition of Done。
 9. [adr/](adr/) — 关键技术选择与备选方案。
 
 > CLI 的命令 UX、输出契约与退出码文档在 `astral-cli` 仓库（docs/ARCHITECTURE.md）；

@@ -20,16 +20,10 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/migrations"
 )
 
-// Open 建立连接并执行 goose up。
-// 返回的 DB 为 nil 仅当 dsn 为空（无数据库开发模式，由调用方处理）。
+// Open 建立连接并执行 goose up。调用方保证 dsn 非空（main 已守卫桩模式）。
 func Open(ctx context.Context, dsn string, autoMigrate bool, log *slog.Logger) (*gorm.DB, error) {
-	if dsn == "" {
-		return nil, nil
-	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
-		// TODO(phase-3): 任务搜索用参数化 SQL repository（recursive CTE / trigram），
-		// 届时准备 statement_timeout 会话参数（architecture §13）。
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)

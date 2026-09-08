@@ -6,9 +6,6 @@
 package ids
 
 import (
-	"regexp"
-	"strings"
-
 	"github.com/google/uuid"
 )
 
@@ -40,13 +37,7 @@ const (
 	Approval    Prefix = "apv" // human approval request（architecture §22）
 )
 
-// 前缀长度 2~3（现存最短为 ws_）；UUIDv7 小写十六进制。
-var valid = regexp.MustCompile(`^[a-z]{2,3}_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-
 // New 生成 `<prefix>_<uuidv7>`。
 func New(p Prefix) string {
 	return string(p) + "_" + uuid.Must(uuid.NewV7()).String()
 }
-
-// Validate 校验 ID 形状（前缀 + UUIDv7）。用于入参快速失败，避免脏数据入库。
-func Validate(id string) bool { return valid.MatchString(strings.ToLower(id)) }

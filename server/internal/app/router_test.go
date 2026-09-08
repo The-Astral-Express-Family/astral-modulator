@@ -38,13 +38,13 @@ func newTestServer(t *testing.T) *httptest.Server {
 	mods := &Modules{
 		Idempotency: &idempotency.Middleware{DB: db, Log: log},
 		Auth:        &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
-		Workspace:   &workspace.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
-		Task:        &task.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
+		Workspace:   &workspace.Module{DB: db, Audit: recorder, Auth: svc},
+		Task:        &task.Module{DB: db, Auth: svc},
 		Tag:         &tag.Module{},
 		Memory:      &memory.Module{},
 		Document:    &document.Module{},
-		Message:     &message.Module{DB: db, Hub: hub, Auth: svc},
-		Presence:    &presence.Module{DB: db, Hub: hub, Auth: svc},
+		Message:     &message.Module{DB: db, Auth: svc},
+		Presence:    &presence.Module{DB: db, Auth: svc},
 		Audit:       &audit.Module{},
 		Events:      &event.SSEHandler{Hub: hub, DB: db},
 	}

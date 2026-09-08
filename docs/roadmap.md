@@ -1,14 +1,18 @@
-# Astral Modulator 开发路线图初稿
+# Astral Modulator 开发路线图
 
-> 状态：Accepted baseline（Phase 划分仍有效）
+> 状态：Accepted baseline
 >
 > 原则：先验证协作语义和分发链路，再扩功能。
 >
-> **当前进度**以根目录 [TODO.md](../TODO.md) 为准（Phase 0-2 已大体落地：
-> 服务端 auth/workspace/task/presence/message 全量实装、Web 控制台可登录，
-> CLI 骨架就绪待接 device flow）。
+> **Phase 编号唯一事实来源是 [architecture.md §27](architecture.md)**
+> （实施顺序：0 协议 → 1 Auth → 2 Workspace → 3 TODO/搜索/Tags →
+> 4 Presence/Event → 5 Memory/Sync → 6 GUI/Hardening）。本文是同一工作的
+> **里程碑视图**，用里程碑名而非编号，避免与实施 Phase 混淆。
+>
+> **当前进度**以根目录 [TODO.md](../TODO.md) 为准（实施 Phase 0-4 已落地，
+> CLI 骨架就绪待接 device flow；Memory/Sync 与 GUI 视图未开工）。
 
-## Phase 0 — Design Baseline（已完成）
+## 里程碑：Design Baseline（已完成）
 
 目标：在写业务代码前把最容易导致返工的决策做成可讨论的规格。
 
@@ -30,7 +34,7 @@ Exit criteria：
 - 确认 public protocol；
 - 确认 CLI build/dependency baseline。
 
-## Phase 1 — End-to-End Spike
+## 里程碑：End-to-End Spike（对应实施 Phase 0-2）
 
 只做一条链路：
 
@@ -78,7 +82,7 @@ CLI login
 
 Exit criteria：两个 CLI 实例在竞争同一 Task 时只有一个 Claim 成功，并且 GUI/SSE 可实时观察。
 
-## Phase 2 — MVP Collaboration
+## 里程碑：MVP Collaboration（对应实施 Phase 1-4）
 
 增加：
 
@@ -94,7 +98,7 @@ Exit criteria：两个 CLI 实例在竞争同一 Task 时只有一个 Claim 成�
 
 Exit criteria：可以让两个真实 LLM Agent 完成一个有依赖的协作任务，不需要人工直接改数据库。
 
-## Phase 3 — Markdown Sync
+## 里程碑：Markdown Sync（对应实施 Phase 5）
 
 增加：
 
@@ -109,7 +113,7 @@ Exit criteria：可以让两个真实 LLM Agent 完成一个有依赖的协作�
 
 Exit criteria：并发修改不会静默丢失，断网/重试后状态仍一致。
 
-## Phase 4 — Distribution MVP
+## 里程碑：Distribution MVP（astral-cli 仓库主导）
 
 ### Windows
 
@@ -139,7 +143,7 @@ Exit criteria：并发修改不会静默丢失，断网/重试后状态仍一致
 
 Exit criteria：新机器无需开发工具链即可安装并登录。
 
-## Phase 5 — Human Control Plane
+## 里程碑：Human Control Plane（对应实施 Phase 6）
 
 Web GUI：
 
@@ -155,7 +159,7 @@ Web GUI：
 
 Exit criteria：Human 可以只通过 GUI 监控协作并完成常见干预。
 
-## Phase 6 — Integration & Scale
+## 里程碑：Integration & Scale（按需启动）
 
 按真实需求选择，不预先承诺：
 

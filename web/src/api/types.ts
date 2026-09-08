@@ -4,6 +4,8 @@
 
 export type ID = string
 
+// 与 api/schemas/error.json 的 ErrorCode enum 保持一致（含 NOT_FOUND 等
+// 服务端 httpx/errors.go 全量稳定码）。
 export type ErrorCode =
   | 'AUTH_REQUIRED'
   | 'TOKEN_EXPIRED'
@@ -12,6 +14,7 @@ export type ErrorCode =
   | 'SERVER_NOT_FOUND'
   | 'WORKSPACE_NOT_FOUND'
   | 'WORKSPACE_ALREADY_BOUND'
+  | 'WORKSPACE_NAME_TAKEN'
   | 'TASK_NOT_FOUND'
   | 'TASK_ALREADY_CLAIMED'
   | 'TASK_LEASE_EXPIRED'
@@ -22,6 +25,9 @@ export type ErrorCode =
   | 'RATE_LIMITED'
   | 'CLIENT_VERSION_UNSUPPORTED'
   | 'VALIDATION_FAILED'
+  | 'NOT_FOUND'
+  | 'AUTHORIZATION_PENDING'
+  | 'SLOW_DOWN'
   | 'INTERNAL_ERROR'
   | 'NOT_IMPLEMENTED'
 
@@ -63,48 +69,12 @@ export interface Actor {
   display_name: string
 }
 
-export interface Me {
-  actor: Actor
-  session?: { client_type: 'cli' | 'web'; expires_at?: string }
-}
-
 export interface Workspace {
   id: ID
   name: string
   slug: string
   created_at: string
   updated_at?: string
-}
-
-export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled'
-export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
-
-export interface Lease {
-  holder_actor_id: ID
-  expires_at: string
-  renewed_at?: string
-}
-
-export interface Tag {
-  id: ID
-  workspace_id: ID
-  name: string
-}
-
-export interface Task {
-  id: ID
-  workspace_id: ID
-  parent_id: ID | null
-  title: string
-  description?: string
-  status: TaskStatus
-  priority?: TaskPriority
-  assignee_actor_id?: ID | null
-  revision: number
-  tags?: Tag[]
-  lease?: Lease | null
-  created_at: string
-  updated_at: string
 }
 
 // SSE 事件 envelope（api/schemas/event.json）。

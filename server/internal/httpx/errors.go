@@ -10,11 +10,9 @@ import (
 	"net/http"
 )
 
-// 稳定错误码。此列表必须与 api/openapi.yaml 中 Error.code 的 enum 保持一致；
-// 变更错误码属于协议变更，需走 api/README.md 的协议发布流程。
-//
-// TODO(phase-2): 增加 contract test，校验本文件常量与 openapi.yaml enum 一致，
-// 防止两端漂移（当前靠人工同步）。
+// 稳定错误码。此列表必须与 api/openapi.yaml 的 ErrorCode enum 及
+// api/schemas/error.json 保持一致（openapi_contract_test 强制双向同步）；
+// 变更错误码属于协议变更，需走 api/README.md 的协议发布流程并在 TODO.md 登记。
 const (
 	CodeAuthRequired             = "AUTH_REQUIRED"
 	CodeTokenExpired             = "TOKEN_EXPIRED"
@@ -22,18 +20,23 @@ const (
 	CodeInsufficientScope        = "INSUFFICIENT_SCOPE"
 	CodeServerNotFound           = "SERVER_NOT_FOUND"
 	CodeWorkspaceNotFound        = "WORKSPACE_NOT_FOUND"
-	CodeWorkspaceAlreadyBound    = "WORKSPACE_ALREADY_BOUND"
+	CodeWorkspaceAlreadyBound    = "WORKSPACE_ALREADY_BOUND" // 预留：credential workspace 绑定冲突
 	CodeTaskNotFound             = "TASK_NOT_FOUND"
 	CodeTaskAlreadyClaimed       = "TASK_ALREADY_CLAIMED"
 	CodeTaskLeaseExpired         = "TASK_LEASE_EXPIRED"
 	CodeTagProposalExpired       = "TAG_PROPOSAL_EXPIRED"
 	CodeTagAlreadyExists         = "TAG_ALREADY_EXISTS"
 	CodeRevisionConflict         = "REVISION_CONFLICT"
-	CodeDocumentConflict         = "DOCUMENT_CONFLICT"
-	CodeRateLimited              = "RATE_LIMITED"
-	CodeClientVersionUnsupported = "CLIENT_VERSION_UNSUPPORTED"
+	CodeDocumentConflict         = "DOCUMENT_CONFLICT"          // 预留：phase-5 document sync
+	CodeRateLimited              = "RATE_LIMITED"               // 预留：phase-6 rate limit
+	CodeClientVersionUnsupported = "CLIENT_VERSION_UNSUPPORTED" // 预留：版本协商
 	CodeValidationFailed         = "VALIDATION_FAILED"
 	CodeInternalError            = "INTERNAL_ERROR"
+
+	// CodeNotFound 是通用 404：/api/v1 未知路由，以及没有专用码的次级资源
+	// （成员/凭证/tag/proposal 等）不存在。资源是端点主语的（task/workspace）
+	// 用各自的 *_NOT_FOUND 专用码。
+	CodeNotFound = "NOT_FOUND"
 
 	// Device Flow 轮询语义（A1，RFC 8628）：均返回 HTTP 400 + retryable=true。
 	CodeAuthorizationPending = "AUTHORIZATION_PENDING"
@@ -74,6 +77,22 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
+
+// NotFound / Invalid / Conflict 是常用 APIError 构造器，消除手写字面量：
+//   - NotFound：次级资源不存在（主资源用各模块专用 *_NOT_FOUND 码）；
+//   - Invalid：请求体/参数校验失败（400 VALIDATION_FAILED）；
+//   - Conflict：通用状态冲突（409，code 指定细分语义）。
+func NotFound(message string) *APIError {
+	return &APIError{Status: http.StatusNotFound, Code: CodeNotFound, Message: message}
+}
+
+func Invalid(message string) *APIError {
+	return &APIError{Status: http.StatusBadRequest, Code: CodeValidationFailed, Message: message}
+}
+
+func Conflict(code, message string) *APIError {
+	return &APIError{Status: http.StatusConflict, Code: code, Message: message}
+}
 
 // IsRetryable 返回该错误是否建议客户端重试。
 func (e *APIError) IsRetryable() bool {

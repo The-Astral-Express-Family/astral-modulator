@@ -171,6 +171,8 @@ type TagProposal struct {
 func (TagProposal) TableName() string { return "tag_proposals" }
 
 // TaskTag 见 00004_tags.sql：task 与 tag 多对多关联。
+// 目前只经参数化 SQL（task/search.go 的 JOIN）使用，无 GORM 读写路径；
+// 保留结构体供 AutoMigrate 建表（sqlite 测试库）。
 type TaskTag struct {
 	TaskID  string `gorm:"primaryKey;size:40"`
 	TagID   string `gorm:"primaryKey;size:40"`
@@ -210,10 +212,12 @@ type AuditEntry struct {
 
 func (AuditEntry) TableName() string { return "audit_log" }
 
-// Presence 见 00008_presence_messages.sql。offline 是读路径派生值，不落库。
+// Presence 见 00008_presence_messages.sql / 00010（主键改为 actor+workspace）。
+// 同一 actor 可在多个 workspace 各自 heartbeat，互不覆盖；
+// offline 是读路径派生值，不落库。
 type Presence struct {
 	ActorID         string  `gorm:"primaryKey;size:40"`
-	WorkspaceID     string  `gorm:"index;size:40"`
+	WorkspaceID     string  `gorm:"primaryKey;size:40;index"`
 	State           string  `gorm:"size:16"`
 	CurrentTaskID   *string `gorm:"size:40"`
 	Note            *string

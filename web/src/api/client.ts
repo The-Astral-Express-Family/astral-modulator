@@ -1,14 +1,16 @@
 // 统一 HTTP 客户端：公共请求头、错误 envelope 解析、request id。
 // 所有请求用相对路径（开发期由 Vite 代理，生产同源），禁止硬编码 localhost。
 
+import type { ApiErrorBody, ErrorCode } from './types'
+
 export class AstralApiError extends Error {
-  readonly code: string
+  readonly code: ErrorCode
   readonly retryable: boolean
   readonly details?: Record<string, unknown>
   readonly requestId: string
   readonly status: number
 
-  constructor(status: number, body: { code: string; message: string; retryable: boolean; details?: Record<string, unknown>; request_id: string }) {
+  constructor(status: number, body: ApiErrorBody) {
     super(body.message)
     this.name = 'AstralApiError'
     this.status = status
@@ -19,8 +21,13 @@ export class AstralApiError extends Error {
   }
 }
 
+/** 面向 UI 的单行错误文案：API 错误带 code，其余原样字符串化。 */
+export function formatApiError(e: unknown): string {
+  return e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
+}
+
 const CLIENT = 'web'
-// TODO(phase-1): 与服务端 version 对齐来源（读 package.json 或构建注入），避免双写。
+// TODO(phase-2): 与服务端 version 对齐来源（读 package.json 或构建注入），避免双写。
 const CLIENT_VERSION = '0.1.0'
 
 // Bearer 来源由 session store 注入（避免 client→store 循环依赖）。
@@ -74,7 +81,7 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
   }
 
   if (!resp.ok) {
-    const env = json as { error?: { code: string; message: string; retryable: boolean; details?: Record<string, unknown>; request_id: string } } | undefined
+    const env = json as { error?: ApiErrorBody } | undefined
     if (env?.error) {
       throw new AstralApiError(resp.status, {
         ...env.error,

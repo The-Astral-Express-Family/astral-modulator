@@ -2,7 +2,7 @@
 // Human 本地登录页（TODO.md D6）。登录成功后跳回来源页或总览。
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AstralApiError } from '../api/client'
+import { formatApiError } from '../api/client'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
@@ -22,7 +22,7 @@ async function submit(): Promise<void> {
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
     void router.push(redirect)
   } catch (e) {
-    error.value = e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
+    error.value = formatApiError(e)
   } finally {
     busy.value = false
   }

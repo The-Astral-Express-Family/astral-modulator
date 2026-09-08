@@ -1,12 +1,12 @@
-// Package task 模块：TODO 树、原子 claim/lease（architecture §12/§17）。
-// 搜索（regex→fuzzy）与 tags proposal 属 phase-3 后续（见 TODO.md T-task-6/7）。
+// Package task 模块：TODO 树、原子 claim/lease、regex→fuzzy 搜索
+// （architecture §12/§13/§17；搜索实现决策 TODO.md D7）。
 package task
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/background"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
@@ -23,17 +24,32 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 )
 
+// Lease 时长钳制边界（openapi TaskClaimInput.lease_seconds 的服务端约束）。
+// 归属本模块：lease 是 task 领域概念，与 auth 无关。
+var (
+	LeaseDefault = 5 * time.Minute
+	LeaseMin     = 30 * time.Second
+	LeaseMax     = time.Hour
+)
+
 type Module struct {
-	DB    *gorm.DB
-	Audit *audit.GormRecorder
-	Hub   *event.Hub
-	Auth  *auth.Service
+	DB *gorm.DB
+	// Auth 提供 workspace 级 scope 解析。
+	Auth *auth.Service
+	// Log 供后台清扫等无请求上下文路径记录错误；nil 时退回 slog.Default()。
+	Log *slog.Logger
+}
+
+func (m *Module) logger() *slog.Logger {
+	if m.Log != nil {
+		return m.Log
+	}
+	return slog.Default()
 }
 
 func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/workspaces/{workspace_id}/tasks", m.create)
 	r.Get("/workspaces/{workspace_id}/tasks", m.list)
-	// search 已实装（regex→fuzzy 管线见 search.go，决策 TODO.md D7）。
 	r.Get("/workspaces/{workspace_id}/tasks/search", m.search)
 	r.Get("/tasks/{task_id}", m.get)
 	r.Patch("/tasks/{task_id}", m.update)
@@ -45,38 +61,37 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	})
 }
 
-// StartSweeper 启动租约清扫 goroutine（由 app 装配调用）。
-func (m *Module) StartSweeper(stop <-chan struct{}, every time.Duration) {
-	go func() {
-		ticker := time.NewTicker(every)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				m.sweepOnce()
-			}
-		}
-	}()
+// StartSweeper 启动租约清扫 goroutine（由 app 装配调用，ctx 取消即退出）。
+func (m *Module) StartSweeper(ctx context.Context, every time.Duration) {
+	background.RunEvery(ctx, every, func(ctx context.Context) {
+		m.sweepOnce(ctx)
+	})
 }
 
-func (m *Module) sweepOnce() {
+// sweepOnce 清扫过期租约。删除必须是条件删除（expires_at < now）：
+// 快照查询与删除之间 holder 可能已续租，无条件删除会误杀有效租约。
+func (m *Module) sweepOnce(ctx context.Context) {
 	var expired []model.TaskLease
-	err := m.DB.Where("expires_at < ?", time.Now()).Limit(100).Find(&expired).Error
+	err := m.DB.WithContext(ctx).Where("expires_at < ?", time.Now()).Limit(100).Find(&expired).Error
 	if err != nil {
+		m.logger().Error("lease sweep query failed", "err", err)
 		return
 	}
 	for _, lease := range expired {
-		err := m.DB.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Where("task_id = ?", lease.TaskID).Delete(&model.TaskLease{}).Error; err != nil {
-				return err
+		err := m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			res := tx.Where("task_id = ? AND expires_at < ?", lease.TaskID, time.Now()).Delete(&model.TaskLease{})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				// 快照后被续租/释放，本轮跳过。
+				return nil
 			}
 			var t model.Task
 			if err := tx.First(&t, "id = ?", lease.TaskID).Error; err != nil {
 				return err
 			}
-			updates := map[string]any{"assignee_actor_id": nil, "revision": t.Revision + 1, "updated_at": time.Now()}
+			updates := map[string]any{"assignee_actor_id": nil, "revision": t.Revision + 1}
 			if t.Status == "in_progress" {
 				updates["status"] = "open"
 			}
@@ -87,7 +102,7 @@ func (m *Module) sweepOnce() {
 				map[string]any{"task_id": t.ID, "previous_holder": lease.HolderActorID})
 		})
 		if err != nil {
-			continue
+			m.logger().Error("lease sweep failed", "task_id", lease.TaskID, "err", err)
 		}
 	}
 }
@@ -171,21 +186,21 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Title = strings.TrimSpace(in.Title)
 	if in.Title == "" || len(in.Title) > 500 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "title required (1-500 chars)"})
+		httpx.WriteError(w, r, httpx.Invalid("title required (1-500 chars)"))
 		return
 	}
 	if in.Priority == "" {
 		in.Priority = "normal"
 	}
 	if !validPriority(in.Priority) {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid priority"})
+		httpx.WriteError(w, r, httpx.Invalid("invalid priority"))
 		return
 	}
 	if in.ParentID != nil {
 		var parent model.Task
 		err := m.DB.WithContext(r.Context()).First(&parent, "id = ?", *in.ParentID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && parent.WorkspaceID != wsID) {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "parent must exist in the same workspace"})
+			httpx.WriteError(w, r, httpx.Invalid("parent must exist in the same workspace"))
 			return
 		}
 		if err != nil {
@@ -238,34 +253,29 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("assignee"); v != "" {
 		query = query.Where("assignee_actor_id = ?", v)
 	}
-	// cursor 分页：base64({c: created_at, i: id})，稳定序 (created_at, id)。
-	// 行值比较用 OR 展开保持 sqlite/PG 双方言兼容。
+	// cursor 分页：id 即游标。任务 ID 是 task_<uuidv7>，字典序 = 创建时间序
+	// （毫秒精度），单列比较在 sqlite/PG 下行为一致——不引入 created_at
+	// 文本格式对齐问题（drivers 存储格式不同，时间比较不可移植）。
 	if v := q.Get("cursor"); v != "" {
-		ca, id, err := decodeCursor(v)
-		if err != nil {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid cursor"})
-			return
-		}
-		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", ca, ca, id)
+		query = query.Where("id < ?", v)
 	}
 	limit := parseLimit(q.Get("limit"), 50, 200)
 
 	var rows []model.Task
-	if err := query.Order("created_at DESC, id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+	if err := query.Order("id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
 	next := ""
 	if len(rows) > limit {
 		rows = rows[:limit]
-		last := rows[len(rows)-1]
-		next = encodeCursor(last.CreatedAt, last.ID)
+		next = rows[len(rows)-1].ID
 	}
 	items := make([]taskDTO, 0, len(rows))
 	for _, t := range rows {
 		items = append(items, toTaskDTO(t, nil))
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursorPtr(next)})
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, next))
 }
 
 // search：regex 过滤 → fuzzy 排序（architecture §13 语义；CLI --regex/--fuzzy 双参数）。
@@ -294,7 +304,7 @@ func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": results, "next_cursor": nextCursorPtr(next)})
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(results, next))
 }
 
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
@@ -336,23 +346,18 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.ExpectedRevision == nil || *in.ExpectedRevision != t.Revision {
-		httpx.WriteError(w, r, &httpx.APIError{
-			Status: http.StatusConflict, Code: httpx.CodeRevisionConflict,
-			Message: "revision mismatch",
-			Details: map[string]any{"current_revision": t.Revision},
-		})
+		httpx.WriteError(w, r, revisionConflict(t.Revision))
 		return
 	}
 
 	updates := map[string]any{
 		"revision":   t.Revision + 1,
-		"updated_at": time.Now(),
 		"updated_by": p.ActorID,
 	}
 	if in.Title != nil {
 		title := strings.TrimSpace(*in.Title)
 		if title == "" || len(title) > 500 {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "title required (1-500 chars)"})
+			httpx.WriteError(w, r, httpx.Invalid("title required (1-500 chars)"))
 			return
 		}
 		updates["title"] = title
@@ -362,14 +367,14 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Status != nil {
 		if !validStatus(*in.Status) {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid status"})
+			httpx.WriteError(w, r, httpx.Invalid("invalid status"))
 			return
 		}
 		updates["status"] = *in.Status
 	}
 	if in.Priority != nil {
 		if !validPriority(*in.Priority) {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid priority"})
+			httpx.WriteError(w, r, httpx.Invalid("invalid priority"))
 			return
 		}
 		updates["priority"] = *in.Priority
@@ -380,7 +385,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 			var parentTask model.Task
 			err := m.DB.WithContext(r.Context()).First(&parentTask, "id = ?", *parent).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && parentTask.WorkspaceID != t.WorkspaceID) {
-				httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "parent must exist in the same workspace"})
+				httpx.WriteError(w, r, httpx.Invalid("parent must exist in the same workspace"))
 				return
 			}
 			if err != nil {
@@ -389,8 +394,13 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 			}
 			// 循环检测：从新 parent 向上走祖先链，遇到自己即循环。
 			// （recursive CTE 在 sqlite/PG 双方言兼容，此处用应用层遍历，树深有限。）
-			if err := m.checkCycle(r, t.ID, *parent); err != nil {
-				httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "parent change would create a cycle"})
+			cyclic, err := m.checkCycle(r, t.ID, *parent)
+			if err != nil {
+				httpx.RespondError(w, r, err)
+				return
+			}
+			if cyclic {
+				httpx.WriteError(w, r, httpx.Invalid("parent change would create a cycle"))
 				return
 			}
 		}
@@ -400,26 +410,25 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		updates["assignee_actor_id"] = *in.AssigneeActorID
 	}
 
-	// 乐观并发：条件更新。0 行 = 并发修改（revision 变了）。
-	res := m.DB.WithContext(r.Context()).Model(&model.Task{}).
-		Where("id = ? AND revision = ?", t.ID, t.Revision).Updates(updates)
-	if res.Error != nil {
-		httpx.RespondError(w, r, res.Error)
-		return
-	}
-	if res.RowsAffected == 0 {
-		var current model.Task
-		_ = m.DB.First(&current, "id = ?", t.ID).Error
-		httpx.WriteError(w, r, &httpx.APIError{
-			Status: http.StatusConflict, Code: httpx.CodeRevisionConflict,
-			Message: "revision mismatch",
-			Details: map[string]any{"current_revision": current.Revision},
-		})
-		return
-	}
+	// 单事务：条件更新（乐观并发）+ audit + outbox。业务写与事件
+	// 分离提交会让客户端在“已生效但无事件”的窗口里重试撞 REVISION_CONFLICT。
 	var fresh model.Task
-	_ = m.DB.WithContext(r.Context()).First(&fresh, "id = ?", t.ID).Error
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Task{}).
+			Where("id = ? AND revision = ?", t.ID, t.Revision).Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			var current model.Task
+			if e := tx.First(&current, "id = ?", t.ID).Error; e != nil {
+				return e
+			}
+			return revisionConflict(current.Revision)
+		}
+		if err := tx.First(&fresh, "id = ?", t.ID).Error; err != nil {
+			return err
+		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: t.WorkspaceID, ActorID: p.ActorID,
 			Action: "task.update", Outcome: "allowed",
@@ -438,40 +447,48 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, nil))
 }
 
-func (m *Module) checkCycle(r *http.Request, taskID, newParent string) error {
+// checkCycle 沿 newParent 向上遍历祖先链，返回是否形成环。
+// 祖先行缺失（脏数据/并发删除）视为无环；真实 DB 错误向上返回。
+func (m *Module) checkCycle(r *http.Request, taskID, newParent string) (bool, error) {
 	current := newParent
 	for depth := 0; depth < 64 && current != ""; depth++ {
 		if current == taskID {
-			return errors.New("cycle")
+			return true, nil
 		}
 		var t model.Task
 		err := m.DB.WithContext(r.Context()).Select("parent_id").First(&t, "id = ?", current).Error
-		if err != nil || t.ParentID == nil {
-			return nil
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if t.ParentID == nil {
+			return false, nil
 		}
 		current = *t.ParentID
 	}
-	return nil
+	return false, nil
 }
 
 // Claim 原子认领核心（HTTP handler 与测试共用；roadmap spike 验收项）。
 // 单事务内完成：revision 校验 → 抢租约 → 条件更新任务 → audit + outbox。
 func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, expectedRevision *int64, leaseSeconds int) (*model.Task, *model.TaskLease, error) {
 	var current model.Task
-	if err := m.DB.WithContext(ctx).First(&current, "id = ?", taskID).Error; err != nil {
+	err := m.DB.WithContext(ctx).First(&current, "id = ?", taskID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
 	}
-	lease := time.Duration(m.leaseSeconds(leaseSeconds)) * time.Second
+	if err != nil {
+		return nil, nil, err
+	}
+	lease := time.Duration(leaseSecondsValue(leaseSeconds)) * time.Second
 
 	var claimedLease model.TaskLease
-	err := m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. revision 校验（可选但推荐）。
 		if expectedRevision != nil && *expectedRevision != current.Revision {
-			return &httpx.APIError{
-				Status: http.StatusConflict, Code: httpx.CodeRevisionConflict,
-				Message: "revision mismatch",
-				Details: map[string]any{"current_revision": current.Revision},
-			}
+			return revisionConflict(current.Revision)
 		}
 		// 2. 原子抢租约：条件删除旧（过期或自己持有）→ 插入。
 		//    并发下第二个事务的 INSERT 会因主键冲突失败 → TASK_ALREADY_CLAIMED。
@@ -481,16 +498,16 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 		if res.Error != nil {
 			return res.Error
 		}
+		now := time.Now()
 		claimedLease = model.TaskLease{
 			TaskID:        taskID,
 			HolderActorID: p.ActorID,
-			ExpiresAt:     time.Now().Add(lease),
-			RenewedAt:     time.Now(),
-			CreatedAt:     time.Now(),
+			ExpiresAt:     now.Add(lease),
+			RenewedAt:     now,
 		}
 		if err := tx.Create(&claimedLease).Error; err != nil {
 			// 主键冲突 = 别人持有有效租约。
-			if strings.Contains(err.Error(), "UNIQUE constraint") || strings.Contains(err.Error(), "duplicate key") {
+			if isUniqueViolation(err) {
 				return &httpx.APIError{
 					Status: http.StatusConflict, Code: httpx.CodeTaskAlreadyClaimed,
 					Message: "task is already claimed by another actor",
@@ -504,7 +521,6 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 			"assignee_actor_id": p.ActorID,
 			"status":            "in_progress",
 			"revision":          current.Revision + 1,
-			"updated_at":        time.Now(),
 			"updated_by":        p.ActorID,
 		}
 		res = tx.Model(&model.Task{}).Where("id = ? AND revision = ?", taskID, current.Revision).Updates(updates)
@@ -512,11 +528,7 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
-			return &httpx.APIError{
-				Status: http.StatusConflict, Code: httpx.CodeRevisionConflict,
-				Message: "revision mismatch",
-				Details: map[string]any{"current_revision": current.Revision},
-			}
+			return revisionConflict(current.Revision)
 		}
 		// 4. audit + outbox 同事务。
 		if err := audit.RecordInTx(tx, audit.Entry{
@@ -533,8 +545,14 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 	if err != nil {
 		return nil, nil, err
 	}
+	// 认领已提交，读回失败不应整体报错：用事务内已知状态兜底构造。
 	var fresh model.Task
-	_ = m.DB.WithContext(ctx).First(&fresh, "id = ?", taskID).Error
+	if e := m.DB.WithContext(ctx).First(&fresh, "id = ?", taskID).Error; e != nil {
+		fresh = current
+		fresh.AssigneeActorID = &p.ActorID
+		fresh.Status = "in_progress"
+		fresh.Revision = current.Revision + 1
+	}
 	return &fresh, &claimedLease, nil
 }
 
@@ -565,8 +583,7 @@ func (m *Module) claim(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) renewLease(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "task_id")
-	t, apiErr := m.requireTask(r, taskID, auth.ScopeTaskClaim)
-	if apiErr != nil {
+	if _, apiErr := m.requireTask(r, taskID, auth.ScopeTaskClaim); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -574,14 +591,15 @@ func (m *Module) renewLease(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		LeaseSeconds int `json:"lease_seconds"`
 	}
+	// body 可选（全默认时长）；非 JSON body 视为未携带。
 	_ = json.NewDecoder(r.Body).Decode(&in)
-	lease := time.Duration(m.leaseSeconds(in.LeaseSeconds)) * time.Second
+	lease := time.Duration(leaseSecondsValue(in.LeaseSeconds)) * time.Second
 
 	now := time.Now()
 	var existing model.TaskLease
 	err := m.DB.WithContext(r.Context()).First(&existing, "task_id = ?", taskID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && existing.ExpiresAt.Before(now)) {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 409, Code: httpx.CodeTaskLeaseExpired, Message: "lease expired; claim again"})
+		httpx.WriteError(w, r, httpx.Conflict(httpx.CodeTaskLeaseExpired, "lease expired; claim again"))
 		return
 	}
 	if err != nil {
@@ -599,7 +617,6 @@ func (m *Module) renewLease(w http.ResponseWriter, r *http.Request) {
 	}
 	existing.ExpiresAt = now.Add(lease)
 	existing.RenewedAt = now
-	_ = t
 	httpx.WriteOK(w, r, http.StatusOK, map[string]any{
 		"holder_actor_id": existing.HolderActorID,
 		"expires_at":      existing.ExpiresAt.UTC().Format(time.RFC3339),
@@ -632,12 +649,13 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	newRev := t.Revision
+	// 与 claim/update 同构：条件更新 + 0 行 = 并发修改 → REVISION_CONFLICT，
+	// 租约删除随事务回滚，不出现“租约没了但任务没放开”。
 	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("task_id = ?", taskID).Delete(&model.TaskLease{}).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"assignee_actor_id": nil, "revision": t.Revision + 1, "updated_at": time.Now()}
+		updates := map[string]any{"assignee_actor_id": nil, "revision": t.Revision + 1}
 		if t.Status == "in_progress" {
 			updates["status"] = "open"
 		}
@@ -645,7 +663,13 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 		if res.Error != nil {
 			return res.Error
 		}
-		newRev = t.Revision + 1
+		if res.RowsAffected == 0 {
+			var current model.Task
+			if e := tx.First(&current, "id = ?", taskID).Error; e != nil {
+				return e
+			}
+			return revisionConflict(current.Revision)
+		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: t.WorkspaceID, ActorID: p.ActorID,
 			Action: "task.release", Outcome: "allowed",
@@ -653,7 +677,7 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeTaskReleased, t.WorkspaceID, p.ActorID, newRev,
+		return event.EmitTx(tx, event.TypeTaskReleased, t.WorkspaceID, p.ActorID, t.Revision+1,
 			map[string]any{"task_id": taskID})
 	})
 	if err != nil {
@@ -672,17 +696,33 @@ func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *ht
 	return apiErr
 }
 
-func (m *Module) leaseSeconds(in int) int {
-	if in <= 0 {
-		return int(m.Auth.LeaseDefault.Seconds())
+func leaseSecondsValue(in int) int {
+	switch {
+	case in <= 0:
+		return int(LeaseDefault.Seconds())
+	case in < int(LeaseMin.Seconds()):
+		return int(LeaseMin.Seconds())
+	case in > int(LeaseMax.Seconds()):
+		return int(LeaseMax.Seconds())
+	default:
+		return in
 	}
-	if in < int(m.Auth.LeaseMin.Seconds()) {
-		return int(m.Auth.LeaseMin.Seconds())
+}
+
+// revisionConflict 统一构造 409 REVISION_CONFLICT（details 携带当前 revision，
+// CLI/GUI 据此做 re-read-retry）。
+func revisionConflict(current int64) *httpx.APIError {
+	return &httpx.APIError{
+		Status:  http.StatusConflict,
+		Code:    httpx.CodeRevisionConflict,
+		Message: "revision mismatch",
+		Details: map[string]any{"current_revision": current},
 	}
-	if in > int(m.Auth.LeaseMax.Seconds()) {
-		return int(m.Auth.LeaseMax.Seconds())
-	}
-	return in
+}
+
+func isUniqueViolation(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint") || strings.Contains(msg, "duplicate key")
 }
 
 func validStatus(s string) bool {
@@ -713,33 +753,4 @@ func parseLimit(raw string, def, max int) int {
 		return max
 	}
 	return n
-}
-
-type cursorPayload struct {
-	C string `json:"c"` // RFC3339Nano
-	I string `json:"i"`
-}
-
-func encodeCursor(t time.Time, id string) string {
-	raw, _ := json.Marshal(cursorPayload{C: t.UTC().Format(time.RFC3339Nano), I: id})
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-func decodeCursor(s string) (string, string, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return "", "", err
-	}
-	var p cursorPayload
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return "", "", err
-	}
-	return p.C, p.I, nil
-}
-
-func nextCursorPtr(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }

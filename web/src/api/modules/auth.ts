@@ -9,13 +9,6 @@ export interface MeResponse {
   session?: { client_type: 'cli' | 'web'; expires_at?: string }
 }
 
-export function register(email: string, password: string, displayName?: string): Promise<MeResponse> {
-  return apiFetch('/api/v1/auth/register', {
-    method: 'POST',
-    body: { email, password, display_name: displayName },
-  })
-}
-
 export function login(email: string, password: string): Promise<MeResponse> {
   return apiFetch('/api/v1/auth/login', { method: 'POST', body: { email, password } })
 }
