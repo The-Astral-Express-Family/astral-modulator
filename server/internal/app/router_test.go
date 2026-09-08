@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/document"
@@ -35,16 +36,17 @@ func newTestServer(t *testing.T) *httptest.Server {
 	recorder := &audit.GormRecorder{DB: db}
 	hub := event.NewHub()
 	mods := &Modules{
-		Auth:      &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
-		Workspace: &workspace.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
-		Task:      &task.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
-		Tag:       &tag.Module{},
-		Memory:    &memory.Module{},
-		Document:  &document.Module{},
-		Message:   &message.Module{DB: db, Hub: hub, Auth: svc},
-		Presence:  &presence.Module{DB: db, Hub: hub, Auth: svc},
-		Audit:     &audit.Module{},
-		Events:    &event.SSEHandler{Hub: hub},
+		Idempotency: &idempotency.Middleware{DB: db, Log: log},
+		Auth:        &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
+		Workspace:   &workspace.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
+		Task:        &task.Module{DB: db, Audit: recorder, Hub: hub, Auth: svc},
+		Tag:         &tag.Module{},
+		Memory:      &memory.Module{},
+		Document:    &document.Module{},
+		Message:     &message.Module{DB: db, Hub: hub, Auth: svc},
+		Presence:    &presence.Module{DB: db, Hub: hub, Auth: svc},
+		Audit:       &audit.Module{},
+		Events:      &event.SSEHandler{Hub: hub, DB: db},
 	}
 	ts := httptest.NewServer(NewRouter(config.Config{ServerID: "srv_test", PublicURL: "https://astral.example.com"}, log, db, mods))
 	t.Cleanup(ts.Close)

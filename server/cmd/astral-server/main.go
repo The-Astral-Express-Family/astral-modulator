@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/app"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/document"
@@ -47,13 +48,15 @@ func run() error {
 	var db *gorm.DB
 	var authSvc *auth.Service
 	hub := event.NewHub()
+	idem := &idempotency.Middleware{Log: log} // DB 在有库分支补挂
 	mods := &app.Modules{
-		Auth:     &auth.Module{PublicURL: cfg.PublicURL},
-		Tag:      &tag.Module{},
-		Memory:   &memory.Module{},
-		Document: &document.Module{},
-		Audit:    &audit.Module{},
-		Events:   &event.SSEHandler{Hub: hub},
+		Idempotency: idem,
+		Auth:        &auth.Module{PublicURL: cfg.PublicURL},
+		Tag:         &tag.Module{},
+		Memory:      &memory.Module{},
+		Document:    &document.Module{},
+		Audit:       &audit.Module{},
+		Events:      &event.SSEHandler{Hub: hub}, // DB 在有库分支补挂（重放需要）
 	}
 
 	if cfg.DatabaseDSN != "" {
@@ -85,8 +88,15 @@ func run() error {
 		mods.Message = msgMod
 		mods.Presence = presMod
 
+		// SSE 重放需要读 outbox。
+		mods.Events.DB = gormDB
 		// outbox → SSE dispatcher（architecture §19）。
 		event.StartDispatcher(ctx, gormDB, hub, log, 500*time.Millisecond)
+		// outbox 保留窗口清扫（S1 = 24h）。
+		event.StartRetention(ctx, gormDB, log, time.Hour)
+		// 幂等键保留窗口清理（同 24h）。
+		idem.DB = gormDB
+		idempotency.StartCleanup(ctx, gormDB, log, time.Hour)
 		// 过期租约清扫（architecture §17）。
 		taskMod.StartSweeper(ctx.Done(), 30*time.Second)
 	} else {

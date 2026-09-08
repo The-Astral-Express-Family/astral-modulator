@@ -36,12 +36,17 @@ const (
 	TypeTagRenamed                = "tag.renamed"
 	TypeTagDeleted                = "tag.deleted"
 	TypeHumanOverride             = "human.override"
+
+	// TypeSnapshotRequired 是控制事件（不属于领域事实）：resume 游标超出
+	// outbox 保留窗口、无法安全补发时下发，客户端必须重新拉取快照
+	// （docs/protocol.md §5；保留窗口 S1 裁决 = 24h）。
+	TypeSnapshotRequired = "snapshot.required"
 )
 
 // SSE 传输常量。
 const (
 	// KeepaliveInterval 服务器无事件时的注释心跳间隔，防止中间层断开空闲连接。
 	KeepaliveInterval = 15 * time.Second
-	// RetentionNote: resume 依赖 outbox 保留窗口；TODO(phase-4) 确定窗口时长与过期策略
-	// （cursor 过期时返回 snapshot.required 事件，客户端重新拉快照）。
+	// RetentionWindow 是 outbox 行保留窗口（S1 裁决 = 24h）；
+	// 超窗游标 → snapshot.required（见 retention.go 的清扫器与 sse.go 的重放）。
 )

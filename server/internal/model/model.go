@@ -246,3 +246,16 @@ type ServerMeta struct {
 }
 
 func (ServerMeta) TableName() string { return "server_meta" }
+
+// IdempotencyKey 见 00009_idempotency_keys.sql：写操作幂等去重。
+type IdempotencyKey struct {
+	ActorID     string `gorm:"primaryKey;size:40"`
+	Endpoint    string `gorm:"primaryKey;size:255"`
+	Key         string `gorm:"primaryKey;size:255"`
+	StatusCode  int
+	ContentType string `gorm:"size:128"`
+	Body        []byte
+	CreatedAt   time.Time
+}
+
+func (IdempotencyKey) TableName() string { return "idempotency_keys" }

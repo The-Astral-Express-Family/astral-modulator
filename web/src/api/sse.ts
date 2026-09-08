@@ -96,5 +96,6 @@ export const KNOWN_EVENT_TYPES = [
   'tag.created',
   'tag.renamed',
   'tag.deleted',
+  'snapshot.required',
   'human.override',
 ] as const

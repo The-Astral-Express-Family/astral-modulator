@@ -99,6 +99,21 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - **capabilities.features** 开放 `task_lease`。
 - 事件枚举三处同步（types.go / event.json / web sse.ts）——自动一致性检查列入下轮。
 
+### 第 6 轮（2026-09-09）：SSE 断线重放 + 幂等 + 一致性检查
+
+- **SSE resume 实装**（protocol.md §5 承诺兑现）：
+  `Last-Event-ID` 头 / `last_event_id` query 双通道；先订阅缓冲 → outbox 按
+  id 升序批量补发（500/批）→ 按游标去重接入实时流；游标超窗（24h）下发
+  `snapshot.required` 后断流。超窗判定依赖 UUIDv7 字符串可比性；
+  同毫秒乱序的极小概率误去重已注释记录（客户端幂等消费兜底）。
+- **outbox 保留窗口清扫**（S1 = 24h，每小时执行）与 **幂等键清理**同批启动。
+- **Idempotency-Key 中间件**（T-ws-5）：`internal/idempotency`，actor+endpoint
+  (路由模板)+key 主键；仅激活于携带头请求；只缓存 2xx（≤64KB）；并发同键
+  依赖主键冲突后回读重放；挂载于鉴权后（公共端点不受影响）。
+- **事件枚举一致性检查**（TestEventTypesSync）：types.go ↔ event.json ↔
+  web sse.ts 三方互比，CI 防漂移（与路由/错误码检查同属契约门）。
+- snapshot.required 纳入 event.json 契约 + web 订阅清单。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -126,7 +141,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | A3 | Web 审批页 API | `GET /api/v1/auth/device/authorizations?user_code=`（需 human session）+ `POST .../{id}/approve`、`POST .../{id}/deny` | ✅ 已实现 |
 | A4 | ASTRAL_TOKEN 格式 | Agent credential secret 为 `astral_<43字符base64url>` 随机串；服务端按 sha256 hash 查 credentials 表校验；请求头仍为 `Authorization: Bearer astral_...` | ✅ 已实现 |
 | T1 | task 删除/取消语义 | （未裁决，phase-3）MVP 暂不提供 DELETE，仅 cancelled 状态 | **open** |
-| S1 | snapshot.required 事件与 outbox 保留窗口 | （未裁决，phase-4） | **open** |
+| S1 | snapshot.required 事件与 outbox 保留窗口 | **已裁决并实装**：保留窗口 24h（`event.RetentionWindow`，清扫器每小时清理）；游标超窗下发 `snapshot.required`（reason=cursor_expired）后断流；已纳入 event.json 契约 | ✅ 已实现 |
 
 ## 3. Phase 1 — Auth（roadmap Phase 1）
 
@@ -173,7 +188,9 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - [x] T-ws-3 workspace/member/credential 变更的审计与事件（credential 事件经 outbox 的
       仅 task 路径；workspace 侧事件当前直发 hub，见 T-task-4 统一计划）
 - [x] T-ws-4 测试：CRUD、claim 竞争、scope 强制（app 集成测试覆盖）
-- [ ] T-ws-5 Idempotency-Key 中间件（存储：库表；接口已留）
+- [x] T-ws-5 Idempotency-Key 中间件（`internal/idempotency`：库表存储、24h 窗口、
+      仅缓存 2xx、actor+endpoint+key 主键、并发同键回读重放；挂载于鉴权后，
+      携带头即激活）
 - [ ] T-ws-6 promote_owner approval 状态机（当前显式拒绝，需建 approvals 表）
 - [ ] T-ws-7 agents 列表按 workspace 过滤（需 agent-workspace 绑定模型；
       见 workspace/module.go listAgents TODO，审查轮 2026-09-07 登记）
@@ -242,6 +259,8 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-07 | 第 5 轮：新增事件类型 `tag.created`/`tag.renamed`/`tag.deleted`（architecture §14 要求 tag 变更写 outbox；types.go/event.json/web 三处已同步） | 补充 | CLI/Web |
 | 2026-09-07 | 第 5 轮：capabilities.features 开放 `task_lease`（原子 claim 稳定并有并发测试覆盖） | 补充 | CLI |
 | 2026-09-07 | 第 5 轮：事件路径统一——全部领域事件经 EmitTx outbox（PublishDomain 直发已移除），SSE 事件延迟 ≤ dispatcher 轮询间隔（500ms） | 行为 | CLI/Web |
+| 2026-09-09 | 第 6 轮：新增控制事件 `snapshot.required`（SSE resume 超窗，reason=cursor_expired；不在领域事件语义内） | 补充 | CLI/Web |
+| 2026-09-09 | 第 6 轮：SSE resume 正式可用（保留窗口 24h，S1 裁决落定）；Idempotency-Key 语义实装（同 actor+endpoint+key 24h 内重放首次 2xx） | 行为 | CLI/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -280,13 +299,11 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
     （Last-Event-ID 重放 + snapshot.required）
 12. `content_hash` 统一 `sha256:<hex>`（小写十六进制）— phase-5 文档同步联调时最易错
 
-## 11. 下一轮计划（Phase 4 收尾 + Phase 2 遗留）
+## 11. 下一轮计划
 
-1. Idempotency-Key 中间件（T-ws-5）：库表存储 + 窗口清理，接入 contract 列出的写端点
-2. approvals 表 + promote_owner 状态机（T-ws-6）
-3. SSE resume：Last-Event-ID 从 outbox 重放 + `snapshot.required` 控制事件 + S1 裁决
-   （outbox 已是唯一事件源，重放只剩 handler 侧工作）
-4. agents 列表按 workspace 过滤（T-ws-7，需绑定模型）
-5. Web 任务树视图（消费 search API + SSE 实时刷新）与 CLI `todo search --regex/--fuzzy` 对接
-6. 双源一致性 CI 检查扩展：事件枚举（types.go vs event.json vs sse.ts）
-   ——路由与错误码检查已就位（openapi_contract_test.go）
+1. approvals 表 + promote_owner 状态机（T-ws-6，高风险动作审批落地）
+2. agents 列表按 workspace 过滤（T-ws-7，需 agent-workspace 绑定模型）
+3. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理）
+4. 凭证/会话撤销后主动断开 SSE 连接（hub 订阅者携带身份；security.md 要求）
+5. rate limit（auth/device 端点优先；phase-6）
+6. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求

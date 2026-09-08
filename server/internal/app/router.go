@@ -13,6 +13,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/document"
@@ -48,6 +49,9 @@ type Capabilities struct {
 
 // Modules 汇集装配好的模块（由 main 构造，测试可用 sqlite 内存库构造）。
 type Modules struct {
+	// Idempotency 为写操作幂等中间件（nil 则不启用）。
+	Idempotency *idempotency.Middleware
+
 	Auth      *auth.Module
 	Workspace *workspace.Module
 	Task      *task.Module
@@ -109,6 +113,11 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		// 受保护 API。TODO(phase-2): 经 audit recorder 记录授权失败。
 		api.Group(func(priv chi.Router) {
 			priv.Use(mods.Auth.Svc.Authenticate)
+			// 幂等：挂载于鉴权后（actor 身份参与键空间）；仅当客户端携带
+			// Idempotency-Key 头时激活。contract 列出的写端点全部受益。
+			if mods.Idempotency != nil {
+				priv.Use(mods.Idempotency.Handler)
+			}
 			mods.Auth.RegisterPrivate(priv)
 			mods.Workspace.RegisterRoutes(priv)
 			mods.Task.RegisterRoutes(priv)

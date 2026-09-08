@@ -65,11 +65,12 @@ GET /api/v1/workspaces/{workspace_id}/events
 - envelope 与事件类型目录：`api/schemas/event.json`（SSE `id:` 行 = envelope 的
   `id`，即 resume 游标）；
 - keepalive 为 SSE 注释行（`: keepalive`），15s 间隔，不占事件 ID 序列；
-- **Resume 语义**：客户端保存最近处理完成的事件 ID，重连时经 `Last-Event-ID`
-  （或等价 query 参数）请求重放；服务端在 outbox 保留窗口内补发，游标过期时
-  下发 `snapshot.required` 控制事件，客户端重新拉快照（phase-4 落地，当前版本
-  无重放——客户端需接受"快照 + 增量"的最终一致模型）；
-- 客户端必须把事件消费设计为幂等（重放会带来重复事件）。
+- **Resume 语义（已实装）**：客户端保存最近处理完成的事件 ID，重连时经
+  `Last-Event-ID` 头（或 `last_event_id` query 参数）请求补发；服务端从 outbox
+  保留窗口内按事件 ID 升序补发后接入实时流；保留窗口为 **24 小时**（S1 裁决），
+  游标超窗时服务端下发 `snapshot.required` 控制事件（`data.reason=cursor_expired`）
+  并断流，客户端必须重新拉取快照后再建立新游标；
+- 客户端必须把事件消费设计为幂等（重放与补发可能带来重复事件）。
 
 ## 6. Rate Limit
 

@@ -82,27 +82,10 @@ func pollOnce(ctx context.Context, db *gorm.DB, hub *Hub, log *slog.Logger) {
 		return
 	}
 	for _, row := range rows {
-		env := Envelope{
-			ID:            row.ID,
-			Type:          row.Type,
-			OccurredAt:    row.OccurredAt.UTC().Format(time.RFC3339),
-			SchemaVersion: 1,
-			Data:          json.RawMessage(row.Payload),
-		}
-		if row.WorkspaceID != nil {
-			env.WorkspaceID = *row.WorkspaceID
-		}
-		if row.ActorID != nil {
-			env.ActorID = *row.ActorID
-		}
-		// payload 是 {resource_revision, data} 包装（EmitTx），还原成契约形状。
-		var wrapped struct {
-			ResourceRevision int64           `json:"resource_revision"`
-			Data             json.RawMessage `json:"data"`
-		}
-		if err := json.Unmarshal(row.Payload, &wrapped); err == nil {
-			env.ResourceRevision = wrapped.ResourceRevision
-			env.Data = wrapped.Data
+		env, err := envelopeFromRow(row)
+		if err != nil {
+			log.Error("outbox envelope decode failed", "event_id", row.ID, "err", err)
+			continue
 		}
 		hub.Publish(env)
 		if err := db.WithContext(ctx).Model(&model.OutboxEvent{}).
@@ -110,4 +93,32 @@ func pollOnce(ctx context.Context, db *gorm.DB, hub *Hub, log *slog.Logger) {
 			log.Error("outbox mark sent failed", "event_id", row.ID, "err", err)
 		}
 	}
+}
+
+// envelopeFromRow 把 outbox 行还原为契约 envelope。
+// payload 形状由 EmitTx 写入：{resource_revision, data}。
+func envelopeFromRow(row model.OutboxEvent) (Envelope, error) {
+	env := Envelope{
+		ID:            row.ID,
+		Type:          row.Type,
+		OccurredAt:    row.OccurredAt.UTC().Format(time.RFC3339),
+		SchemaVersion: 1,
+		Data:          json.RawMessage(row.Payload),
+	}
+	if row.WorkspaceID != nil {
+		env.WorkspaceID = *row.WorkspaceID
+	}
+	if row.ActorID != nil {
+		env.ActorID = *row.ActorID
+	}
+	var wrapped struct {
+		ResourceRevision int64           `json:"resource_revision"`
+		Data             json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(row.Payload, &wrapped); err != nil {
+		return env, err
+	}
+	env.ResourceRevision = wrapped.ResourceRevision
+	env.Data = wrapped.Data
+	return env, nil
 }

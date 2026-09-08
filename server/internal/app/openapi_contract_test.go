@@ -86,7 +86,7 @@ func collectChiRoutes(t *testing.T) map[string]bool {
 		Message:   &message.Module{DB: db, Hub: hub, Auth: svc},
 		Presence:  &presence.Module{DB: db, Hub: hub, Auth: svc},
 		Audit:     &audit.Module{},
-		Events:    &event.SSEHandler{Hub: hub},
+		Events:    &event.SSEHandler{Hub: hub, DB: db},
 	}
 	mux := NewRouter(config.Config{ServerID: "srv_test"}, log, db, mods).(*chi.Mux)
 
