@@ -246,6 +246,16 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - 测试 55 项全绿（新增 device flow 状态机 6 项、会话槽往返 2 项）；CI 4 平台全绿。
 - CLI 侧对应提交：astral-cli@4cd6a74。
 
+### 第 12 轮（2026-09-10）：Web approval 裁决视图 + device 审批页联调收尾
+
+- **裁决队列视图**（§11 第 5 项）：`/workspaces/{id}/approvals`——待裁决列表
+  （GET ?status=requested）+ 批准/拒绝（confirm 后 POST，owner 专用），
+  15s 自动刷新、裁决后立即刷新；新增 api/modules/workspace.ts（approvals 三个调用）
+  与 Approval/ApprovalPage 类型（手工对齐 openapi）；
+- **device 审批页联调收尾**（§11 第 6 项）：pending 状态每 5s 轮询，
+  请求在别处被批准/拒绝/过期时页面自动跟进；裁决或终态后停止轮询；
+- workspace 总览页增加裁决队列入口。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -458,6 +468,6 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
    端到端联调依赖真实服务器 + 浏览器审批，留待部署环境手动验收）
 4. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理；
    D11 后 tag 过滤/展示数据源才真实可用）
-5. Web/GUI approval 裁决视图（GET /workspaces/{id}/approvals?status=requested）
-6. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
+5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图
+6. 【✅ 第 12 轮完成】Web device 审批页联调收尾：pending 自动轮询
 7. rate limit（auth/device 端点优先；phase-6）

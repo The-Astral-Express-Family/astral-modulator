@@ -27,6 +27,11 @@ export const router = createRouter({
       component: () => import('../views/WorkspaceOverviewView.vue'),
     },
     {
+      path: '/workspaces/:workspaceId/approvals',
+      name: 'workspace-approvals',
+      component: () => import('../views/ApprovalsView.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'not-found',
       component: () => import('../views/NotFoundView.vue'),

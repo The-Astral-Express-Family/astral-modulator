@@ -2,7 +2,7 @@
 // Device Flow 人类审批页（architecture §8.2 / TODO.md A3）：
 // CLI 发起登录后 verification_uri 指向 /device?code=XXXX-XXXX。
 // 需先登录（未登录跳转 /login 并带 redirect）。
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { formatApiError } from '../api/client'
 import {
@@ -23,6 +23,38 @@ const error = ref<string | null>(null)
 const notice = ref<string | null>(null)
 const busy = ref(false)
 
+// 联调收尾（TODO.md §11 第 6 项）：pending 状态下每 5s 轮询一次，
+// 请求在别处被处理/过期时页面自动跟进，不需要人工刷新。
+const POLL_MS = 5_000
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function startPolling(code: string): void {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    if (busy.value) return
+    try {
+      const fresh = await findDeviceAuthorization(code)
+      view.value = fresh
+      if (fresh.status !== 'pending') {
+        stopPolling()
+        notice.value =
+          fresh.status === 'approved' || fresh.status === 'exchanged'
+            ? '该请求已批准。'
+            : `该请求已${fresh.status === 'expired' ? '过期' : '失效'}。`
+      }
+    } catch {
+      // 查询失败（网络抖动等）不打断轮询；下一次循环重试。
+    }
+  }, POLL_MS)
+}
+
 function userCodeFromQuery(): string {
   return typeof route.query.code === 'string' ? route.query.code : ''
 }
@@ -31,12 +63,14 @@ async function lookup(code: string): Promise<void> {
   error.value = null
   notice.value = null
   view.value = null
+  stopPolling()
   if (!session.isLoggedIn) {
     void router.push({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
   try {
     view.value = await findDeviceAuthorization(code)
+    if (view.value?.status === 'pending') startPolling(code)
   } catch (e) {
     error.value = formatApiError(e)
   }
@@ -53,6 +87,8 @@ async function decide(approve: boolean): Promise<void> {
       await denyDeviceAuthorization(view.value.id)
       notice.value = '已拒绝。该设备授权请求已终止。'
     }
+    view.value = null
+    stopPolling()
   } catch (e) {
     error.value = formatApiError(e)
   } finally {
@@ -64,6 +100,7 @@ onMounted(() => {
   const code = userCodeFromQuery()
   if (code) void lookup(code)
 })
+onUnmounted(stopPolling)
 </script>
 
 <template>

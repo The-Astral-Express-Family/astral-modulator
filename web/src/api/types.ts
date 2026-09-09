@@ -74,6 +74,33 @@ export interface Workspace {
   updated_at?: string
 }
 
+// ---- Approvals（architecture §22，T-ws-6）----
+
+export type ApprovalAction = 'membership.promote_owner'
+
+export type ApprovalStatus =
+  | 'requested'
+  | 'approved'
+  | 'rejected'
+  | 'expired'
+  | 'executed'
+
+// 手工对齐 openapi Approval schema（服务端 workspace/approval.go approvalDTO）。
+export interface Approval {
+  id: ID
+  workspace_id: ID
+  action: ApprovalAction
+  target_actor_id: ID
+  status: ApprovalStatus
+  requested_by: ID
+  decided_by?: ID | null
+  decided_at?: string | null
+  expires_at: string
+  created_at: string
+}
+
+export interface ApprovalPage extends Page<Approval> {}
+
 // SSE 事件 envelope（api/schemas/event.json）。
 export interface EventEnvelope<T = Record<string, unknown>> {
   id: string

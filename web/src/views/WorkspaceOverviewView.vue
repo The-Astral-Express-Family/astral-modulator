@@ -49,7 +49,10 @@ onUnmounted(() => unsubscribe?.())
     <p class="muted">
       {{ workspace ? workspace.name : '（无权访问或不存在）' }}
     </p>
-    <p>SSE 状态：{{ sseState }}（事件流端点已实装，事件产生于业务模块落地后）</p>
+    <p>
+      SSE 状态：{{ sseState }}
+      · <RouterLink :to="`/workspaces/${workspaceId}/approvals`">裁决队列</RouterLink>
+    </p>
   </div>
   <div class="card">
     <h3>实时事件</h3>
