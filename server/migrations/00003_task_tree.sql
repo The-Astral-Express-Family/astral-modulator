@@ -28,6 +28,9 @@ CREATE INDEX idx_tasks_workspace_status ON tasks(workspace_id, status);
 --   放到搜索实现时一并加，并配套 statement_timeout 防危险 regex（architecture §13）。
 
 -- 同 workspace 父子约束：拒绝跨 workspace parent（应用层先校验给友好错误，此为纵深防御）。
+-- StatementBegin/End 必须加：goose 默认按分号切语句，函数体的 `$$ ... $$`
+-- 内含分号会被拦腰截断（CI postgres migration test 实测报 unterminated dollar quote）。
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION assert_task_parent_same_workspace() RETURNS trigger AS $$
 BEGIN
     IF NEW.parent_id IS NOT NULL THEN
@@ -38,6 +41,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER trg_task_parent_same_workspace
 BEFORE INSERT OR UPDATE OF parent_id ON tasks
