@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -70,6 +71,17 @@ func Ping(ctx context.Context, db *gorm.DB) error {
 	pctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return sqlDB.PingContext(pctx)
+}
+
+// IsUniqueViolation 可移植地判断 err 是否唯一约束冲突：
+// PG 23505 文案含 "duplicate key"，sqlite 含 "UNIQUE constraint"。
+// 唯一授权单点：各模块的 409 翻译一律经此判断，不得自建字符串匹配。
+func IsUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint") || strings.Contains(msg, "duplicate key")
 }
 
 // EnsureServerID 读取/固化稳定 server_id（architecture §7：一经生成永久不变）。

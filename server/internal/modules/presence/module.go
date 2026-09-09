@@ -44,17 +44,10 @@ type presenceDTO struct {
 	ExpiresAt       string  `json:"expires_at"`
 }
 
-// requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
-func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *httpx.APIError {
-	p := auth.PrincipalFrom(r.Context())
-	_, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, wsID, need)
-	return apiErr
-}
-
 func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopePresenceWrite); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopePresenceWrite); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -107,7 +100,7 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 // 已过期的行保留（GUI 需要“刚离开”的展示），派生为 offline。
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeWorkspaceRead); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeWorkspaceRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}

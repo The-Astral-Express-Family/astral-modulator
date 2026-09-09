@@ -18,11 +18,11 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 type Module struct {
-	DB    *gorm.DB
-	Audit *audit.GormRecorder
+	DB *gorm.DB
 	// Auth 提供 scope 解析与 credential 签发/吊销。
 	Auth *auth.Service
 }
@@ -84,7 +84,7 @@ func (m *Module) requireWorkspace(r *http.Request, workspaceID string, need ...s
 		return nil, nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
 	}
 	if err != nil {
-		return nil, nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "workspace lookup failed"}
+		return nil, nil, httpx.Internal("workspace lookup failed")
 	}
 	scopes, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, workspaceID, need...)
 	if apiErr != nil {
@@ -106,7 +106,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len(in.Name) > 200 {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "name required (1-200 chars)"})
+		httpx.WriteError(w, r, httpx.Invalid("name required (1-200 chars)"))
 		return
 	}
 	slug := strings.TrimSpace(in.Slug)
@@ -114,7 +114,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		slug = slugify(in.Name)
 	}
 	if slug == "" {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "slug could not be derived; provide slug"})
+		httpx.WriteError(w, r, httpx.Invalid("slug could not be derived; provide slug"))
 		return
 	}
 
@@ -202,7 +202,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	if in.Name != nil {
 		n := strings.TrimSpace(*in.Name)
 		if n == "" {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "name cannot be empty"})
+			httpx.WriteError(w, r, httpx.Invalid("name cannot be empty"))
 			return
 		}
 		updates["name"] = n
@@ -210,7 +210,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	if in.Slug != nil {
 		s := slugify(*in.Slug)
 		if s == "" {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid slug"})
+			httpx.WriteError(w, r, httpx.Invalid("invalid slug"))
 			return
 		}
 		updates["slug"] = s
@@ -282,7 +282,7 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validRole(in.Role) {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid role"})
+		httpx.WriteError(w, r, httpx.Invalid("invalid role"))
 		return
 	}
 	if in.Role == "owner" {
@@ -448,11 +448,11 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 		in.Kind = "agent"
 	}
 	if in.Kind != "agent" && in.Kind != "service" {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "kind must be agent or service"})
+		httpx.WriteError(w, r, httpx.Invalid("kind must be agent or service"))
 		return
 	}
 	if strings.TrimSpace(in.DisplayName) == "" {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "display_name required"})
+		httpx.WriteError(w, r, httpx.Invalid("display_name required"))
 		return
 	}
 	prefix := ids.Agent
@@ -494,7 +494,7 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if actor.Kind != "agent" && actor.Kind != "service" {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "not an agent/service actor"})
+		httpx.WriteError(w, r, httpx.Invalid("not an agent/service actor"))
 		return
 	}
 	var in struct {
@@ -520,7 +520,7 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 	if in.ExpiresAt != nil {
 		t, err := time.Parse(time.RFC3339, *in.ExpiresAt)
 		if err != nil {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid expires_at (RFC3339)"})
+			httpx.WriteError(w, r, httpx.Invalid("invalid expires_at (RFC3339)"))
 			return
 		}
 		exp = &t
@@ -656,10 +656,9 @@ func updatedFields(updates map[string]any) []string {
 }
 
 func writeDBError(w http.ResponseWriter, r *http.Request, err error, conflictMsg, conflictCode string) {
-	// 唯一约束冲突翻译（可移植判断：PG 23505 文案 / sqlite UNIQUE 文案）。
-	msg := err.Error()
-	if strings.Contains(msg, "duplicate key") || strings.Contains(msg, "UNIQUE constraint") || strings.Contains(msg, "constraint failed") {
-		httpx.WriteError(w, r, &httpx.APIError{Status: http.StatusConflict, Code: conflictCode, Message: conflictMsg})
+	// 唯一约束冲突翻译（可移植判断单点在 store.IsUniqueViolation）。
+	if store.IsUniqueViolation(err) {
+		httpx.WriteError(w, r, httpx.Conflict(conflictCode, conflictMsg))
 		return
 	}
 	httpx.RespondError(w, r, err)

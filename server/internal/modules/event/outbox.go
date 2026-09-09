@@ -11,6 +11,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/background"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 )
 
 // EmitTx 在业务事务内写入 outbox（architecture §19：与业务变更同事务，
@@ -33,12 +34,10 @@ func EmitTx(tx *gorm.DB, typ string, workspaceID, actorID string, resourceRevisi
 		OccurredAt: time.Now(),
 	}
 	if workspaceID != "" {
-		ws := workspaceID
-		row.WorkspaceID = &ws
+		row.WorkspaceID = ptr.Of(workspaceID)
 	}
 	if actorID != "" {
-		a := actorID
-		row.ActorID = &a
+		row.ActorID = ptr.Of(actorID)
 	}
 	return tx.Create(&row).Error
 }

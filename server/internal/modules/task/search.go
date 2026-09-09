@@ -48,17 +48,17 @@ type SearchParams struct {
 // Search 执行一次搜索并返回一页结果。调用方已完成 task:read 授权。
 func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) ([]ScoredTask, string, *httpx.APIError) {
 	if len(params.Regex) > maxRegexLen {
-		return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "regex too long"}
+		return nil, "", httpx.Invalid("regex too long")
 	}
 	if len(params.Fuzzy) > maxFuzzyLen {
-		return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "fuzzy too long"}
+		return nil, "", httpx.Invalid("fuzzy too long")
 	}
 	var re *regexp.Regexp
 	if params.Regex != "" {
 		var err error
 		re, err = regexp.Compile(params.Regex)
 		if err != nil {
-			return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid regex: " + err.Error()}
+			return nil, "", httpx.Invalid("invalid regex: " + err.Error())
 		}
 	}
 
@@ -71,7 +71,7 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 	}
 	if params.Status != "" {
 		if !validStatus(params.Status) {
-			return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid status"}
+			return nil, "", httpx.Invalid("invalid status")
 		}
 		query = query.Where("tasks.status = ?", params.Status)
 	}
@@ -83,7 +83,7 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 	var candidates []model.Task
 	// JOIN 场景下列名需限定表名（tags 也有 created_at，避免歧义）。
 	if err := query.Order("tasks.created_at DESC, tasks.id DESC").Limit(maxScanCap).Find(&candidates).Error; err != nil {
-		return nil, "", &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "search query failed"}
+		return nil, "", httpx.Internal("search query failed")
 	}
 
 	// 2. regex 过滤（title + description）。
@@ -117,7 +117,7 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 		var err error
 		offset, err = decodeSearchCursor(params.Cursor)
 		if err != nil || offset < 0 {
-			return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid cursor"}
+			return nil, "", httpx.Invalid("invalid cursor")
 		}
 		if offset > len(pool) {
 			offset = len(pool)

@@ -37,7 +37,7 @@ func (s *Service) CreateDeviceAuthorization(ctx context.Context, clientType, pub
 		return nil, dbErr
 	}
 	if clientType != "cli" && clientType != "web" {
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "client_type must be cli or web"}
+		return nil, httpx.Invalid("client_type must be cli or web")
 	}
 	deviceCode, err := NewDeviceCode()
 	if err != nil {
@@ -117,7 +117,7 @@ func (s *Service) decide(ctx context.Context, authorizationID, actorID, status s
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return &httpx.APIError{Status: 409, Code: httpx.CodeValidationFailed, Message: "authorization not pending or expired"}
+		return httpx.Conflict(httpx.CodeValidationFailed, "authorization not pending or expired")
 	}
 	return nil
 }
@@ -135,7 +135,7 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 		return nil, dbErr
 	}
 	if deviceCode == "" {
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "missing device_code"}
+		return nil, httpx.Invalid("missing device_code")
 	}
 	var row model.DeviceAuthorization
 	err := s.DB.WithContext(ctx).Where("device_code_hash = ?", HashToken(deviceCode)).First(&row).Error
@@ -167,7 +167,7 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 	default:
 		// 未知状态值 = 数据被外部改动或代码漏分支，按服务端错误处理，
 		// 绝不能落到 approved 兑换路径。
-		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "unknown authorization status"}
+		return nil, httpx.Internal("unknown authorization status")
 	}
 
 	if row.ActorID == nil {
@@ -229,10 +229,10 @@ func (s *Service) IssueCredential(ctx context.Context, in CreateCredentialInput)
 		return nil, dbErr
 	}
 	if in.Kind != "agent" && in.Kind != "service" {
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "kind must be agent or service"}
+		return nil, httpx.Invalid("kind must be agent or service")
 	}
 	if len(in.Scopes) == 0 {
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "scopes required"}
+		return nil, httpx.Invalid("scopes required")
 	}
 	known := map[string]bool{}
 	for _, sc := range AllScopes {
@@ -274,7 +274,8 @@ func (s *Service) RevokeCredential(ctx context.Context, credentialID string) err
 	var cred model.Credential
 	if err := s.DB.WithContext(ctx).First(&cred, "id = ?", credentialID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "credential not found or already revoked"}
+			// 次级资源 404 → NOT_FOUND（TODO.md §9 第 7 轮登记的统一裁决）。
+			return httpx.NotFound("credential not found or already revoked")
 		}
 		return err
 	}
@@ -284,7 +285,7 @@ func (s *Service) RevokeCredential(ctx context.Context, credentialID string) err
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return &httpx.APIError{Status: 404, Code: httpx.CodeValidationFailed, Message: "credential not found or already revoked"}
+		return httpx.NotFound("credential not found or already revoked")
 	}
 	s.notifyRevoked(cred.ActorID)
 	return nil

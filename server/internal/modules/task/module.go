@@ -23,6 +23,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 // Lease 时长钳制边界（openapi TaskClaimInput.lease_seconds 的服务端约束）。
@@ -164,7 +165,7 @@ func (m *Module) requireTask(r *http.Request, taskID string, need string) (*mode
 		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
 	}
 	if err != nil {
-		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "task lookup failed"}
+		return nil, httpx.Internal("task lookup failed")
 	}
 	p := auth.PrincipalFrom(r.Context())
 	if _, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, t.WorkspaceID, need); apiErr != nil {
@@ -178,7 +179,7 @@ func (m *Module) requireTask(r *http.Request, taskID string, need string) (*mode
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskWrite); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskWrite); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -245,7 +246,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskRead); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -288,14 +289,13 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 // search：regex 过滤 → fuzzy 排序（architecture §13 语义；CLI --regex/--fuzzy 双参数）。
 func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTaskRead); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	q := r.URL.Query()
 	if q.Get("regex") == "" && q.Get("fuzzy") == "" {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed,
-			Message: "at least one of regex/fuzzy is required"})
+		httpx.WriteError(w, r, httpx.Invalid("at least one of regex/fuzzy is required"))
 		return
 	}
 	results, next, apiErr := m.Search(r.Context(), wsID, SearchParams{
@@ -514,12 +514,9 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 		}
 		if err := tx.Create(&claimedLease).Error; err != nil {
 			// 主键冲突 = 别人持有有效租约。
-			if isUniqueViolation(err) {
-				return &httpx.APIError{
-					Status: http.StatusConflict, Code: httpx.CodeTaskAlreadyClaimed,
-					Message: "task is already claimed by another actor",
-					Details: map[string]any{"task_id": taskID},
-				}
+			if store.IsUniqueViolation(err) {
+				return httpx.ConflictWith(httpx.CodeTaskAlreadyClaimed,
+					"task is already claimed by another actor", map[string]any{"task_id": taskID})
 			}
 			return err
 		}
@@ -694,13 +691,6 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 
 // ---- helpers ----
 
-// requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
-func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *httpx.APIError {
-	p := auth.PrincipalFrom(r.Context())
-	_, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, wsID, need)
-	return apiErr
-}
-
 func leaseSecondsValue(in int) int {
 	switch {
 	case in <= 0:
@@ -717,17 +707,8 @@ func leaseSecondsValue(in int) int {
 // revisionConflict 统一构造 409 REVISION_CONFLICT（details 携带当前 revision，
 // CLI/GUI 据此做 re-read-retry）。
 func revisionConflict(current int64) *httpx.APIError {
-	return &httpx.APIError{
-		Status:  http.StatusConflict,
-		Code:    httpx.CodeRevisionConflict,
-		Message: "revision mismatch",
-		Details: map[string]any{"current_revision": current},
-	}
-}
-
-func isUniqueViolation(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "UNIQUE constraint") || strings.Contains(msg, "duplicate key")
+	return httpx.ConflictWith(httpx.CodeRevisionConflict, "revision mismatch",
+		map[string]any{"current_revision": current})
 }
 
 func validStatus(s string) bool {

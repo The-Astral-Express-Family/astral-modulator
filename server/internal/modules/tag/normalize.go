@@ -3,17 +3,15 @@
 package tag
 
 import (
-	"crypto/rand"
 	"strings"
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
+
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 )
 
-const (
-	maxTagNameLen  = 64
-	confirmCodeLen = 6
-)
+const maxTagNameLen = 64
 
 // NormalizeName：trim + Unicode NFKC（兼容性折叠：全角→半角等）+ 小写。
 // 入库前必须经过本函数（tags.normalized_name 的唯一性基于规范化名）；
@@ -41,20 +39,9 @@ func ValidateTagName(name string) (string, bool) {
 	return NormalizeName(name), true
 }
 
-// confirmCodeAlphabet 与 auth 的 user code 同源（去易混淆字符），
-// 但确认码强度需求更低（TTL 120s、单次使用、绑定 actor）。
-const confirmCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
-
 // NewConfirmCode 生成 6 位确认码（architecture §14 示例形状 K7P4Q2）。
+// 字母表复用 auth 的去混淆字符集（单一授权点）。
 // 明文只在 proposal 响应出现一次；库中只存 sha256 hash（见 module.go）。
 func NewConfirmCode() (string, error) {
-	buf := make([]byte, confirmCodeLen)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	out := make([]byte, confirmCodeLen)
-	for i, b := range buf {
-		out[i] = confirmCodeAlphabet[int(b)%len(confirmCodeAlphabet)]
-	}
-	return string(out), nil
+	return auth.NewRandomCode(6)
 }

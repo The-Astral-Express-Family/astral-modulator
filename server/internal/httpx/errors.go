@@ -14,24 +14,29 @@ import (
 // api/schemas/error.json 保持一致（openapi_contract_test 强制双向同步）；
 // 变更错误码属于协议变更，需走 api/README.md 的协议发布流程并在 TODO.md 登记。
 const (
-	CodeAuthRequired             = "AUTH_REQUIRED"
-	CodeTokenExpired             = "TOKEN_EXPIRED"
-	CodeTokenRevoked             = "TOKEN_REVOKED"
-	CodeInsufficientScope        = "INSUFFICIENT_SCOPE"
-	CodeServerNotFound           = "SERVER_NOT_FOUND"
-	CodeWorkspaceNotFound        = "WORKSPACE_NOT_FOUND"
-	CodeWorkspaceAlreadyBound    = "WORKSPACE_ALREADY_BOUND" // 预留：credential workspace 绑定冲突
-	CodeTaskNotFound             = "TASK_NOT_FOUND"
-	CodeTaskAlreadyClaimed       = "TASK_ALREADY_CLAIMED"
-	CodeTaskLeaseExpired         = "TASK_LEASE_EXPIRED"
-	CodeTagProposalExpired       = "TAG_PROPOSAL_EXPIRED"
-	CodeTagAlreadyExists         = "TAG_ALREADY_EXISTS"
-	CodeRevisionConflict         = "REVISION_CONFLICT"
-	CodeDocumentConflict         = "DOCUMENT_CONFLICT"          // 预留：phase-5 document sync
-	CodeRateLimited              = "RATE_LIMITED"               // 预留：phase-6 rate limit
-	CodeClientVersionUnsupported = "CLIENT_VERSION_UNSUPPORTED" // 预留：版本协商
-	CodeValidationFailed         = "VALIDATION_FAILED"
-	CodeInternalError            = "INTERNAL_ERROR"
+	CodeAuthRequired      = "AUTH_REQUIRED"
+	CodeTokenExpired      = "TOKEN_EXPIRED"
+	CodeTokenRevoked      = "TOKEN_REVOKED"
+	CodeInsufficientScope = "INSUFFICIENT_SCOPE"
+	CodeServerNotFound    = "SERVER_NOT_FOUND" // 预留：多服务器发现/路由场景
+	CodeWorkspaceNotFound = "WORKSPACE_NOT_FOUND"
+	// 预留：credential workspace 绑定冲突
+	CodeWorkspaceAlreadyBound = "WORKSPACE_ALREADY_BOUND"
+	CodeTaskNotFound          = "TASK_NOT_FOUND"
+	CodeTaskAlreadyClaimed    = "TASK_ALREADY_CLAIMED"
+	CodeTaskLeaseExpired      = "TASK_LEASE_EXPIRED"
+	CodeTagProposalExpired    = "TAG_PROPOSAL_EXPIRED"
+	CodeTagAlreadyExists      = "TAG_ALREADY_EXISTS"
+	CodeRevisionConflict      = "REVISION_CONFLICT"
+	// 预留：phase-5 document sync
+	CodeDocumentConflict = "DOCUMENT_CONFLICT"
+	// 预留：phase-6 rate limit
+	CodeRateLimited = "RATE_LIMITED"
+	// 预留：版本协商
+	CodeClientVersionUnsupported = "CLIENT_VERSION_UNSUPPORTED"
+
+	CodeValidationFailed = "VALIDATION_FAILED"
+	CodeInternalError    = "INTERNAL_ERROR"
 
 	// CodeNotFound 是通用 404：/api/v1 未知路由，以及没有专用码的次级资源
 	// （成员/凭证/tag/proposal 等）不存在。资源是端点主语的（task/workspace）
@@ -93,8 +98,19 @@ func Invalid(message string) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: CodeValidationFailed, Message: message}
 }
 
+// Internal 是服务端内部错误构造器（500 INTERNAL_ERROR，retryable=true）。
+func Internal(message string) *APIError {
+	return &APIError{Status: http.StatusInternalServerError, Code: CodeInternalError, Message: message}
+}
+
 func Conflict(code, message string) *APIError {
 	return &APIError{Status: http.StatusConflict, Code: code, Message: message}
+}
+
+// ConflictWith 在 Conflict 基础上携带 details（如 current_revision/task_id
+// 等现场信息，CLI/GUI 据此做 re-read-retry）。
+func ConflictWith(code, message string, details map[string]any) *APIError {
+	return &APIError{Status: http.StatusConflict, Code: code, Message: message, Details: details}
 }
 
 // IsRetryable 返回该错误是否建议客户端重试。

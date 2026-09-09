@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
 
@@ -146,7 +147,7 @@ func TestSSESnapshotRequiredOnExpiredCursor(t *testing.T) {
 	row := model.OutboxEvent{
 		ID: "evt_ffffff", Type: TypeTaskCreated, WorkspaceID: &wsID,
 		Payload:    []byte(`{"resource_revision":0,"data":{}}`),
-		OccurredAt: time.Now(), SentAt: ptr(time.Now()),
+		OccurredAt: time.Now(), SentAt: ptr.Of(time.Now()),
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatal(err)
@@ -178,7 +179,5 @@ func TestSSESnapshotRequiredOnExpiredCursor(t *testing.T) {
 		t.Fatalf("want snapshot.required, got %+v", events)
 	}
 }
-
-func ptr[T any](v T) *T { return &v }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

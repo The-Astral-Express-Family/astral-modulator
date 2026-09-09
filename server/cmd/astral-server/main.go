@@ -75,11 +75,10 @@ func run() error {
 		}
 		cfg.ServerID = serverID
 
-		recorder := &audit.GormRecorder{DB: gormDB}
 		authSvc = auth.NewService(gormDB, log)
 		// security.md：凭证/会话撤销后主动断开该 actor 的 SSE 流。
 		authSvc.OnRevoke = func(actorID string) { hub.DisconnectActor(actorID) }
-		wsMod := &workspace.Module{DB: gormDB, Audit: recorder, Auth: authSvc}
+		wsMod := &workspace.Module{DB: gormDB, Auth: authSvc}
 		taskMod := &task.Module{DB: gormDB, Auth: authSvc, Log: log}
 		msgMod := &message.Module{DB: gormDB, Auth: authSvc}
 		presMod := &presence.Module{DB: gormDB, Auth: authSvc}

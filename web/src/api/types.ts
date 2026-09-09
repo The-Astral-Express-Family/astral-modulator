@@ -40,10 +40,6 @@ export interface ApiErrorBody {
   request_id: string
 }
 
-export interface ApiErrorEnvelope {
-  error: ApiErrorBody
-}
-
 export interface Page<T> {
   items: T[]
   next_cursor: string | null

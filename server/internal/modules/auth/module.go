@@ -73,18 +73,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) refreshToken(w http.ResponseWriter, r *http.Request) {
-	// CLI：body {refresh_token}；Web：HttpOnly Cookie。
-	var in struct {
-		RefreshToken string `json:"refresh_token"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&in)
-	token := in.RefreshToken
-	if token == "" {
-		if c, err := r.Cookie(CookieName); err == nil {
-			token = c.Value
-		}
-	}
-	pair, err := m.Svc.Refresh(r.Context(), token, clientIP(r), r.UserAgent())
+	pair, err := m.Svc.Refresh(r.Context(), refreshTargetFrom(r), clientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
@@ -93,18 +82,24 @@ func (m *Module) refreshToken(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteOK(w, r, http.StatusOK, pair)
 }
 
-func (m *Module) logout(w http.ResponseWriter, r *http.Request) {
+// refreshTargetFrom 提取 refresh token：CLI 走 body {refresh_token}，
+// Web 无 body 时回退 HttpOnly Cookie（refresh/logout 两个端点共用）。
+func refreshTargetFrom(r *http.Request) string {
 	var in struct {
 		RefreshToken string `json:"refresh_token"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
-	token := in.RefreshToken
-	if token == "" {
-		if c, err := r.Cookie(CookieName); err == nil {
-			token = c.Value
-		}
+	if in.RefreshToken != "" {
+		return in.RefreshToken
 	}
-	if err := m.Svc.Logout(r.Context(), token); err != nil {
+	if c, err := r.Cookie(CookieName); err == nil {
+		return c.Value
+	}
+	return ""
+}
+
+func (m *Module) logout(w http.ResponseWriter, r *http.Request) {
+	if err := m.Svc.Logout(r.Context(), refreshTargetFrom(r)); err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
@@ -122,7 +117,8 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	// TODO(phase-2): 附 session 过期时间（Principal 已带 SessionID）。
+	// TODO(phase-6): 附 session 过期时间（Principal 已带 SessionID；MeResponse
+	// 契约增补属协议变更，需走 openapi 流程并登记 TODO.md §9）。
 	httpx.WriteOK(w, r, http.StatusOK, MeResponse{Actor: actor})
 }
 

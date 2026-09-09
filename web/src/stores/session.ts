@@ -16,7 +16,7 @@ let accessToken: string | null = null
 let accessExpiresAt = 0
 let renewalTimer: ReturnType<typeof setTimeout> | null = null
 
-export function currentAccessToken(): string | null {
+function currentAccessToken(): string | null {
   if (accessToken && Date.now() < accessExpiresAt - 30_000) return accessToken
   return null
 }
@@ -66,6 +66,15 @@ export const useSessionStore = defineStore('session', () => {
 
   const isLoggedIn = computed(() => actor.value !== null)
 
+  /** boot 与 login 共用的会话建立序列：Cookie 换 token 对 → 静默续期 → 拉身份。 */
+  async function establishSession(): Promise<void> {
+    const pair = await authApi.refreshWithCookie()
+    setAccessToken(pair)
+    scheduleRenewal()
+    const me = await authApi.getMe()
+    actor.value = me.actor
+  }
+
   /** 启动：well-known + 尝试 Cookie 续期恢复会话。 */
   async function boot(): Promise<void> {
     if (booted.value) return
@@ -77,11 +86,7 @@ export const useSessionStore = defineStore('session', () => {
       return
     }
     try {
-      const pair = await authApi.refreshWithCookie()
-      setAccessToken(pair)
-      scheduleRenewal()
-      const me = await authApi.getMe()
-      actor.value = me.actor
+      await establishSession()
     } catch {
       actor.value = null // 未登录（正常路径）
     }
@@ -93,11 +98,7 @@ export const useSessionStore = defineStore('session', () => {
 
   async function login(email: string, password: string): Promise<void> {
     await authApi.login(email, password)
-    const pair = await authApi.refreshWithCookie()
-    setAccessToken(pair)
-    scheduleRenewal()
-    const me = await authApi.getMe()
-    actor.value = me.actor
+    await establishSession()
   }
 
   async function logout(): Promise<void> {

@@ -19,6 +19,8 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 const proposalTTL = 120 * time.Second // 只够“三思”，不够挂机
@@ -32,13 +34,6 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Get("/workspaces/{workspace_id}/tags", m.list)
 	r.Post("/workspaces/{workspace_id}/tag-proposals", m.propose)
 	r.Post("/tag-proposals/{proposal_id}/confirm", m.confirm)
-}
-
-// requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
-func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *httpx.APIError {
-	p := auth.PrincipalFrom(r.Context())
-	_, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, wsID, need)
-	return apiErr
 }
 
 // ---- DTO ----
@@ -66,7 +61,7 @@ type proposalDTO struct {
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTagRead); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTagRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -87,7 +82,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeTagWrite); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTagWrite); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -101,20 +96,17 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Action = strings.TrimSpace(in.Action)
 	if in.Action != "create" && in.Action != "rename" && in.Action != "delete" {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed,
-			Message: "action must be create|rename|delete"})
+		httpx.WriteError(w, r, httpx.Invalid("action must be create|rename|delete"))
 		return
 	}
 	normalized, ok := ValidateTagName(in.Name)
 	if !ok {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed,
-			Message: "invalid tag name (1-64 chars, no control chars)"})
+		httpx.WriteError(w, r, httpx.Invalid("invalid tag name (1-64 chars, no control chars)"))
 		return
 	}
 	if in.Action != "create" {
 		if in.TargetTagID == nil || *in.TargetTagID == "" {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed,
-				Message: "target_tag_id required for rename/delete"})
+			httpx.WriteError(w, r, httpx.Invalid("target_tag_id required for rename/delete"))
 			return
 		}
 		var target model.Tag
@@ -139,8 +131,7 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if count > 0 {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 409, Code: httpx.CodeTagAlreadyExists,
-				Message: "tag already exists"})
+			httpx.WriteError(w, r, httpx.Conflict(httpx.CodeTagAlreadyExists, "tag already exists"))
 			return
 		}
 	}
@@ -149,6 +140,11 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
+	}
+	// 空请求头保持 NULL 语义（原 strPtr 行为），不写空串。
+	var reqID *string
+	if v := r.Header.Get(httpx.HeaderRequestID); v != "" {
+		reqID = ptr.Of(v)
 	}
 	now := time.Now()
 	proposal := model.TagProposal{
@@ -160,7 +156,7 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 		TargetTagID:     in.TargetTagID,
 		ConfirmCodeHash: auth.HashToken(code),
 		Status:          "pending",
-		RequestID:       strPtr(r.Header.Get(httpx.HeaderRequestID)),
+		RequestID:       reqID,
 		ExpiresAt:       now.Add(proposalTTL),
 		CreatedAt:       now,
 	}
@@ -208,7 +204,7 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, confirmCode, name string) (*model.Tag, error) {
 	normalized, ok := ValidateTagName(name)
 	if !ok {
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid tag name"}
+		return nil, httpx.Invalid("invalid tag name")
 	}
 
 	var tag model.Tag
@@ -229,14 +225,13 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 			return apiErr
 		}
 		if proposal.Status != "pending" || time.Now().After(proposal.ExpiresAt) {
-			return &httpx.APIError{Status: 409, Code: httpx.CodeTagProposalExpired, Message: "proposal expired or already used"}
+			return httpx.Conflict(httpx.CodeTagProposalExpired, "proposal expired or already used")
 		}
 		if !auth.HashEqual(confirmCode, proposal.ConfirmCodeHash) {
 			return &httpx.APIError{Status: 403, Code: httpx.CodeValidationFailed, Message: "confirm_code mismatch"}
 		}
 		if proposal.CanonicalName != normalized {
-			return &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed,
-				Message: "name does not match the proposed input"}
+			return httpx.Invalid("name does not match the proposed input")
 		}
 		// 单次使用：原子置 confirmed，抢不到即已使用/并发。
 		res := tx.Model(&model.TagProposal{}).
@@ -246,7 +241,7 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
-			return &httpx.APIError{Status: 409, Code: httpx.CodeTagProposalExpired, Message: "proposal already used"}
+			return httpx.Conflict(httpx.CodeTagProposalExpired, "proposal already used")
 		}
 
 		// 执行动作（唯一约束在事务内二次检查，TOCTOU 兜底）。
@@ -259,8 +254,8 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 				CreatedBy: p.ActorID, CreatedAt: time.Now(),
 			}
 			if err := tx.Create(&tag).Error; err != nil {
-				if isUniqueViolation(err) {
-					return &httpx.APIError{Status: 409, Code: httpx.CodeTagAlreadyExists, Message: "tag already exists"}
+				if store.IsUniqueViolation(err) {
+					return httpx.Conflict(httpx.CodeTagAlreadyExists, "tag already exists")
 				}
 				return err
 			}
@@ -270,8 +265,8 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 				Where("id = ? AND workspace_id = ?", *proposal.TargetTagID, proposal.WorkspaceID).
 				Updates(map[string]any{"name": name, "normalized_name": normalized})
 			if res.Error != nil {
-				if isUniqueViolation(res.Error) {
-					return &httpx.APIError{Status: 409, Code: httpx.CodeTagAlreadyExists, Message: "target name already exists"}
+				if store.IsUniqueViolation(res.Error) {
+					return httpx.Conflict(httpx.CodeTagAlreadyExists, "target name already exists")
 				}
 				return res.Error
 			}
@@ -291,7 +286,7 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 			tag.ID, tag.Name = *proposal.TargetTagID, name
 			evType = event.TypeTagDeleted
 		default:
-			return &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "unknown proposal action"}
+			return httpx.Internal("unknown proposal action")
 		}
 
 		if err := audit.RecordInTx(tx, audit.Entry{
@@ -328,16 +323,4 @@ func (m *Module) confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteOK(w, r, http.StatusOK, tagDTO{ID: tagRow.ID, Name: tagRow.Name})
-}
-
-func isUniqueViolation(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "UNIQUE constraint") || strings.Contains(msg, "duplicate key")
-}
-
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }

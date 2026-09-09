@@ -131,7 +131,7 @@ func (s *Service) RequireWorkspaceScopes(ctx context.Context, p *Principal, work
 	scopes, err := s.WorkspaceScopes(ctx, p, workspaceID)
 	if err != nil {
 		s.Log.Error("scope resolution failed", "actor_id", p.ActorID, "workspace_id", workspaceID, "err", err)
-		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "scope resolution failed"}
+		return nil, httpx.Internal("scope resolution failed")
 	}
 	if len(scopes) == 0 {
 		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
@@ -142,6 +142,14 @@ func (s *Service) RequireWorkspaceScopes(ctx context.Context, p *Principal, work
 		}
 	}
 	return scopes, nil
+}
+
+// RequireWorkspace 是 workspace 级 HTTP 端点的授权前置便捷封装：
+// 从请求上下文取 Principal 后调 RequireWorkspaceScopes（非成员 404 /
+// scope 不足 403）。各模块 handler 直接调用，不再各自维护同名私有包装。
+func RequireWorkspace(r *http.Request, svc *Service, workspaceID string, need ...string) *httpx.APIError {
+	_, apiErr := svc.RequireWorkspaceScopes(r.Context(), PrincipalFrom(r.Context()), workspaceID, need...)
+	return apiErr
 }
 
 // ---- 注册 / 登录（human，web 侧；TODO.md D6）----
@@ -160,7 +168,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*model.Actor,
 	}
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	if in.Email == "" || !strings.Contains(in.Email, "@") {
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: "invalid email"}
+		return nil, httpx.Invalid("invalid email")
 	}
 	if strings.TrimSpace(in.DisplayName) == "" {
 		in.DisplayName = strings.SplitN(in.Email, "@", 2)[0]
@@ -204,7 +212,7 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (re
 		if !errors.Is(e, gorm.ErrRecordNotFound) {
 			// 查库失败不能伪装成“凭证错误”（那会引导用户反复改密码）。
 			s.Log.Error("login lookup failed", "err", e)
-			return "", nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "login failed"}
+			return "", nil, httpx.Internal("login failed")
 		}
 		// 不区分“无此邮箱/口令错误”，避免枚举。
 		return "", nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid credentials"}
@@ -352,8 +360,7 @@ func (s *Service) revokeFamily(ctx context.Context, sess *model.Session, reason 
 	}
 	s.Log.Warn("session family revoked", "reason", reason, "actor_id", sess.ActorID)
 	s.notifyRevoked(sess.ActorID)
-	// TODO(phase-1): 撤销后主动断开该 family 的 SSE 连接（security.md）。
-	// TODO(phase-2): audit 记录（audit recorder 注入后）。
+	// TODO: audit 记录撤销动作（需要向 Service 注入 audit recorder，见 TODO.md §3.2）。
 }
 
 // Logout 撤销 refresh token 对应的 session。
@@ -427,7 +434,7 @@ func (s *Service) authenticateAccessToken(ctx context.Context, token string) (*P
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid access token"}
 	}
 	if err != nil {
-		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "auth lookup failed"}
+		return nil, httpx.Internal("auth lookup failed")
 	}
 	if sess.RevokedAt != nil {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "session revoked"}
@@ -445,7 +452,7 @@ func (s *Service) authenticateCredential(ctx context.Context, secret string) (*P
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid credential"}
 	}
 	if err != nil {
-		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "auth lookup failed"}
+		return nil, httpx.Internal("auth lookup failed")
 	}
 	if cred.RevokedAt != nil {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "credential revoked"}
@@ -479,7 +486,7 @@ func (s *Service) authenticateCookieSession(ctx context.Context, refresh string)
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid session"}
 	}
 	if err != nil {
-		return nil, &httpx.APIError{Status: 500, Code: httpx.CodeInternalError, Message: "auth lookup failed"}
+		return nil, httpx.Internal("auth lookup failed")
 	}
 	if sess.RevokedAt != nil {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "session revoked"}

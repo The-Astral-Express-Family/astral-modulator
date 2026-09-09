@@ -16,7 +16,6 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
@@ -39,7 +38,7 @@ func approvalSetup(t *testing.T) *approvalFixture {
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	hub := event.NewHub()
-	m := &Module{DB: db, Audit: &audit.GormRecorder{DB: db}, Auth: svc}
+	m := &Module{DB: db, Auth: svc}
 
 	ownerActor := &model.Actor{ID: "usr_owner", Kind: "human", DisplayName: "Owner"}
 	maintActor := &model.Actor{ID: "usr_maint", Kind: "human", DisplayName: "Maint"}

@@ -38,7 +38,8 @@ func (s *Service) Authenticate(next http.Handler) http.Handler {
 		}
 		p, apiErr := s.ResolvePrincipal(r.Context(), bearer, cookieRefresh)
 		if apiErr != nil {
-			// TODO(phase-2): 接 audit recorder 记录认证失败（security.md 审计要求）。
+			// TODO: audit 记录认证失败（security.md 审计要求，TODO.md §3.2；
+			// 需要先向 Service 注入 recorder，避免中间件反向依赖装配层）。
 			httpx.WriteError(w, r, apiErr)
 			return
 		}

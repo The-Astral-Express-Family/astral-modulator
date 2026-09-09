@@ -18,6 +18,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 var errAlreadyLinked = errors.New("task tag already linked")
@@ -99,7 +100,7 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 		}
 		if err := tx.Create(&model.TaskTag{TaskID: taskID, TagID: tagID, AddedBy: p.ActorID}).Error; err != nil {
 			// 并发重复挂载：整体回滚（含 revision bump），等价目标状态已达成。
-			if isUniqueViolation(err) {
+			if store.IsUniqueViolation(err) {
 				return errAlreadyLinked
 			}
 			return err

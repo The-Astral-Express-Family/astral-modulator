@@ -194,6 +194,38 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   refresh 重放撤族、credential 吊销、logout 四条路径触发）。
 - 协议行为变更登记见 §9；openapi 新增 2 个操作（attachTaskTag/detachTaskTag）。
 
+### 第 10 轮（2026-09-09）：CI 修复 + 代码/逻辑卫生轮（双仓库）
+
+- **CI 修复（先导）**：
+  - store.Migrate 的 goose 目录参数与 embed FS 根不匹配（`*.sql` 直接嵌在根，
+    却找 `migrations/` 子目录），postgres migration test 自引入 embed 起从未真正
+    跑过；改指 FS 根并新增无库回归测试（CollectMigrations 锁定 (FS, dir) 组合）；
+  - 修复暴露出的 00003 迁移解析失败：plpgsql 函数体加 goose
+    StatementBegin/End（分号切分器不识别 $$ 引用）。
+- **去重（server）**：4 个模块逐字复制的 `requireWorkspace` 上收为
+  `auth.RequireWorkspace`（workspace 模块的三返回值变体语义不同，保留）；
+  唯一约束冲突判断 3 份实现（含 "constraint failed" 文案分叉）归一为
+  `store.IsUniqueViolation`；`v := x; &x` 取址样板 8 处归一为 `ptr.Of`；
+  user_code 与 tag confirm_code 的去混淆字母表+生成循环归一为
+  `auth.NewRandomCode`。
+- **死代码移除**：workspace.Module.Audit 字段（装配与测试零有效引用）；
+  web `ApiErrorEnvelope` 类型、`AstralApiError`/`currentAccessToken` 的多余导出；
+  config 的 `getEnv` 纯别名。
+- **行为对齐**：RevokeCredential 404 由 `VALIDATION_FAILED` 修正为 `NOT_FOUND`
+  （对齐第 7 轮已登记的次级资源 404 裁决，openapi 该端点未文档化错误码，无契约冲突）；
+  audit 录入在调用方未显式传值时从请求上下文补 `request_id`
+  （列此前恒空）；message.send 的 task 目标查询区分「查无此行 404」与「DB 故障 500」
+  （此前一律 404）。
+- **构造器收敛**：新增 `httpx.Internal`/`httpx.ConflictWith`，全库 ~40 处
+  APIError 字面量改为构造器（带 Retryable 的扩展字面量保留）。
+- **web**：session boot/login 的会话建立序列去重（establishSession）。
+- **过时 TODO 注释清理**：service.go 撤销断流（第 9 轮已实装）、middleware/router
+  的孤儿 phase-2 标签（改指本文件 §3.2）、module.go 的 me() phase 标签。
+- **本文件对账**：§3.2/§4.1/§6 中「已完成未勾选」的撤销断流、T-ws-7、
+  refresh 窗口测试补勾并注明轮次；§10 桩清单与实际一致。
+- **astral-cli**：见该仓库同轮提交（commitlint 放行 protocol、macos-13 摘除、
+  严格构建修复、死代码与过时表述清理、MANIFEST 修订链修复、文档对齐）。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -252,9 +284,13 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 ### 3.2 Phase 1 剩余（下轮）
 
 - [ ] user_code 防枚举限流（HTTP 层，phase-6 一并做 rate limit）
-- [ ] credential/session 撤销后主动断开 SSE 连接（依赖 hub 订阅者携带身份）
-- [ ] 认证失败写 audit（Authenticate 中间件当前只拒不记）
-- [ ] refresh 家族生命周期上限窗口测试加固（轮换滑动 vs 创建起算的边界用例）
+- [x] credential/session 撤销后主动断开 SSE 连接（第 9 轮实装：Hub 订阅携带
+      actor 身份，auth.OnRevoke → Hub.DisconnectActor，覆盖 session 撤族/
+      refresh 重放/credential 吊销/logout 四条路径）
+- [ ] 认证失败写 audit（Authenticate 中间件当前只拒不记；需先向 Service
+      注入 audit recorder）
+- [x] refresh 家族生命周期上限窗口测试加固（第 9 轮随 D10 补齐：89d 过 /
+      90d+1s 拒）
 
 ## 4. Phase 2 — Workspace（architecture §27 Phase 2）
 
@@ -270,8 +306,9 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
       携带头即激活）
 - [x] T-ws-6 promote_owner approval 状态机（第 8 轮实装：approvals 表 + approve/deny +
       同事务 promote；D8 登记 MVP 允许自批，双人裁决为后续收紧项）
-- [ ] T-ws-7 agents 列表按 workspace 过滤（需 agent-workspace 绑定模型；
-      见 workspace/module.go listAgents TODO，审查轮 2026-09-07 登记）
+- [x] T-ws-7 agents 列表按 workspace 过滤（第 9 轮随 D9 实装：**推翻原
+      「需绑定模型」前提**，不建第三条路径；listAgents = membership 行 ∪
+      有效 credential 绑定，createAgent 同事务补 role='agent' 成员行）
 
 ## 5. Phase 3 — TODO 树 / 搜索 / Tags（architecture §27 Phase 3）
 
@@ -302,7 +339,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
       待多实例需求出现，见 architecture §19 触发条件）
 - [x] SSE resume：Last-Event-ID 重放 + snapshot.required（第 6 轮，S1 裁决落定）
 - [x] 裁决并登记 S1
-- [ ] 凭证 revoke 后主动断流（hub 订阅者需携带 actor/credential 标识）
+- [x] 凭证 revoke 后主动断流（第 9 轮，见 §3.2 同项）
 - [ ] messaging thread 树形聚合视图（GUI/CLI 消费侧，随任务视图一并做）
 
 ## 7. Phase 5 — Memory / Document Sync（architecture §27 Phase 5）
@@ -357,7 +394,8 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 1. `GET /.well-known/astral` — server_id/api_base/protocol_version（已实装 ✅）
 2. `GET /api/v1/meta/capabilities` — features 门控（已实装 ✅，features 暂为空）
 3. 错误 envelope 解析 — 所有非 2xx（已实装 ✅；`NOT_IMPLEMENTED` 501 桩仅剩
-   task.messages.list（phase-4）、document/memory（phase-5）、audit.list（phase-6））
+   document 5 端点（phase-5）与 audit.list（phase-6）；memory 因 M1 未裁决
+   尚未注册路由）
 4. 公共响应头回显 — `X-Astral-Request-Id`/`X-Astral-Protocol-Version`（已实装 ✅）
 5. ID 形状 `^[a-z]{2,3}_<uuidv7>` — CLI 只做透传与展示（已实装 ✅）
 6. **Device Flow 全链路（已实装 ✅，第 2 轮）**：
@@ -395,10 +433,25 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 > 优先级原则：先闭合「已宣称完成但实际断链」的功能（D11），再做新面。
 
 1. 【✅ 第 9 轮完成】D11 tag attach/detach + D9 T-ws-7 + D10 session 上限 + 凭证/会话撤销断流
-2. CLI login/init 实装（消费协议快照 v1：device flow + workspace 绑定；
-   `token_provider`/`openInBrowser` 等 seam 已就位）——打通双仓库端到端闭环
-3. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理；
+2. 【✅ 第 10 轮完成】CI 修复（goose embed 目录、迁移 StatementBegin/End）+ 双仓库卫生轮
+3. **CLI login/init 实装**（下一轮主题；消费协议快照 v1，打通双仓库端到端闭环）。
+   实施前设计预审（2026-09-09，先行裁决避免边写边定）：
+   - **D12 凭证存储分槽**：device flow 产出的 human session token 对与 agent
+     credential 语义不同（session 可 refresh 轮换 / credential 是静态 secret），
+     credential store 顶层增设 `session` 槽（per server），不与 `credentials`
+     混放；重复 login 覆盖 session 槽并先尝试 logout 旧值（服务端撤族）。
+   - **D13 刷新策略 = 惰性**：CLI 不做后台刷新；401 时按 astral-cli §13 约定
+     单次 refresh → 重放原请求，再 401 即报 AUTH_REQUIRED 引导重新 login
+     （启动时不主动 refresh，离线可用性优先）。
+   - **init discovery 顺序照抄 ARCHITECTURE §9.1**（--server > ASTRAL_SERVER >
+     绑定文件 > 默认 localhost），不发明第二套优先级；`--create` 仅在查询
+     空结果时可用，命中即绑定。
+   - **browser 打开失败不阻塞**：verification_uri_complete 打不开（无 GUI/远端
+     shell）时打印 URL 与 user_code 降级为手动流程。
+   - doctor 增加真实的服务端连通性检查（此前措辞声称「等 HTTP client 接线」，
+     而实际 client 已就位——本轮已修正该过时表述）。
+4. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理；
    D11 后 tag 过滤/展示数据源才真实可用）
-4. Web/GUI approval 裁决视图（GET /workspaces/{id}/approvals?status=requested）
-5. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
-6. rate limit（auth/device 端点优先；phase-6）
+5. Web/GUI approval 裁决视图（GET /workspaces/{id}/approvals?status=requested）
+6. Web device 审批页联调收尾：登录后轮询/自动刷新 pending 请求
+7. rate limit（auth/device 端点优先；phase-6）

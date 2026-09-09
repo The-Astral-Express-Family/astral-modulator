@@ -3,7 +3,8 @@
 
 import type { ApiErrorBody, ErrorCode } from './types'
 
-export class AstralApiError extends Error {
+// AstralApiError 是内部错误载体；UI 一律经 formatApiError 消费，勿直接 import。
+class AstralApiError extends Error {
   readonly code: ErrorCode
   readonly retryable: boolean
   readonly details?: Record<string, unknown>

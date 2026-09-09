@@ -41,7 +41,7 @@ type Config struct {
 func Load() Config {
 	cfg := Config{
 		HTTPAddr:       env("ASTRAL_HTTP_ADDR", ":8080"),
-		PublicURL:      strings.TrimRight(getEnv("ASTRAL_PUBLIC_URL"), "/"),
+		PublicURL:      strings.TrimRight(os.Getenv("ASTRAL_PUBLIC_URL"), "/"),
 		DatabaseDSN:    getEnvDefault("ASTRAL_DATABASE_DSN", "DATABASE_URL"),
 		ServerID:       os.Getenv("ASTRAL_SERVER_ID"),
 		AutoMigrate:    envBool("ASTRAL_AUTO_MIGRATE", true),
@@ -76,8 +76,6 @@ func env(key, def string) string {
 	}
 	return def
 }
-
-func getEnv(key string) string { return os.Getenv(key) }
 
 func getEnvDefault(primary, fallback string) string {
 	if v := os.Getenv(primary); v != "" {

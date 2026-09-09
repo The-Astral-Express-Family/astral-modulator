@@ -50,17 +50,10 @@ func toMessageDTO(row model.Message) messageDTO {
 	}
 }
 
-// requireWorkspace：workspace 级端点的授权前置（非成员 404 / scope 不足 403）。
-func (m *Module) requireWorkspace(r *http.Request, wsID string, need string) *httpx.APIError {
-	p := auth.PrincipalFrom(r.Context())
-	_, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, wsID, need)
-	return apiErr
-}
-
 func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeMessageSend); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeMessageSend); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -114,7 +107,16 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		in.Target.ID = wsID
 	case "task":
 		var t model.Task
-		if err := m.DB.WithContext(r.Context()).First(&t, "id = ?", in.Target.ID).Error; err != nil || t.WorkspaceID != wsID {
+		if err := m.DB.WithContext(r.Context()).First(&t, "id = ?", in.Target.ID).Error; err != nil {
+			// 与 thread/父任务查询同规矩：查无此行 404，DB 故障如实 500。
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.WriteError(w, r, httpx.NotFound("target task not found in workspace"))
+				return
+			}
+			httpx.RespondError(w, r, err)
+			return
+		}
+		if t.WorkspaceID != wsID {
 			httpx.WriteError(w, r, httpx.NotFound("target task not found in workspace"))
 			return
 		}
@@ -182,7 +184,7 @@ func (m *Module) reachableInWorkspace(ctx context.Context, wsID, actorID string)
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	if apiErr := m.requireWorkspace(r, wsID, auth.ScopeMessageRead); apiErr != nil {
+	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeMessageRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}

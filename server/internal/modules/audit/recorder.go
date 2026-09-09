@@ -6,8 +6,10 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 )
 
 // GormRecorder 把审计写入 audit_log（00007）。业务事务内调用时传 tx，
@@ -42,31 +44,32 @@ func (r *GormRecorder) Record(ctx context.Context, e Entry) error {
 	if err != nil {
 		details = []byte(`{}`)
 	}
+	// 调用方未带 request id 时从请求上下文补齐（业务事务的 ctx 即请求 ctx），
+	// 保证 audit_log.request_id 列对全部审计行有意义。
+	reqID := e.RequestID
+	if reqID == "" {
+		reqID = httpx.RequestIDFrom(ctx)
+	}
 	row := model.AuditEntry{
 		ID:      ids.New(ids.Audit),
 		Action:  e.Action,
 		Outcome: e.Outcome,
 		Details: details,
 	}
+	if reqID != "" {
+		row.RequestID = ptr.Of(reqID)
+	}
 	if e.WorkspaceID != "" {
-		ws := e.WorkspaceID
-		row.WorkspaceID = &ws
+		row.WorkspaceID = ptr.Of(e.WorkspaceID)
 	}
 	if e.ActorID != "" {
-		a := e.ActorID
-		row.ActorID = &a
+		row.ActorID = ptr.Of(e.ActorID)
 	}
 	if e.TargetType != "" {
-		t := e.TargetType
-		row.TargetType = &t
+		row.TargetType = ptr.Of(e.TargetType)
 	}
 	if e.TargetID != "" {
-		t := e.TargetID
-		row.TargetID = &t
-	}
-	if e.RequestID != "" {
-		req := e.RequestID
-		row.RequestID = &req
+		row.TargetID = ptr.Of(e.TargetID)
 	}
 	return r.DB.WithContext(ctx).Create(&row).Error
 }

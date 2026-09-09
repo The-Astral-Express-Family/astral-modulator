@@ -106,7 +106,7 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		// 公共 auth 端点（免鉴权；device create/exchange、register/login/refresh/logout）。
 		mods.Auth.RegisterPublic(api)
 
-		// 受保护 API。TODO(phase-2): 经 audit recorder 记录授权失败。
+		// 受保护 API。TODO: 认证/授权失败写 audit（见 TODO.md §3.2）。
 		api.Group(func(priv chi.Router) {
 			priv.Use(mods.Auth.Svc.Authenticate)
 			// 幂等：挂载于鉴权后（actor 身份参与键空间）；仅当客户端携带

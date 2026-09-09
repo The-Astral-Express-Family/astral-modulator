@@ -76,11 +76,10 @@ func collectChiRoutes(t *testing.T) map[string]bool {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, log)
-	recorder := &audit.GormRecorder{DB: db}
 	hub := event.NewHub()
 	mods := &Modules{
 		Auth:      &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
-		Workspace: &workspace.Module{DB: db, Audit: recorder, Auth: svc},
+		Workspace: &workspace.Module{DB: db, Auth: svc},
 		Task:      &task.Module{DB: db, Auth: svc},
 		Tag:       &tag.Module{},
 		Memory:    &memory.Module{},

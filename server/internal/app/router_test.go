@@ -33,12 +33,11 @@ func newTestServer(t *testing.T) *httptest.Server {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, log)
-	recorder := &audit.GormRecorder{DB: db}
 	hub := event.NewHub()
 	mods := &Modules{
 		Idempotency: &idempotency.Middleware{DB: db, Log: log},
 		Auth:        &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
-		Workspace:   &workspace.Module{DB: db, Audit: recorder, Auth: svc},
+		Workspace:   &workspace.Module{DB: db, Auth: svc},
 		Task:        &task.Module{DB: db, Auth: svc},
 		Tag:         &tag.Module{},
 		Memory:      &memory.Module{},

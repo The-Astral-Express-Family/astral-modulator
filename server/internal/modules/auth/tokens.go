@@ -47,29 +47,36 @@ func HashEqual(token, hash string) bool {
 	return subtle.ConstantTimeCompare([]byte(HashToken(token)), []byte(hash)) == 1
 }
 
-// userCodeAlphabet 去掉易混淆字符（0/O/1/I/L）。
-const userCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+// humanCodeAlphabet 去掉易混淆字符（0/O/1/I/L）。
+// 供 user_code 与 tag confirm_code 共用（后者的生成器在 tag 包）。
+const humanCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+
+// NewRandomCode 生成 n 位去混淆字符的随机码。
+// 单一授权点：新增需要"人类比对码"的场景时复用，不要再抄字母表。
+func NewRandomCode(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	out := make([]byte, n)
+	for i, b := range buf {
+		out[i] = humanCodeAlphabet[int(b)%len(humanCodeAlphabet)]
+	}
+	return string(out), nil
+}
 
 // NewUserCode 生成 XXXX-XXXX 形式的人类比对码（security.md：强度要求低于
 // device secret，但需限流防枚举——限流在 HTTP 层做，TODO(phase-6)）。
 func NewUserCode() (string, error) {
-	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
+	half, err := NewRandomCode(4)
+	if err != nil {
 		return "", err
 	}
-	out := make([]byte, 9)
-	for i := 0; i < 9; i++ {
-		if i == 4 {
-			out[i] = '-'
-			continue
-		}
-		idx := i
-		if idx > 4 {
-			idx--
-		}
-		out[i] = userCodeAlphabet[int(buf[idx])%len(userCodeAlphabet)]
+	tail, err := NewRandomCode(4)
+	if err != nil {
+		return "", err
 	}
-	return string(out), nil
+	return half + "-" + tail, nil
 }
 
 // IsCredentialToken 判断 Bearer 值是否为 agent/service credential（区别于 human access token）。
