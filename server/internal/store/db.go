@@ -44,6 +44,10 @@ func Open(ctx context.Context, dsn string, autoMigrate bool, log *slog.Logger) (
 	return db, nil
 }
 
+// migrationsDir 是 migrations.FS 内的 migration 目录。
+// embed 声明是 `//go:embed *.sql`，FS 根就是 .sql 所在目录，故为 "."。
+const migrationsDir = "."
+
 // Migrate 以嵌入的 goose migration 执行 up。幂等。
 func Migrate(ctx context.Context, db *sql.DB) error {
 	goose.SetBaseFS(migrations.FS)
@@ -51,7 +55,7 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	// TODO(phase-6): 多实例部署改为部署流程显式执行 + 启动时仅校验版本兼容（deployment §14）。
-	return goose.UpContext(ctx, db, "migrations")
+	return goose.UpContext(ctx, db, migrationsDir)
 }
 
 // Ping 供 /readyz 判断数据库可用性。
