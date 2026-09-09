@@ -226,6 +226,26 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - **astral-cli**：见该仓库同轮提交（commitlint 放行 protocol、macos-13 摘除、
   严格构建修复、死代码与过时表述清理、MANIFEST 修订链修复、文档对齐）。
 
+### 第 11 轮（2026-09-10）：astral-cli auth 链路实装（消费协议快照 v1）
+
+> 按 §11 第 3 项的设计预审（D12/D13）照图施工，未新增契约、未改 openapi。
+
+- **D12 会话分槽落地**：`credentials.json` 升 v2——human 会话（device flow 产出、
+  按 canonical server URL 键）与 agent credential（按 server_id 键）分槽互不混淆；
+- **device flow**（A1/RFC 8628）：well-known 协议门 → 创建授权 → 拉起浏览器
+  （失败降级手动 URL+user_code，输出走 stderr 保住 --json 单对象契约）→
+  轮询兑换（AUTHORIZATION_PENDING/SLOW_DOWN 退避 +5s、401 拒绝、expires_in 超窗 TIMEOUT）；
+  传输/等待均为注入 seam，轮询状态机纯逻辑单测覆盖；
+- **D13 惰性刷新**：whoami/init 的已认证调用统一经 withLazyRefresh——
+  401 时单次轮换并重放，refresh 再 401 即判整族撤销并清除本地会话；
+- **login/whoami/logout/init 实装**：init 走 §9.3 状态机（解析 → 发现 →
+  ?name= 解析 → --create 可选创建 → GET /workspaces/{id} 可见性校验 →
+  绑定写入，已绑定同目标幂等、异目标须 --rebind）；logout 服务端登出尽力而为 +
+  本地必清；server 解析统一为 positional > --server > ASTRAL_SERVER；
+- **doctor** 增加服务端连通性探测（仅在 env/绑定给出目标时，离线仍是合法状态）；
+- 测试 55 项全绿（新增 device flow 状态机 6 项、会话槽往返 2 项）；CI 4 平台全绿。
+- CLI 侧对应提交：astral-cli@4cd6a74。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -434,22 +454,8 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 
 1. 【✅ 第 9 轮完成】D11 tag attach/detach + D9 T-ws-7 + D10 session 上限 + 凭证/会话撤销断流
 2. 【✅ 第 10 轮完成】CI 修复（goose embed 目录、迁移 StatementBegin/End）+ 双仓库卫生轮
-3. **CLI login/init 实装**（下一轮主题；消费协议快照 v1，打通双仓库端到端闭环）。
-   实施前设计预审（2026-09-09，先行裁决避免边写边定）：
-   - **D12 凭证存储分槽**：device flow 产出的 human session token 对与 agent
-     credential 语义不同（session 可 refresh 轮换 / credential 是静态 secret），
-     credential store 顶层增设 `session` 槽（per server），不与 `credentials`
-     混放；重复 login 覆盖 session 槽并先尝试 logout 旧值（服务端撤族）。
-   - **D13 刷新策略 = 惰性**：CLI 不做后台刷新；401 时按 astral-cli §13 约定
-     单次 refresh → 重放原请求，再 401 即报 AUTH_REQUIRED 引导重新 login
-     （启动时不主动 refresh，离线可用性优先）。
-   - **init discovery 顺序照抄 ARCHITECTURE §9.1**（--server > ASTRAL_SERVER >
-     绑定文件 > 默认 localhost），不发明第二套优先级；`--create` 仅在查询
-     空结果时可用，命中即绑定。
-   - **browser 打开失败不阻塞**：verification_uri_complete 打不开（无 GUI/远端
-     shell）时打印 URL 与 user_code 降级为手动流程。
-   - doctor 增加真实的服务端连通性检查（此前措辞声称「等 HTTP client 接线」，
-     而实际 client 已就位——本轮已修正该过时表述）。
+3. 【✅ 第 11 轮完成】CLI login/init 实装（按 D12/D13 预审施工，双仓库端到端闭环；
+   端到端联调依赖真实服务器 + 浏览器审批，留待部署环境手动验收）
 4. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理；
    D11 后 tag 过滤/展示数据源才真实可用）
 5. Web/GUI approval 裁决视图（GET /workspaces/{id}/approvals?status=requested）
