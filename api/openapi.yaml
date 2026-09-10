@@ -462,9 +462,9 @@ paths:
         子层用 GET /tasks/{task_id}/children 逐容器下钻（D15：不做全量平铺）。
       operationId: listWorkspaceChildren
       parameters:
-        - { name: status, in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
-        - { name: tag, in: query, schema: { type: string } }
-        - { name: assignee, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/TaskStatusFilter" }
+        - { $ref: "#/components/parameters/TaskTagFilter" }
+        - { $ref: "#/components/parameters/TaskAssigneeFilter" }
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
@@ -499,9 +499,9 @@ paths:
       summary: task 容器的子任务集合（直接子层，仅此一层；与 workspace children 同参数同响应）
       operationId: listTaskChildren
       parameters:
-        - { name: status, in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
-        - { name: tag, in: query, schema: { type: string } }
-        - { name: assignee, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/TaskStatusFilter" }
+        - { $ref: "#/components/parameters/TaskTagFilter" }
+        - { $ref: "#/components/parameters/TaskAssigneeFilter" }
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
@@ -524,12 +524,12 @@ paths:
       operationId: searchTasks
       parameters:
         - { $ref: "#/components/parameters/WorkspaceId" }
-        - { name: regex, in: query, schema: { type: string, maxLength: 512 } }
-        - { name: fuzzy, in: query, schema: { type: string, maxLength: 256 } }
+        - { $ref: "#/components/parameters/TaskRegexFilter" }
+        - { $ref: "#/components/parameters/TaskFuzzyFilter" }
         - { name: parent_id, in: query, schema: { type: string } }
-        - { name: tag, in: query, schema: { type: string } }
-        - { name: status, in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
-        - { name: assignee, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/TaskTagFilter" }
+        - { $ref: "#/components/parameters/TaskStatusFilter" }
+        - { $ref: "#/components/parameters/TaskAssigneeFilter" }
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
@@ -1032,6 +1032,26 @@ components:
       name: cursor
       in: query
       schema: { type: string, description: 不透明游标，取自 next_cursor }
+    TaskStatusFilter:
+      name: status
+      in: query
+      schema: { $ref: "#/components/schemas/TaskStatus" }
+    TaskTagFilter:
+      name: tag
+      in: query
+      schema: { type: string }
+    TaskAssigneeFilter:
+      name: assignee
+      in: query
+      schema: { type: string }
+    TaskRegexFilter:
+      name: regex
+      in: query
+      schema: { type: string, maxLength: 512 }
+    TaskFuzzyFilter:
+      name: fuzzy
+      in: query
+      schema: { type: string, maxLength: 256 }
 
   responses:
     Error:

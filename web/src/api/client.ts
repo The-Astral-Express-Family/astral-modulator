@@ -50,6 +50,16 @@ export interface RequestOptions {
   idempotencyKey?: string
 }
 
+/** 拼接路径与查询串：undefined/空串字段跳过；查询为空时不追加 ?。 */
+export function apiPath(path: string, params: object = {}): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') q.set(k, String(v))
+  }
+  const qs = q.toString()
+  return qs ? `${path}?${qs}` : path
+}
+
 export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',

@@ -18,7 +18,6 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
 )
 
 const (
@@ -65,29 +64,20 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 		}
 	}
 
-	// 1. 结构化过滤（SQL）+ 候选集封顶。
-	// 列名一律限定 tasks. 前缀：tag 过滤会 JOIN tags，后者拥有同名
-	// workspace_id/created_at 列，避免歧义（sqlite/PG 均严格报错）。
+	// 1. 结构化过滤（SQL）+ 候选集封顶。三件套与 children 集合共用同一实现
+	//（filters.go），列名限定 tasks. 前缀的防歧义说明见彼处。
 	query := m.DB.WithContext(ctx).Model(&model.Task{}).Where("tasks.workspace_id = ?", wsID)
 	if params.ParentID != "" {
 		query = query.Where("tasks.parent_id = ?", params.ParentID)
 	}
-	if params.Status != "" {
-		if !validStatus(params.Status) {
-			return nil, "", httpx.Invalid("invalid status")
-		}
-		query = query.Where("tasks.status = ?", params.Status)
-	}
-	if params.Tag != "" {
-		query = query.Joins("JOIN task_tags tt ON tt.task_id = tasks.id").
-			Joins("JOIN tags g ON g.id = tt.tag_id").
-			Where("g.normalized_name = ?", tag.NormalizeName(params.Tag))
-	}
-	if params.Assignee != "" {
-		query = query.Where("tasks.assignee_actor_id = ?", params.Assignee)
+	query, apiErr := applyTaskFilters(query, taskFilters{
+		Status: params.Status, Tag: params.Tag, Assignee: params.Assignee,
+	})
+	if apiErr != nil {
+		return nil, "", apiErr
 	}
 	var candidates []model.Task
-	// JOIN 场景下列名需限定表名（tags 也有 created_at，避免歧义）。
+	// ORDER BY 同样限定表名（tags 也有 created_at，避免歧义）。
 	if err := query.Order("tasks.created_at DESC, tasks.id DESC").Limit(maxScanCap).Find(&candidates).Error; err != nil {
 		return nil, "", httpx.Internal("search query failed")
 	}
@@ -142,19 +132,15 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 		next = encodeSearchCursor(end)
 	}
 
-	// 5. 批量填充 tags 与 children_count（D15：结果行内恒带；每页各一次查询）。
-	pageIDs := make([]string, 0, end-offset)
-	for i := offset; i < end; i++ {
-		pageIDs = append(pageIDs, pool[i].ID)
-	}
-	tagsByTask := m.tagsForTasks(ctx, pageIDs)
-	counts := m.childCounts(ctx, pageIDs)
-
-	out := make([]ScoredTask, 0, end-offset)
-	for i := offset; i < end; i++ {
-		st := ScoredTask{taskDTO: toTaskDTO(pool[i], nil, tagsByTask[pool[i].ID], counts[pool[i].ID])}
+	// 5. 批量填充 tags 与 children_count（D15：结果行内恒带）。行组装与
+	// children 集合共用 enrichTasks，这里只叠加 fuzzy 排序分。
+	page := pool[offset:end]
+	dtos := m.enrichTasks(ctx, page)
+	out := make([]ScoredTask, 0, len(dtos))
+	for i := range dtos {
+		st := ScoredTask{taskDTO: dtos[i]}
 		if scores != nil {
-			v := scores[pool[i].ID]
+			v := scores[page[i].ID]
 			st.Score = &v
 		}
 		out = append(out, st)

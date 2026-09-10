@@ -25,25 +25,13 @@ var errAlreadyLinked = errors.New("task tag already linked")
 
 // loadTags 是 handler 侧便捷入口。
 func (m *Module) loadTags(r *http.Request, taskID string) []tag.TagDTO {
-	return m.loadTaskTags(r.Context(), m.DB, taskID)
+	return m.loadTaskTags(r.Context(), taskID)
 }
 
-// loadTaskTags 取任务的 tag 列表（service 层与 handler 共用）。
-func (m *Module) loadTaskTags(ctx context.Context, db *gorm.DB, taskID string) []tag.TagDTO {
-	var rows []model.Tag
-	err := db.WithContext(ctx).
-		Joins("JOIN task_tags tt ON tt.tag_id = tags.id").
-		Where("tt.task_id = ?", taskID).
-		Order("tags.created_at ASC").Find(&rows).Error
-	if err != nil {
-		m.logger().Warn("load task tags failed", "task_id", taskID, "err", err)
-		return nil
-	}
-	out := make([]tag.TagDTO, 0, len(rows))
-	for _, t := range rows {
-		out = append(out, tag.TagDTO{ID: t.ID, WorkspaceID: t.WorkspaceID, Name: t.Name})
-	}
-	return out
+// loadTaskTags 取任务的 tag 列表（service 层与 handler 共用）。单任务场景是
+// 批量版 tagsForTasks 的退化调用——tag 行组装与排序只有 tagsForTasks 一处实现。
+func (m *Module) loadTaskTags(ctx context.Context, taskID string) []tag.TagDTO {
+	return m.tagsForTasks(ctx, []string{taskID})[taskID]
 }
 
 // AttachTag 关联核心（HTTP handler 与测试共用，语义同 Claim/Confirm）：
@@ -80,7 +68,7 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 		return nil, nil, err
 	}
 	if linked > 0 {
-		return &t, m.loadTaskTags(ctx, m.DB, taskID), nil
+		return &t, m.loadTaskTags(ctx, taskID), nil
 	}
 
 	var fresh model.Task
@@ -123,12 +111,12 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 		if e := m.DB.WithContext(ctx).First(&fresh, "id = ?", taskID).Error; e != nil {
 			return nil, nil, e
 		}
-		return &fresh, m.loadTaskTags(ctx, m.DB, taskID), nil
+		return &fresh, m.loadTaskTags(ctx, taskID), nil
 	}
 	if err != nil {
 		return nil, nil, err
 	}
-	return &fresh, m.loadTaskTags(ctx, m.DB, taskID), nil
+	return &fresh, m.loadTaskTags(ctx, taskID), nil
 }
 
 // DetachTag 摘除关联。未挂载（或 tag 已删连带清理）→ no-op，不动 revision。

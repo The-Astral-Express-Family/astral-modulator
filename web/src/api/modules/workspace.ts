@@ -1,20 +1,15 @@
 // workspace 作用域资源的 API 模块。路径必须与 api/openapi.yaml 一字不差；
 // approvals 相关（architecture §22，T-ws-6）。
 
-import { apiFetch } from '../client'
+import { apiFetch, apiPath } from '../client'
 import type { Approval, ApprovalPage, Member, Page, Tag } from '../types'
 
 export function listApprovals(
   workspaceId: string,
   params: { status?: string; limit?: number; cursor?: string } = {},
 ): Promise<ApprovalPage> {
-  const q = new URLSearchParams()
-  if (params.status) q.set('status', params.status)
-  if (params.limit) q.set('limit', String(params.limit))
-  if (params.cursor) q.set('cursor', params.cursor)
-  const qs = q.toString()
   return apiFetch(
-    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/approvals${qs ? `?${qs}` : ''}`,
+    apiPath(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/approvals`, params),
   )
 }
 

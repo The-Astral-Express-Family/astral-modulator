@@ -52,28 +52,19 @@ func (m *Module) listTaskChildren(w http.ResponseWriter, r *http.Request) {
 // sqlite/PG 单列比较行为一致）。
 func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID string, parentID *string) {
 	q := r.URL.Query()
-	query := m.DB.WithContext(r.Context()).Model(&model.Task{}).Where("workspace_id = ?", wsID)
+	query := m.DB.WithContext(r.Context()).Model(&model.Task{}).Where("tasks.workspace_id = ?", wsID)
 	if parentID == nil {
-		query = query.Where("parent_id IS NULL")
+		query = query.Where("tasks.parent_id IS NULL")
 	} else {
-		query = query.Where("parent_id = ?", *parentID)
+		query = query.Where("tasks.parent_id = ?", *parentID)
 	}
-	// JOIN 场景下列名一律限定 tasks. 前缀（tags 也有 workspace_id/created_at，
-	// 不限定会在 sqlite/PG 下歧义报错——见 search.go 同款注释）。
-	if v := q.Get("status"); v != "" {
-		if !validStatus(v) {
-			httpx.WriteError(w, r, httpx.Invalid("invalid status"))
-			return
-		}
-		query = query.Where("tasks.status = ?", v)
-	}
-	if v := q.Get("tag"); v != "" {
-		query = query.Joins("JOIN task_tags tt ON tt.task_id = tasks.id").
-			Joins("JOIN tags g ON g.id = tt.tag_id").
-			Where("g.normalized_name = ?", tag.NormalizeName(v))
-	}
-	if v := q.Get("assignee"); v != "" {
-		query = query.Where("tasks.assignee_actor_id = ?", v)
+	// status/tag/assignee 三件套与 task-search 共用同一实现（filters.go）。
+	query, apiErr := applyTaskFilters(query, taskFilters{
+		Status: q.Get("status"), Tag: q.Get("tag"), Assignee: q.Get("assignee"),
+	})
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
 	}
 	if v := q.Get("cursor"); v != "" {
 		query = query.Where("tasks.id < ?", v)
@@ -198,11 +189,11 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 	if err != nil {
 		return taskDTO{}, err
 	}
-	return toTaskDTO(t, nil, m.loadTaskTags(ctx, m.DB, t.ID), 0), nil
+	return toTaskDTO(t, nil, m.loadTaskTags(ctx, t.ID), 0), nil
 }
 
 // resolveTagNames 按规范化名解析 workspace 内既有 tag；未知名字 → 404
-//（整体不创建，避免静默丢弃调用者意图）。
+// （整体不创建，避免静默丢弃调用者意图）。
 func (m *Module) resolveTagNames(ctx context.Context, wsID string, names []string) ([]string, error) {
 	if len(names) == 0 {
 		return nil, nil
@@ -233,7 +224,8 @@ func (m *Module) resolveTagNames(ctx context.Context, wsID string, names []strin
 
 // ---- 批量填充（tags + children_count；D15 修订 D11）----
 
-// enrichTasks 集合行组装：每页各一次批量查询，杜绝 N+1。
+// enrichTasks 集合行组装（children 集合与 task-search 两处共用）：每页各一次
+// 批量查询，杜绝 N+1。
 func (m *Module) enrichTasks(ctx context.Context, rows []model.Task) []taskDTO {
 	ids := make([]string, 0, len(rows))
 	for i := range rows {
@@ -301,11 +293,7 @@ func (m *Module) childCounts(ctx context.Context, parentIDs []string) map[string
 }
 
 // childCount 单任务直接子任务数（变更响应恒填充 children_count 用）。
+// 批量版 childCounts 的退化调用——计数只有一处实现。
 func (m *Module) childCount(ctx context.Context, taskID string) int64 {
-	var n int64
-	if err := m.DB.WithContext(ctx).Model(&model.Task{}).Where("parent_id = ?", taskID).Count(&n).Error; err != nil {
-		m.logger().Warn("child count failed", "task_id", taskID, "err", err)
-		return 0
-	}
-	return n
+	return m.childCounts(ctx, []string{taskID})[taskID]
 }

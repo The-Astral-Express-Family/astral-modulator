@@ -357,6 +357,21 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   可见集合 + 刷新详情；types.ts/task.ts 对齐 v2 契约（tags/children_count
   required）；vue-tsc + vite build 全绿。
 
+### 第 18 轮（2026-09-10）：API 冗余清理（外部 agent 实施，本端验收）
+
+- **server**：新增 filters.go——children 集合与 task-search 的结构化过滤
+  （status/tag/assignee）收敛为 applyTaskFilters 单一实现（status 校验单点化；
+  列名 `tasks.` 前缀约定统一限定，children 的 workspace_id/parent_id 条件
+  一并对齐）；loadTaskTags/childCount 改为批量版 tagsForTasks/childCounts 的
+  退化调用（tag 行组装与排序只剩一处）；task-search 行组装复用 enrichTasks；
+- **openapi**：新增 TaskStatusFilter/TaskTagFilter/TaskAssigneeFilter/
+  TaskRegexFilter/TaskFuzzyFilter 组件参数，三个任务端点的内联参数块改 ref
+  （过滤定义单点化，契约语义零变化）；
+- **web**：apiPath 查询串构造上提 client.ts，core/workspace/task 三个模块
+  收敛（原三份手写 URLSearchParams 循环删除）；core.ts 过时 phase-3 TODO 改写；
+- 门禁：go build/vet/test、redocly lint、vue-tsc + vite build 全绿；
+  零行为变化。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
