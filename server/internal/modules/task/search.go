@@ -29,9 +29,11 @@ const (
 	maxScanCap = 2000
 )
 
-// ScoredTask 是搜索结果：任务 DTO + fuzzy 排序分（仅 fuzzy 查询时非 nil）。
+// ScoredTask 是查询结果行：任务字段内联 + fuzzy 排序分（仅 fuzzy 查询时非 nil）。
+// 契约（TaskSearchPage.items）= Task 字段 + 内联 score；v1 用具名字段把任务
+// 序列化到 "Task" 键下属隐性漂移，v2 起以匿名嵌入内联修正。
 type ScoredTask struct {
-	Task  taskDTO
+	taskDTO
 	Score *float64 `json:"score,omitempty"`
 }
 
@@ -41,6 +43,7 @@ type SearchParams struct {
 	ParentID string
 	Tag      string
 	Status   string
+	Assignee string
 	Limit    int
 	Cursor   string // base64 候选集内偏移（候选集已封顶，内存分页稳定）
 }
@@ -79,6 +82,9 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 		query = query.Joins("JOIN task_tags tt ON tt.task_id = tasks.id").
 			Joins("JOIN tags g ON g.id = tt.tag_id").
 			Where("g.normalized_name = ?", tag.NormalizeName(params.Tag))
+	}
+	if params.Assignee != "" {
+		query = query.Where("tasks.assignee_actor_id = ?", params.Assignee)
 	}
 	var candidates []model.Task
 	// JOIN 场景下列名需限定表名（tags 也有 created_at，避免歧义）。
@@ -136,9 +142,17 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 		next = encodeSearchCursor(end)
 	}
 
+	// 5. 批量填充 tags 与 children_count（D15：结果行内恒带；每页各一次查询）。
+	pageIDs := make([]string, 0, end-offset)
+	for i := offset; i < end; i++ {
+		pageIDs = append(pageIDs, pool[i].ID)
+	}
+	tagsByTask := m.tagsForTasks(ctx, pageIDs)
+	counts := m.childCounts(ctx, pageIDs)
+
 	out := make([]ScoredTask, 0, end-offset)
 	for i := offset; i < end; i++ {
-		st := ScoredTask{Task: toTaskDTO(pool[i], nil, nil)}
+		st := ScoredTask{taskDTO: toTaskDTO(pool[i], nil, tagsByTask[pool[i].ID], counts[pool[i].ID])}
 		if scores != nil {
 			v := scores[pool[i].ID]
 			st.Score = &v

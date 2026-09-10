@@ -23,7 +23,7 @@ const (
 
 	// ProtocolVersion 是当前公网协议大版本，与 /.well-known/astral 的
 	// protocol_version 字段及 openapi.info.version 的 major 位一致。
-	ProtocolVersion = 1
+	ProtocolVersion = 2
 )
 
 type ctxKeyRequestID struct{}

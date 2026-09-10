@@ -39,7 +39,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		Auth:        &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
 		Workspace:   &workspace.Module{DB: db, Auth: svc},
 		Task:        &task.Module{DB: db, Auth: svc},
-		Tag:         &tag.Module{},
+		Tag:        &tag.Module{DB: db, Auth: svc},
 		Memory:      &memory.Module{},
 		Document:    &document.Module{},
 		Message:     &message.Module{DB: db, Auth: svc},
@@ -95,7 +95,7 @@ func TestWellKnownAndCapabilities(t *testing.T) {
 		t.Fatalf("well-known: %d %v", code, wk)
 	}
 	code, caps := do(t, "GET", ts.URL+"/api/v1/meta/capabilities", "", nil)
-	if code != 200 || caps["protocol_version"] != float64(1) {
+	if code != 200 || caps["protocol_version"] != float64(2) {
 		t.Fatalf("capabilities: %d %v", code, caps)
 	}
 }
@@ -223,7 +223,7 @@ func TestSpikeE2E(t *testing.T) {
 	secretB := mkAgent("Dan Heng")
 
 	// 7. agent 建 task；两 credential 竞争 claim 只有一个成功。
-	code, tk := do(t, "POST", base+"/workspaces/"+wsID+"/tasks", secretA,
+	code, tk := do(t, "POST", base+"/workspaces/"+wsID+"/children", secretA,
 		map[string]any{"title": "Implement spike"})
 	if code != 201 {
 		t.Fatalf("create task: %d %v", code, tk)
@@ -265,7 +265,7 @@ func TestSpikeE2E(t *testing.T) {
 		t.Fatalf("viewer credential: %d %v", code, vcred)
 	}
 	viewerSecret := vcred["secret"].(string)
-	code, body := do(t, "POST", base+"/workspaces/"+wsID+"/tasks", viewerSecret,
+	code, body := do(t, "POST", base+"/workspaces/"+wsID+"/children", viewerSecret,
 		map[string]any{"title": "nope"})
 	if code != 403 || errCode(t, body) != "INSUFFICIENT_SCOPE" {
 		t.Fatalf("scope enforcement: %d %v", code, body)

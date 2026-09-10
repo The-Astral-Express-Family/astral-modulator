@@ -62,8 +62,8 @@ func TestSearchFuzzyRanking(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatal("no results")
 	}
-	if results[0].Task.Title != "Fix login flow" {
-		t.Fatalf("top hit = %q, want login task", results[0].Task.Title)
+	if results[0].Title != "Fix login flow" {
+		t.Fatalf("top hit = %q, want login task", results[0].Title)
 	}
 	if results[0].Score == nil || *results[0].Score <= 0 {
 		t.Fatalf("score missing on fuzzy search: %+v", results[0].Score)
@@ -75,7 +75,7 @@ func TestSearchFuzzyRanking(t *testing.T) {
 	if apiErr != nil {
 		t.Fatalf("combined search: %v", apiErr)
 	}
-	if len(results) != 1 || results[0].Task.Title != "Fix login flow" {
+	if len(results) != 1 || results[0].Title != "Fix login flow" {
 		t.Fatalf("combined results: %+v", results)
 	}
 }
@@ -98,7 +98,7 @@ func TestSearchTagFilter(t *testing.T) {
 	if apiErr != nil {
 		t.Fatalf("tag search: %v", apiErr)
 	}
-	if len(results) != 1 || results[0].Task.ID != "tsk_s1" {
+	if len(results) != 1 || results[0].ID != "tsk_s1" {
 		t.Fatalf("tag filter results: %+v", results)
 	}
 }
@@ -123,7 +123,7 @@ func TestSearchPaginationCursor(t *testing.T) {
 	if len(page2) != 1 || next2 != "" {
 		t.Fatalf("page2: %d items, next=%q", len(page2), next2)
 	}
-	if page1[0].Task.ID == page2[0].Task.ID {
+	if page1[0].ID == page2[0].ID {
 		t.Fatal("pages overlap")
 	}
 }

@@ -138,7 +138,7 @@ func wellKnownHandler(cfg config.Config, log *slog.Logger) http.HandlerFunc {
 			CanonicalURL:          cfg.PublicURL,
 			APIBase:               "/api/v1",
 			ProtocolVersion:       httpx.ProtocolVersion,
-			MinCLIProtocolVersion: 1,
+			MinCLIProtocolVersion: 2,
 		}
 		resp.Auth.DeviceLogin = true
 		if resp.CanonicalURL == "" {

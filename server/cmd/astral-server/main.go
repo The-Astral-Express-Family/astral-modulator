@@ -82,12 +82,14 @@ func run() error {
 		taskMod := &task.Module{DB: gormDB, Auth: authSvc, Log: log}
 		msgMod := &message.Module{DB: gormDB, Auth: authSvc}
 		presMod := &presence.Module{DB: gormDB, Auth: authSvc}
+		tagMod := &tag.Module{DB: gormDB, Auth: authSvc}
 
 		mods.Auth.Svc = authSvc
 		mods.Workspace = wsMod
 		mods.Task = taskMod
 		mods.Message = msgMod
 		mods.Presence = presMod
+		mods.Tag = tagMod
 
 		// SSE 重放需要读 outbox。
 		mods.Events.DB = gormDB

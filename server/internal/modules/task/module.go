@@ -17,7 +17,6 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/background"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
@@ -50,9 +49,12 @@ func (m *Module) logger() *slog.Logger {
 }
 
 func (m *Module) RegisterRoutes(r chi.Router) {
-	r.Post("/workspaces/{workspace_id}/tasks", m.create)
-	r.Get("/workspaces/{workspace_id}/tasks", m.list)
-	r.Get("/workspaces/{workspace_id}/tasks/search", m.search)
+	// 容器化任务树（D15，v2）：凡容器，GET/POST <container>/children。
+	r.Get("/workspaces/{workspace_id}/children", m.listWorkspaceChildren)
+	r.Post("/workspaces/{workspace_id}/children", m.createRoot)
+	r.Get("/tasks/{task_id}/children", m.listTaskChildren)
+	r.Post("/tasks/{task_id}/children", m.createChild)
+	r.Get("/workspaces/{workspace_id}/task-search", m.search)
 	r.Get("/tasks/{task_id}", m.get)
 	r.Patch("/tasks/{task_id}", m.update)
 	r.Post("/tasks/{task_id}/claim", m.claim)
@@ -129,21 +131,25 @@ type taskDTO struct {
 	Priority        string       `json:"priority"`
 	AssigneeActorID *string      `json:"assignee_actor_id"`
 	Revision        int64        `json:"revision"`
-	Tags            []tag.TagDTO `json:"tags,omitempty"`
+	Tags            []tag.TagDTO `json:"tags"`
+	ChildrenCount   int64        `json:"children_count"`
 	Lease           *leaseDTO    `json:"lease"`
 	CreatedAt       string       `json:"created_at"`
 	UpdatedAt       string       `json:"updated_at"`
 }
 
-// toTaskDTO 组装任务响应；tags 由调用方按需加载（get/update/attach 填充，
-// list/search 省略以省一次 JOIN）。
-func toTaskDTO(t model.Task, lease *model.TaskLease, tags []tag.TagDTO) taskDTO {
+// toTaskDTO 组装任务响应。v2（D15 修订 D11）：tags 恒填充（nil 兜底为空数组）、
+// children_count 恒填充；lease 仅 get/claim 填充非空。
+func toTaskDTO(t model.Task, lease *model.TaskLease, tags []tag.TagDTO, childCount int64) taskDTO {
+	if tags == nil {
+		tags = []tag.TagDTO{}
+	}
 	dto := taskDTO{
 		ID: t.ID, WorkspaceID: t.WorkspaceID, ParentID: t.ParentID,
 		Title: t.Title, Description: t.Description,
 		Status: t.Status, Priority: t.Priority,
 		AssigneeActorID: t.AssigneeActorID, Revision: t.Revision,
-		Tags:      tags,
+		Tags: tags, ChildrenCount: childCount,
 		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -174,119 +180,10 @@ func (m *Module) requireTask(r *http.Request, taskID string, need string) (*mode
 	return &t, nil
 }
 
-// ---- CRUD ----
+// ---- CRUD：创建走容器端点（children.go）；读取集合走容器集合（children.go）----
 
-func (m *Module) create(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "workspace_id")
-	p := auth.PrincipalFrom(r.Context())
-	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskWrite); apiErr != nil {
-		httpx.WriteError(w, r, apiErr)
-		return
-	}
-	var in struct {
-		ParentID    *string `json:"parent_id"`
-		Title       string  `json:"title"`
-		Description string  `json:"description"`
-		Priority    string  `json:"priority"`
-	}
-	if !httpx.DecodeJSON(w, r, &in) {
-		return
-	}
-	in.Title = strings.TrimSpace(in.Title)
-	if in.Title == "" || len(in.Title) > 500 {
-		httpx.WriteError(w, r, httpx.Invalid("title required (1-500 chars)"))
-		return
-	}
-	if in.Priority == "" {
-		in.Priority = "normal"
-	}
-	if !validPriority(in.Priority) {
-		httpx.WriteError(w, r, httpx.Invalid("invalid priority"))
-		return
-	}
-	if in.ParentID != nil {
-		var parent model.Task
-		err := m.DB.WithContext(r.Context()).First(&parent, "id = ?", *in.ParentID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && parent.WorkspaceID != wsID) {
-			httpx.WriteError(w, r, httpx.Invalid("parent must exist in the same workspace"))
-			return
-		}
-		if err != nil {
-			httpx.RespondError(w, r, err)
-			return
-		}
-	}
-
-	t := model.Task{
-		ID: ids.New(ids.Task), WorkspaceID: wsID, ParentID: in.ParentID,
-		Title: in.Title, Description: in.Description,
-		Status: "open", Priority: in.Priority, Revision: 1,
-		CreatedBy: p.ActorID,
-	}
-	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&t).Error; err != nil {
-			return err
-		}
-		if err := audit.RecordInTx(tx, audit.Entry{
-			WorkspaceID: wsID, ActorID: p.ActorID,
-			Action: "task.create", Outcome: "allowed",
-			TargetType: "task", TargetID: t.ID,
-		}); err != nil {
-			return err
-		}
-		return event.EmitTx(tx, event.TypeTaskCreated, wsID, p.ActorID, 1,
-			map[string]any{"task_id": t.ID, "title": t.Title})
-	})
-	if err != nil {
-		httpx.RespondError(w, r, err)
-		return
-	}
-	httpx.WriteOK(w, r, http.StatusCreated, toTaskDTO(t, nil, nil))
-}
-
-func (m *Module) list(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "workspace_id")
-	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskRead); apiErr != nil {
-		httpx.WriteError(w, r, apiErr)
-		return
-	}
-	q := r.URL.Query()
-	query := m.DB.WithContext(r.Context()).Model(&model.Task{}).Where("workspace_id = ?", wsID)
-	if v := q.Get("parent_id"); v != "" {
-		query = query.Where("parent_id = ?", v)
-	}
-	if v := q.Get("status"); v != "" {
-		query = query.Where("status = ?", v)
-	}
-	if v := q.Get("assignee"); v != "" {
-		query = query.Where("assignee_actor_id = ?", v)
-	}
-	// cursor 分页：id 即游标。任务 ID 是 task_<uuidv7>，字典序 = 创建时间序
-	// （毫秒精度），单列比较在 sqlite/PG 下行为一致——不引入 created_at
-	// 文本格式对齐问题（drivers 存储格式不同，时间比较不可移植）。
-	if v := q.Get("cursor"); v != "" {
-		query = query.Where("id < ?", v)
-	}
-	limit := parseLimit(q.Get("limit"), 50, 200)
-
-	var rows []model.Task
-	if err := query.Order("id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
-		httpx.RespondError(w, r, err)
-		return
-	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = rows[len(rows)-1].ID
-	}
-	items := make([]taskDTO, 0, len(rows))
-	for _, t := range rows {
-		items = append(items, toTaskDTO(t, nil, nil))
-	}
-	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, next))
-}
-
-// search：regex 过滤 → fuzzy 排序（architecture §13 语义；CLI --regex/--fuzzy 双参数）。
+// search：workspace 级平面查询（v2 task-search）。结构化（tag/status/assignee）
+// 与内容（regex/fuzzy）平权；至少一个条件，防全量 dump（候选集另有封顶，D7）。
 func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskRead); apiErr != nil {
@@ -294,8 +191,9 @@ func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	if q.Get("regex") == "" && q.Get("fuzzy") == "" {
-		httpx.WriteError(w, r, httpx.Invalid("at least one of regex/fuzzy is required"))
+	if q.Get("regex") == "" && q.Get("fuzzy") == "" && q.Get("tag") == "" &&
+		q.Get("status") == "" && q.Get("assignee") == "" {
+		httpx.WriteError(w, r, httpx.Invalid("at least one filter (regex/fuzzy/tag/status/assignee) is required"))
 		return
 	}
 	results, next, apiErr := m.Search(r.Context(), wsID, SearchParams{
@@ -304,6 +202,7 @@ func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 		ParentID: q.Get("parent_id"),
 		Tag:      q.Get("tag"),
 		Status:   q.Get("status"),
+		Assignee: q.Get("assignee"),
 		Limit:    parseLimit(q.Get("limit"), 50, 200),
 		Cursor:   q.Get("cursor"),
 	})
@@ -329,7 +228,7 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	if hasLease {
 		leasePtr = &lease
 	}
-	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*t, leasePtr, m.loadTags(r, t.ID)))
+	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*t, leasePtr, m.loadTags(r, t.ID), m.childCount(r.Context(), t.ID)))
 }
 
 func (m *Module) update(w http.ResponseWriter, r *http.Request) {
@@ -451,7 +350,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, nil, m.loadTags(r, t.ID)))
+	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, nil, m.loadTags(r, t.ID), m.childCount(r.Context(), t.ID)))
 }
 
 // checkCycle 沿 newParent 向上遍历祖先链，返回是否形成环。
@@ -579,7 +478,7 @@ func (m *Module) claim(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	dto := toTaskDTO(*fresh, claimedLease, m.loadTags(r, taskID))
+	dto := toTaskDTO(*fresh, claimedLease, m.loadTags(r, taskID), m.childCount(r.Context(), taskID))
 	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"task": dto, "lease": dto.Lease})
 }
 

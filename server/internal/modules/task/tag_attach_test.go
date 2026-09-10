@@ -63,7 +63,7 @@ func TestAttachTagBumpsRevisionAndSearchFindsIt(t *testing.T) {
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
-	if len(results) != 1 || results[0].Task.ID != tk.ID {
+	if len(results) != 1 || results[0].ID != tk.ID {
 		t.Fatalf("search by tag = %+v, want [tsk_tag1]", results)
 	}
 

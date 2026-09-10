@@ -12,12 +12,17 @@
 openapi: 3.1.0
 info:
   title: Astral Modulator Public API
-  version: 1.0.0-scaffold
+  version: 2.0.0-scaffold
   license:
     name: MIT
     identifier: MIT
   description: |
     人类与多 LLM Agent 的协作控制面。CLI（astral-cli 仓库）与 Web GUI 共用本协议。
+
+    v2（容器化任务树，TODO.md D15）：workspace 与 task 都是容器，子任务集合
+    统一为 GET/POST <container>/children；全量平铺列表与 /tasks/search 已移除，
+    平面查询走 /workspaces/{id}/task-search。protocol_version 升为 2，
+    与 v1 不兼容（破坏性变更，开发期不做兼容窗口）。
 
     已裁决的文档分歧（详见 TODO.md「文档分歧裁决」）：
     - Device flow 采用 architecture.md 路径 `/auth/device/authorizations*`
@@ -431,13 +436,13 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
-  /workspaces/{workspace_id}/tasks:
+  /workspaces/{workspace_id}/children:
     parameters:
       - { $ref: "#/components/parameters/WorkspaceId" }
     post:
       tags: [tasks]
-      summary: 创建任务（支持 Idempotency-Key）
-      operationId: createTask
+      summary: 创建根层任务（投递进 workspace 容器；支持 Idempotency-Key）
+      operationId: createRootTask
       requestBody:
         required: true
         content:
@@ -449,30 +454,73 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/Error" }   # tags 含未知名字
     get:
       tags: [tasks]
-      summary: 任务列表（结构化过滤 + cursor 分页）
-      operationId: listTasks
+      summary: |
+        workspace 容器的子任务集合 = 根层任务（parent_id 为空），仅此一层。
+        子层用 GET /tasks/{task_id}/children 逐容器下钻（D15：不做全量平铺）。
+      operationId: listWorkspaceChildren
       parameters:
-        - { name: parent_id, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
+        - { name: tag, in: query, schema: { type: string } }
         - { name: assignee, in: query, schema: { type: string } }
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
         "200":
-          description: 任务分页列表
+          description: 根层任务分页列表（行内含 tags 与 children_count）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskPage"
 
-  /workspaces/{workspace_id}/tasks/search:
+  /tasks/{task_id}/children:
+    parameters:
+      - { $ref: "#/components/parameters/TaskId" }
+    post:
+      tags: [tasks]
+      summary: 创建子任务（投递进 task 容器；支持 Idempotency-Key）
+      operationId: createChildTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskCreate" }
+      responses:
+        "201":
+          description: 已创建（parent=容器任务，revision=1）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/Error" }   # 容器任务不存在 / tags 含未知名字
+    get:
+      tags: [tasks]
+      summary: task 容器的子任务集合（直接子层，仅此一层；与 workspace children 同参数同响应）
+      operationId: listTaskChildren
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: assignee, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: 子任务分页列表（行内含 tags 与 children_count）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskPage"
+        "404": { $ref: "#/components/responses/Error" }
+
+  /workspaces/{workspace_id}/task-search:
     get:
       tags: [tasks]
       summary: |
-        搜索。语义固定：权限过滤 -> 结构化过滤 -> regex 过滤 -> fuzzy 排序 -> 分页。
-        regex 与 fuzzy 可同时提供；只传 regex 不做模糊排序（architecture §13）。
+        workspace 级平面查询（跨层级）。结构化（tag/status/assignee）与内容
+        （regex/fuzzy）平权，至少提供其一（防全量 dump）。语义固定：
+        权限过滤 -> 结构化过滤 -> regex 过滤 -> fuzzy 排序 -> 分页（architecture §13）。
+        候选集封顶（实现见 TODO.md D7）。
       operationId: searchTasks
       parameters:
         - { $ref: "#/components/parameters/WorkspaceId" }
@@ -481,16 +529,17 @@ paths:
         - { name: parent_id, in: query, schema: { type: string } }
         - { name: tag, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
+        - { name: assignee, in: query, schema: { type: string } }
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
         "200":
-          description: 搜索结果（含 fuzzy 分数时见 items[].score）
+          description: 查询结果（fuzzy 时 items[].score；行内含 tags 与 children_count）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskSearchPage"
-        "400": { $ref: "#/components/responses/Error" }   # 非法 regex / 超长输入
+        "400": { $ref: "#/components/responses/Error" }   # 零条件 / 非法 regex / 超长输入
 
   /tasks/{task_id}:
     parameters:
@@ -1192,11 +1241,15 @@ components:
       type: object
       required: [title]
       properties:
-        parent_id: { $ref: "#/components/schemas/Id" }
         title: { type: string, minLength: 1, maxLength: 500 }
         description: { type: string, default: "" }
         priority: { $ref: "#/components/schemas/TaskPriority" }
-        tags: { type: array, items: { type: string }, description: 已存在 tag 名（新建走 proposal） }
+        tags:
+          type: array
+          items: { type: string }
+          description: |
+            已存在的 tag 名（按规范化名解析；v2 中 parent 由容器端点寻址，
+            不再有 parent_id 字段）。任一名字不存在 → 404 NOT_FOUND，整体不创建。
 
     TaskUpdate:
       type: object
@@ -1212,7 +1265,7 @@ components:
 
     Task:
       type: object
-      required: [id, workspace_id, title, status, revision, created_at, updated_at]
+      required: [id, workspace_id, title, status, revision, tags, children_count, created_at, updated_at]
       properties:
         id: { $ref: "#/components/schemas/Id" }
         workspace_id: { $ref: "#/components/schemas/Id" }
@@ -1223,7 +1276,14 @@ components:
         priority: { $ref: "#/components/schemas/TaskPriority" }
         assignee_actor_id: { $ref: "#/components/schemas/IdOrNull" }
         revision: { type: integer, format: int64 }
-        tags: { type: array, items: { $ref: "#/components/schemas/Tag" } }
+        tags:
+          type: array
+          items: { $ref: "#/components/schemas/Tag" }
+          description: v2 起所有 Task 响应恒填充（无 tag 时空数组；修订 D11）
+        children_count:
+          type: integer
+          format: int64
+          description: 直接子任务数（UI 展开徽标；恒填充）
         lease: { $ref: "#/components/schemas/LeaseOrNull" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
