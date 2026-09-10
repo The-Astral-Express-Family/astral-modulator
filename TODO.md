@@ -279,6 +279,37 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - workspace 总览页加任务树入口（phase-3 的 TODO 注释兑现删除）；
 - 无契约变更（纯消费既有端点）；vue-tsc + vite build 全绿。
 
+### 第 14 轮（2026-09-10）：astral-cli todo 命令族实装（§11 第 8 项）
+
+> CLI 侧按 docs/ARCHITECTURE.md §11 命令面施工，消费协议快照 v1，无契约变更。
+
+- **`astral todo` 六命令**（替换 StubbedNounCommand）：
+  - `list`：结构化过滤（--status/--assignee/--parent）+ cursor 分页
+    （默认单页，`--all` 跟随 next_cursor 取尽）；
+  - `add`：POST create（--parent/--priority/--description/--tag 重复）；
+  - `show`：GET /tasks/{id} 详情（tags/lease 展示，人读输出为键值面板）；
+  - `claim`：POST /claim {expected_revision, lease_seconds}——不传 --revision 时
+    先 GET 当前 revision 再提交（读改写窗口由服务端 409 兜底）；--revision 跳过读取；
+  - `done`：PATCH {expected_revision, status:"done"}，同上 revision 语义；
+  - `search`：--regex/--fuzzy（至少其一，缺失为 exit 2 USAGE）+ --tag/--status，
+    regex/fuzzy 查询串百分号编码（client::urlEncode，libcurl escape）；
+- **auth/api 模块（新）**：业务命令公共底座——resolveLocalTarget（flag >
+  binding > env）→ ApiSession（well-known 发现 + 鉴权策略：ASTRAL_TOKEN 优先，
+  否则 human 会话槽 + 单次惰性刷新 D13；一个命令跑只做一次 discovery）→
+  resolveWorkspace（仅 name 时 ?name= 精确解析，空 items = WORKSPACE_NOT_FOUND）；
+  throwApiError 按状态映射退出码（401/403→3、404→4、409→5、5xx→6、其余
+  4xx→9）；
+- **协议错误透传**（兑现 CLI ARCHITECTURE.md §12 拖欠）：AstralError 增加
+  protocolCode/requestId/retryable 附加；--json 失败 envelope 对服务端失败输出
+  冻结契约 `{"error":{code,message,request_id,retryable}}`（code 如
+  TASK_ALREADY_CLAIMED），CLI 本地失败保持本地码；新增 Errc
+  NotFound/Conflict/InsufficientScope/Usage；
+- 测试 seam：auth::commandHttp() + setCommandTransportForTests（进程级注入，
+  供 runApp 级单测脚本化传输）；test_todo_cmd 16 项（分页合并、revision 读取/
+  钳定、协议码透传、惰性刷新重放与换新对持久化、撤族清会话、URL 编码、
+  无目标 LOCAL_WORKSPACE_ERROR），全仓 71/71 绿；clang-format 通过；
+- CLI 侧对应提交：astral-cli@881c919（README/ARCHITECTURE §11/§12 已同步）。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -494,7 +525,7 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图
 6. 【✅ 第 12 轮完成】Web device 审批页联调收尾：pending 自动轮询
 7. rate limit（auth/device 端点优先；phase-6）
-8. astral-cli todo/tags/msg 业务命令（服务端 API 均已可用；按 docs/ARCHITECTURE.md §11
-   命令面施工，消费 protocol/snapshots/v1）
+8. 【✅ 第 14 轮完成】astral-cli todo/tags/msg 业务命令——todo 命令族已落地；
+   tags（两步确认）/ msg / event listen 为下一批
 9. astral-cli 端到端联调验收（第 11 轮遗留：需真实服务器 + 浏览器审批，
-   部署环境手动执行，覆盖 login → web 审批 → whoami → init 全链路）
+   部署环境手动执行，覆盖 login → web 审批 → whoami → init → todo 全链路）
