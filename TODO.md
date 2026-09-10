@@ -310,6 +310,53 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   无目标 LOCAL_WORKSPACE_ERROR），全仓 71/71 绿；clang-format 通过；
 - CLI 侧对应提交：astral-cli@881c919（README/ARCHITECTURE §11/§12 已同步）。
 
+### 第 15 轮（2026-09-10）：v2 server 轮 —— 容器化任务树（D15，破坏性）
+
+- **openapi 2.0.0-scaffold**：移除 `GET/POST /workspaces/{id}/tasks` 与
+  `GET /workspaces/{id}/tasks/search`；新增 `GET/POST /workspaces/{id}/children`、
+  `GET/POST /tasks/{id}/children`、`GET /workspaces/{id}/task-search`；
+  TaskCreate 移除 parent_id；Task schema 增 `children_count`（required），
+  `tags` 转 required（恒填充，修订 D11）；redocly lint 过；
+- **task 模块**：新 children.go——容器集合统一核心（workspace 容器=根层
+  parent_id IS NULL，task 容器=直接子层；参数 status/tag/assignee/limit/cursor；
+  id cursor 分页沿用 v1 语义）；创建核心 createTask（容器寻址 + tags-on-create：
+  规范化名解析、未知名字 404 整体不创建、关联与 audit/事件同事务）；
+  批量填充 enrichTasks（每页各一次 tags/children_count 查询，杜绝 N+1）；
+  task-search 守卫放宽为「任一过滤条件」（regex/fuzzy/tag/status/assignee），
+  search.go 补 assignee 结构化过滤 + 结果批量填充；
+- **顺带修复两个 v1 隐性缺陷**：① tag 模块生产装配从未接 DB（全部 tag HTTP
+  端点上线至今 500）——main.go 与测试装配补接；② search 结果行误包在
+  `"Task"` 键下（ScoredTask 具名字段无 json tag），与契约内联语义漂移——
+  改匿名嵌入内联；
+- **protocol_version 1→2**（httpx 常量 + well-known min_cli）；go build/vet/test
+  全绿（新增 app 级 TestTaskTreeContainersV2 全链路契约测试）。
+
+### 第 16 轮（2026-09-10）：v2 CLI 轮 —— 快照 v2 + todo 适配（astral-cli）
+
+- **协议快照 v2 发布**至 `protocol/snapshots/v2/`（openapi + schemas +
+  well-known protocol_version=2 + MANIFEST：breaking_changes 清单与
+  key_semantics 速查；冻结 modulator@0330768）；
+- **kProtocolVersion 2**；契约测试指向 v2 快照；
+- **todo 命令 v2 语义**：`list` 默认列 workspace 根层集合，`--parent <id>`
+  切到该任务 children 集合（URL 寻址取代 parent_id 查询参数），新增 `--tag`；
+  `add --parent <id>` 投递进 task 容器（body 不再带 parent_id）；`search` 走
+  `/task-search`，守卫放宽为「任一过滤条件」，新增 `--assignee`；
+  表格新增 KIDS 列（children_count）；
+- 测试同步（URL/协议 pin/search 守卫/容器切换新增用例），74/74 全绿；
+  clang-format 过；astral-cli@d7899b8。
+
+### 第 17 轮（2026-09-10）：v2 web 轮 —— 任务树逐容器懒加载
+
+- **TaskTreeView 重写**：根层 = workspace children 集合；展开节点懒拉取该
+  任务 children 集合并缓存；重载范围 = 可见集合（根层 + 已展开容器），
+  与树规模解耦（第 13 轮全量平铺拉取的 O(N) 问题了结）；
+  行内展示 tags 徽标与 children_count 展开列（v2 集合行内恒带）；
+- 过滤（status/tag/assignee）服务端生效；搜索模式走 task-search
+  （regex/fuzzy/tag/status/assignee 至少其一）；
+- SSE：task.* 防抖重载可见集合；snapshot.required 立即重拉；tag.* 重载
+  可见集合 + 刷新详情；types.ts/task.ts 对齐 v2 契约（tags/children_count
+  required）；vue-tsc + vite build 全绿。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -530,14 +577,13 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图
 6. 【✅ 第 12 轮完成】Web device 审批页联调收尾：pending 自动轮询
 7. 【✅ 第 14 轮完成】astral-cli todo 命令族（v2 轮中适配容器端点）
-8. **v2 server 轮（下一步）**：openapi 升版重写（移除三个旧端点、新增
-   children×2 + task-search）、统一容器集合 handler、tags 批量填充 +
-   children_count、protocol_version=2、openapi 契约门与 app 集成测试重写、
-   协议快照 v2 发布至 astral-cli
-9. v2 CLI 轮：kProtocolVersion=2、todo list/search/add 适配容器端点、
-   default/<user>/todo 约定的 CLI 引导（D14）、快照 v2 契约测试
-10. v2 web 轮：任务树视图改逐容器懒加载 + task-search，删除全量拉取
-11. CLI tags（两步确认）/ msg / event listen 命令（基于 v2）
+8. 【✅ 第 14 轮完成】astral-cli todo 命令族（v1；第 16 轮已适配 v2）
+9. 【✅ 第 16 轮完成】v2 CLI 轮（kProtocolVersion=2、容器端点适配、快照 v2）
+10. 【✅ 第 17 轮完成】v2 web 轮（任务树逐容器懒加载 + task-search）
+11. CLI tags（两步确认）/ msg / event listen 命令（基于 v2）；含 D14 的 CLI
+    引导——todo add 无绑定时提示 default/<user>/todo 约定（登录名经 whoami
+    可得）
 12. rate limit（auth/device 端点优先；phase-6）
 13. astral-cli 端到端联调验收（需真实服务器 + 浏览器审批，部署环境手动执行，
-    覆盖 login → web 审批 → whoami → init → todo 全链路，按 v2 契约）
+    覆盖 login → web 审批 → whoami → init → todo 全链路，按 v2 契约；
+    本机无 docker/PG，v2 链路尚未跑过真服务器）

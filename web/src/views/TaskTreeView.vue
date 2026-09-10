@@ -1,21 +1,19 @@
 <script setup lang="ts">
-// 任务树视图（TODO.md §11 第 4 项）：
-// - 树模式（默认）：list 端点全量分页拉取 → 前端按 parent_id 组树；
-// - 搜索模式：search 端点（regex 过滤 / fuzzy 排序，可叠加 tag/status，
-//   服务端语义 architecture §13）；
-// - SSE 实时刷新：task.* 事件防抖重载，snapshot.required 立即全量重拉
-//   （游标超窗语义，protocol.md §5）；tag.* 刷新打开中的详情（tags 仅详情
-//   响应填充，D11）；
-// - 详情侧栏：getTask（tags/lease 仅详情响应填充）。
+// 任务树视图（v2 容器语义，TODO.md D15）：
+// - 逐容器懒加载：根层 = workspace children 集合；展开节点 = 该任务 children
+//   集合（只回传直接子层，行内带 tags/children_count）；不再全量平铺拉取；
+// - 过滤（status/tag）服务端生效：变更后重载所有可见集合；
+// - 搜索模式：task-search 平面查询（regex/fuzzy/tag/status/assignee 至少其一）；
+// - SSE 实时刷新：task.* 防抖重载可见集合，snapshot.required 立即全量重拉
+//   （游标超窗语义），tag.* 刷新打开中的详情。
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { formatApiError } from '../api/client'
 import {
   getTask,
-  listTasks,
+  listTaskChildren,
+  listWorkspaceChildren,
   searchTasks,
-  type TaskListParams,
-  type TaskSearchParams,
 } from '../api/modules/task'
 import { listMembers, listTags } from '../api/modules/workspace'
 import { subscribeEvents } from '../api/sse'
@@ -29,33 +27,29 @@ const workspaceId = computed(() => route.params.workspaceId as string)
 
 const STATUSES: TaskStatus[] = ['open', 'in_progress', 'blocked', 'review', 'done', 'cancelled']
 
-interface TaskNode {
-  task: Task
-  children: TaskNode[]
-  /** parent_id 指向不存在的任务（防御：服务端已有 parent 校验，正常不应出现） */
-  orphan: boolean
-}
+const PAGE_LIMIT = 200
 
-const tasks = ref<Task[]>([])
-const hits = ref<TaskSearchHit[]>([])
-const searchNext = ref<string | null>(null)
+const roots = ref<Task[]>([])
+// 已加载的 task 容器集合（直接子层），按容器 id 缓存。
+const childrenByContainer = ref<Map<string, Task[]>>(new Map())
+const expanded = ref<Set<string>>(new Set())
+
 const mode = ref<'tree' | 'search'>('tree')
 const statusFilter = ref<TaskStatus | ''>('')
+const tagFilter = ref('')
 const regexInput = ref('')
 const fuzzyInput = ref('')
-const tagInput = ref('')
+const assigneeInput = ref('')
 
 const members = ref<Member[]>([])
 const tagDict = ref<Tag[]>([])
 const selected = ref<Task | null>(null)
-const collapsed = ref<Set<string>>(new Set())
 const error = ref<string | null>(null)
 const loading = ref(false)
 const sseState = ref<'connecting' | 'open' | 'closed'>('connecting')
 
 let unsubscribe: (() => void) | null = null
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
-let inFlight = 0
 
 const memberNames = computed(() => {
   const m = new Map<string, string>()
@@ -67,124 +61,43 @@ function memberName(id: string | null): string {
   return memberNames.value.get(id) ?? id
 }
 
-async function fetchAllTasks(): Promise<Task[]> {
-  const out: Task[] = []
-  let cursor: string | undefined
-  do {
-    const params: TaskListParams = { limit: 200 }
-    if (cursor) params.cursor = cursor
-    const page = await listTasks(workspaceId.value, params)
-    out.push(...page.items)
-    cursor = page.next_cursor ?? undefined
-  } while (cursor)
-  return out
-}
-
-// 组树：parent 在集合内 → 挂为子节点；否则（含孤儿）作根。兄弟按创建序（id
-// 为 UUIDv7，字典序即时间序）。
-const tree = computed<TaskNode[]>(() => {
-  const byId = new Map<string, TaskNode>()
-  for (const t of tasks.value) byId.set(t.id, { task: t, children: [], orphan: false })
-  const roots: TaskNode[] = []
-  for (const node of byId.values()) {
-    const pid = node.task.parent_id
-    const parent = pid ? byId.get(pid) : undefined
-    if (parent) parent.children.push(node)
-    else {
-      node.orphan = Boolean(pid)
-      roots.push(node)
-    }
-  }
-  const sortRec = (nodes: TaskNode[]): void => {
-    nodes.sort((a, b) => (a.task.id < b.task.id ? -1 : a.task.id > b.task.id ? 1 : 0))
-    for (const n of nodes) sortRec(n.children)
-  }
-  sortRec(roots)
-  if (!statusFilter.value) return roots
-  // 状态过滤保留「命中节点 + 其命中后代路径」；此时不再受折叠状态约束。
-  const filterRec = (nodes: TaskNode[]): TaskNode[] => {
-    const kept: TaskNode[] = []
-    for (const n of nodes) {
-      const children = filterRec(n.children)
-      if (n.task.status === statusFilter.value || children.length) {
-        kept.push({ ...n, children })
-      }
-    }
-    return kept
-  }
-  return filterRec(roots)
-})
-
-// 扁平化为可见行（避免递归组件）；折叠集合仅在无状态过滤时生效。
-interface FlatRow {
-  node: TaskNode
-  depth: number
-}
-const rows = computed<FlatRow[]>(() => {
-  const out: FlatRow[] = []
-  const filtering = Boolean(statusFilter.value)
-  const walk = (nodes: TaskNode[], depth: number): void => {
-    for (const n of nodes) {
-      out.push({ node: n, depth })
-      if (filtering || !collapsed.value.has(n.task.id)) walk(n.children, depth + 1)
-    }
-  }
-  walk(tree.value, 0)
-  return out
-})
-function hasChildren(node: TaskNode): boolean {
-  return node.children.length > 0
-}
-function toggle(node: TaskNode): void {
-  const id = node.task.id
-  const next = new Set(collapsed.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  collapsed.value = next
-}
-
-// ---- 搜索模式 ----
-const canSearch = computed(() => Boolean(regexInput.value || fuzzyInput.value))
-
-async function runSearch(append = false): Promise<void> {
-  const params: TaskSearchParams = { limit: 50 }
-  if (regexInput.value) params.regex = regexInput.value
-  if (fuzzyInput.value) params.fuzzy = fuzzyInput.value
-  if (tagInput.value) params.tag = tagInput.value
+function filterParams(): { status?: string; tag?: string; limit: number } {
+  const params: { status?: string; tag?: string; limit: number } = { limit: PAGE_LIMIT }
   if (statusFilter.value) params.status = statusFilter.value
-  if (append && searchNext.value) params.cursor = searchNext.value
-  const page = await searchTasks(workspaceId.value, params)
-  hits.value = append ? [...hits.value, ...page.items] : page.items
-  searchNext.value = page.next_cursor
-  mode.value = 'search'
+  if (tagFilter.value) params.tag = tagFilter.value
+  return params
 }
 
-function resetToTree(): void {
-  regexInput.value = ''
-  fuzzyInput.value = ''
-  tagInput.value = ''
-  statusFilter.value = ''
-  mode.value = 'tree'
-  void reload()
+async function fetchRoots(): Promise<Task[]> {
+  const page = await listWorkspaceChildren(workspaceId.value, filterParams())
+  return page.items
 }
 
-// ---- 加载 / 刷新 ----
-async function reload(): Promise<void> {
-  inFlight += 1
+async function fetchChildren(taskId: string): Promise<Task[]> {
+  const page = await listTaskChildren(taskId, filterParams())
+  return page.items
+}
+
+// 重载所有可见集合：根层 + 每个「已展开且有缓存」的容器。集合数量 = 展开的
+// 节点数，与树规模解耦（v1 全量平铺的问题就此了结）。
+async function reloadVisible(): Promise<void> {
   loading.value = true
   try {
-    if (mode.value === 'tree') {
-      tasks.value = await fetchAllTasks()
-    } else {
-      await runSearch(false)
-    }
+    const containers = [...childrenByContainer.value.keys()].filter((id) =>
+      expanded.value.has(id),
+    )
+    const [freshRoots, ...freshChildren] = await Promise.all([
+      fetchRoots(),
+      ...containers.map((id) => fetchChildren(id)),
+    ])
+    roots.value = freshRoots
+    containers.forEach((id, i) => childrenByContainer.value.set(id, freshChildren[i]))
     error.value = null
     if (selected.value) await refreshDetail()
   } catch (e) {
     error.value = formatApiError(e)
   } finally {
-    inFlight -= 1
-    if (inFlight === 0) loading.value = false
+    loading.value = false
   }
 }
 
@@ -193,7 +106,7 @@ function scheduleReload(): void {
   if (reloadTimer) clearTimeout(reloadTimer)
   reloadTimer = setTimeout(() => {
     reloadTimer = null
-    void reload()
+    void reloadVisible()
   }, 300)
 }
 
@@ -218,18 +131,111 @@ async function openDetail(task: Pick<Task, 'id'>): Promise<void> {
 function onEvent(env: EventEnvelope): void {
   if (env.type === 'snapshot.required') {
     // 游标超窗断流：SSE 封装会自动重连，这里负责补齐错过的数据。
-    void reload()
+    void reloadVisible()
     return
   }
   if (env.type.startsWith('task.')) scheduleReload()
-  else if (env.type.startsWith('tag.')) void refreshDetail()
+  else if (env.type.startsWith('tag.')) {
+    void reloadVisible()
+    void refreshDetail()
+  }
+}
+
+// ---- 树展开 / 扁平化 ----
+
+async function toggle(task: Task): Promise<void> {
+  const next = new Set(expanded.value)
+  if (next.has(task.id)) {
+    next.delete(task.id)
+  } else {
+    next.add(task.id)
+    if (!childrenByContainer.value.has(task.id)) {
+      loading.value = true
+      try {
+        childrenByContainer.value.set(task.id, await fetchChildren(task.id))
+        error.value = null
+      } catch (e) {
+        error.value = formatApiError(e)
+        next.delete(task.id)
+      } finally {
+        loading.value = false
+      }
+    }
+  }
+  expanded.value = next
+}
+
+interface FlatRow {
+  task: Task
+  depth: number
+}
+
+const rows = computed<FlatRow[]>(() => {
+  const out: FlatRow[] = []
+  const walk = (list: Task[], depth: number): void => {
+    for (const task of list) {
+      out.push({ task, depth })
+      if (expanded.value.has(task.id)) {
+        const kids = childrenByContainer.value.get(task.id)
+        if (kids) walk(kids, depth + 1)
+      }
+    }
+  }
+  walk(roots.value, 0)
+  return out
+})
+
+// ---- 搜索模式（task-search 平面查询）----
+
+const canSearch = computed(() =>
+  Boolean(regexInput.value || fuzzyInput.value || tagFilter.value || statusFilter.value),
+)
+
+async function runSearch(): Promise<void> {
+  if (!canSearch.value) {
+    error.value = '搜索至少需要一个条件（regex / fuzzy / tag / status）'
+    return
+  }
+  loading.value = true
+  try {
+    const page = await searchTasks(workspaceId.value, {
+      regex: regexInput.value || undefined,
+      fuzzy: fuzzyInput.value || undefined,
+      tag: tagFilter.value || undefined,
+      status: statusFilter.value || undefined,
+      assignee: assigneeInput.value || undefined,
+      limit: 50,
+    })
+    hits.value = page.items
+    mode.value = 'search'
+    error.value = null
+  } catch (e) {
+    error.value = formatApiError(e)
+  } finally {
+    loading.value = false
+  }
+}
+
+const hits = ref<TaskSearchHit[]>([])
+
+function resetToTree(): void {
+  regexInput.value = ''
+  fuzzyInput.value = ''
+  assigneeInput.value = ''
+  tagFilter.value = ''
+  statusFilter.value = ''
+  mode.value = 'tree'
+  void reloadVisible()
 }
 
 async function load(): Promise<void> {
   await session.boot()
-  await reload()
+  await reloadVisible()
   try {
-    const [mem, tags] = await Promise.all([listMembers(workspaceId.value), listTags(workspaceId.value)])
+    const [mem, tags] = await Promise.all([
+      listMembers(workspaceId.value),
+      listTags(workspaceId.value),
+    ])
     members.value = mem.items
     tagDict.value = tags.items
   } catch {
@@ -249,10 +255,11 @@ function fmtTime(iso: string): string {
 
 onMounted(load)
 watch(workspaceId, () => {
-  tasks.value = []
+  roots.value = []
+  childrenByContainer.value = new Map()
+  expanded.value = new Set()
   hits.value = []
   selected.value = null
-  collapsed.value = new Set()
   void load()
 })
 onUnmounted(() => {
@@ -272,7 +279,7 @@ onUnmounted(() => {
     <div class="toolbar">
       <input v-model="regexInput" placeholder="regex（过滤 title/description）" />
       <input v-model="fuzzyInput" placeholder="fuzzy（排序）" />
-      <input v-model="tagInput" placeholder="tag" list="tag-options" />
+      <input v-model="tagFilter" placeholder="tag" list="tag-options" />
       <datalist id="tag-options">
         <option v-for="t in tagDict" :key="t.id" :value="t.name" />
       </datalist>
@@ -280,13 +287,15 @@ onUnmounted(() => {
         <option value="">全部状态</option>
         <option v-for="s in STATUSES" :key="s" :value="s">{{ s }}</option>
       </select>
-      <button :disabled="!canSearch || loading" @click="runSearch()">搜索</button>
-      <button :disabled="loading" @click="resetToTree">重置为树</button>
+      <input v-model="assigneeInput" placeholder="assignee id（可选）" />
+      <button :disabled="!canSearch || loading" @click="runSearch">查询</button>
+      <button :disabled="loading" @click="resetToTree">返回树</button>
     </div>
     <p v-if="error" style="color: #b3261e">{{ error }}</p>
   </div>
 
   <div v-if="mode === 'tree'" class="card">
+    <p class="muted">逐容器懒加载：点击展开箭头拉取该任务直接子层。</p>
     <p v-if="loading && !rows.length" class="muted">加载中…</p>
     <p v-else-if="!rows.length" class="muted">没有任务。</p>
     <table v-else class="task-table">
@@ -295,35 +304,39 @@ onUnmounted(() => {
           <th style="text-align: left">标题</th>
           <th style="text-align: left">状态</th>
           <th style="text-align: left">优先级</th>
+          <th style="text-align: left">子任务</th>
+          <th style="text-align: left">Tags</th>
           <th style="text-align: left">负责人</th>
           <th style="text-align: left">更新时间</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="row.node.task.id">
+        <tr v-for="row in rows" :key="row.task.id">
           <td :style="{ paddingLeft: `${row.depth * 24 + 8}px` }">
-            <button
-              v-if="hasChildren(row.node)"
-              class="toggle"
-              @click="toggle(row.node)"
-            >
-              {{ collapsed.has(row.node.task.id) ? '▸' : '▾' }}
+            <button v-if="row.task.children_count > 0" class="toggle" @click="toggle(row.task)">
+              {{ expanded.has(row.task.id) ? '▾' : '▸' }}
             </button>
             <span v-else class="toggle muted">·</span>
-            <a href="#" @click.prevent="openDetail(row.node.task)">{{ row.node.task.title }}</a>
-            <span v-if="row.node.orphan" class="badge badge-warn" title="父任务不存在">孤儿</span>
+            <a href="#" @click.prevent="openDetail(row.task)">{{ row.task.title }}</a>
           </td>
-          <td><span class="badge" :class="`badge-${row.node.task.status}`">{{ row.node.task.status }}</span></td>
-          <td>{{ row.node.task.priority }}</td>
-          <td>{{ memberName(row.node.task.assignee_actor_id) }}</td>
-          <td>{{ fmtTime(row.node.task.updated_at) }}</td>
+          <td>
+            <span class="badge" :class="`badge-${row.task.status}`">{{ row.task.status }}</span>
+          </td>
+          <td>{{ row.task.priority }}</td>
+          <td>{{ row.task.children_count > 0 ? row.task.children_count : '—' }}</td>
+          <td>
+            <span v-for="t in row.task.tags" :key="t.id" class="badge badge-tag">{{ t.name }}</span>
+            <span v-if="!row.task.tags.length" class="muted">—</span>
+          </td>
+          <td>{{ memberName(row.task.assignee_actor_id) }}</td>
+          <td>{{ fmtTime(row.task.updated_at) }}</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <div v-else class="card">
-    <p class="muted">搜索结果：{{ hits.length }} 条{{ searchNext ? '（还有更多）' : '' }}</p>
+    <p class="muted">查询结果：{{ hits.length }} 条</p>
     <p v-if="!hits.length" class="muted">没有匹配的任务。</p>
     <table v-if="hits.length" class="task-table">
       <thead>
@@ -345,7 +358,6 @@ onUnmounted(() => {
         </tr>
       </tbody>
     </table>
-    <button v-if="searchNext" :disabled="loading" @click="runSearch(true)">加载更多</button>
   </div>
 
   <div v-if="selected" class="card">
@@ -353,18 +365,22 @@ onUnmounted(() => {
       {{ selected.title }}
       <span class="badge" :class="`badge-${selected.status}`">{{ selected.status }}</span>
     </h3>
-    <p class="muted"><code>{{ selected.id }}</code> · revision {{ selected.revision }} · 优先级 {{ selected.priority }}</p>
+    <p class="muted">
+      <code>{{ selected.id }}</code> · revision {{ selected.revision }} · 优先级
+      {{ selected.priority }}
+    </p>
     <p>负责人：{{ memberName(selected.assignee_actor_id) }}</p>
     <p v-if="selected.parent_id">父任务：<code>{{ selected.parent_id }}</code></p>
     <p>
       Tags：
-      <span v-if="selected.tags?.length">
+      <span v-if="selected.tags.length">
         <span v-for="t in selected.tags" :key="t.id" class="badge badge-tag">{{ t.name }}</span>
       </span>
       <span v-else class="muted">（无）</span>
     </p>
     <p v-if="selected.lease">
-      租约：{{ memberName(selected.lease.holder_actor_id) }} 至 {{ fmtTime(selected.lease.expires_at) }}
+      租约：{{ memberName(selected.lease.holder_actor_id) }} 至
+      {{ fmtTime(selected.lease.expires_at) }}
     </p>
     <p v-else class="muted">无租约。</p>
     <pre v-if="selected.description">{{ selected.description }}</pre>
@@ -414,6 +430,5 @@ onUnmounted(() => {
 .badge-review { background: #ede1fb; color: #6b21a8; }
 .badge-done { background: #ddf3e2; color: #1b7f3b; }
 .badge-cancelled { background: #eceef1; color: #6b7075; }
-.badge-warn { background: #fde3e3; color: #b3261e; }
 .badge-tag { background: #e0f2f1; color: #00695c; }
 </style>

@@ -101,9 +101,9 @@ export interface Approval {
 
 export interface ApprovalPage extends Page<Approval> {}
 
-// ---- Tasks / Tags（手工对齐 openapi Task/Tag/Lease schema）----
-// 注意：list/search 响应的 Task 省略 tags 字段（D11：仅 get/update/claim/attach
-// 响应填充）；因此任务树视图展示 tag 走 GET /tasks/{id} 详情。
+// ---- Tasks / Tags（手工对齐 openapi v2 Task/Tag/Lease schema）----
+// v2（D15）：集合端点（children/task-search）行内恒填充 tags 与 children_count；
+// lease 仍仅 get/claim 响应非空。
 
 export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled'
 
@@ -131,13 +131,14 @@ export interface Task {
   priority: TaskPriority
   assignee_actor_id: ID | null
   revision: number
-  tags?: Tag[]
+  tags: Tag[]
+  children_count: number
   lease?: Lease | null
   created_at: string
   updated_at: string
 }
 
-// search 端点的条目 = Task + fuzzy 排序分（仅 fuzzy 查询时出现）。
+// task-search 端点的条目 = Task + fuzzy 排序分（仅 fuzzy 查询时出现）。
 export type TaskSearchHit = Task & { score?: number }
 
 export interface Member {
