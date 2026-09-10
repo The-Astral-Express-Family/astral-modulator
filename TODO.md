@@ -328,6 +328,8 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | D9 | agent 的 workspace 归属模型 | **不引入新绑定模型**：membership 行（人/agent 通用）与 credential 绑定（agent 专用）即既有两条真实路径；`createAgent` 同事务补 role='agent' 成员行；listAgents 取两路径并集 | 原计划「需 agent-workspace 绑定模型」是第三条平行路径，会让「谁在 workspace 里」出现三种事实来源；membership 本就是人 actor 的归属事实，agent 复用它即可。credential 绑定保持纯授权语义（scope 载体），不承担归属语义 |
 | D10 | session 绝对上限 | `MaxSessionLife=90d`（创建起算），`RefreshTTL=30d`（滑动） | 原两者同为 30d，轮换窗口可无限续命，绝对上限永不生效，与 architecture §8.3「生命周期上限从创建时刻算」矛盾。90d 给足跨季度长任务余量，同时封顶被盗 refresh 的最长寿命 |
 | D11 | tag 与 task 的关联 | `PUT/DELETE /tasks/{id}/tags/{tag_id}`；关联是任务修改：条件 revision bump + `task.updated` 事件；Task DTO 的 `tags` 仅 get/attach/detach/update 响应填充 | tags 故事在 round 5 只做了「建/删」，attach 链路缺失导致 task_tags 表、search?tag= 过滤、Task.tags 字段全部空转。revision bump 使 tag 变更纳入既有乐观并发与事件流，不新造事件类型 |
+| D14 | 全局「根 TODO」的归属 | **默认工作区约定**：`default/<user>/todo`——普通 workspace + membership 权限隔离；不引入「个人工作区」类型；按需显式创建（不做首次使用自动开荒）；`<user>` = 登录用户名（非 usr_id、非可变 display_name） | 任务必须归属协作边界（授权/事件/审计的锚点）；全局任务映射为「个人默认容器」模型零改动。服务端命名空间强制（`default/<user>/*` 仅 `<user>` 可建）列为后续收紧项，触发条件：出现抢注/滥用 |
+| D15 | 任务树读取模型（v2 破坏性重构） | **容器化**：凡容器（workspace/task），子任务集合统一为 `GET/POST /workspaces/{id}/children` 与 `GET/POST /tasks/{id}/children`（同参数 status/tag/assignee/limit/cursor，同响应，行内批量填充 tags + children_count）；**移除** `GET/POST /workspaces/{id}/tasks`（同路径改语义=隐性漂移，禁止）；平面查询归 `GET /workspaces/{id}/task-search`（原 search 路径废除；结构化与内容过滤平权，≥1 条件守卫保留，补 assignee）；TaskCreate 移除 parent_id；嵌套树端点**永不建**（将来真需要属纯增量，不破坏 v2） | 「默认=根层、参数=子层、flat=逃生门」让一个集合背三种语义，不优雅；客户端递归只换容器 id。开发期零兼容负担，protocol_version 1→2、快照 v2、CLI/Web 锁步适配；v2 落地前排队中的 CLI tags/msg 暂缓以免白干 |
 
 ## 2. 待裁决契约
 
@@ -470,6 +472,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-09 | 第 7 轮：refresh 并发轮换改条件更新：输家收到 401（token 已被替换），不再误触整族撤销 | 行为 | CLI |
 | 2026-09-09 | 第 8 轮：新增端点 POST/GET `/workspaces/{id}/approvals`、POST `/approvals/{id}/approve|deny`（T-ws-6，architecture §22）；新增错误码 `APPROVAL_EXPIRED`（409）；MVP 仅开放 `membership.promote_owner`，approve 同事务执行并重用 workspace.member.changed 事件（data.change=promoted） | 补充 | CLI/Web |
 | 2026-09-09 | 第 9 轮：新增端点 PUT/DELETE `/tasks/{id}/tags/{tag_id}`（D11，attach/detach 幂等；attach 响应=Task 含 tags）；task.updated 事件 data 增补 `tag_change`/`tag_id`；session 绝对寿命 90d（超期 refresh 返回 TOKEN_EXPIRED）；撤销（session family/credential/logout）后该 actor 的 SSE 流主动断开 | 行为 | CLI/Web |
+| 2026-09-10 | **v2 破坏性重构（D15，定案未实施）**：移除 `GET/POST /workspaces/{id}/tasks` 与 `GET /workspaces/{id}/tasks/search`；新增 `GET/POST /workspaces/{id}/children`、`GET/POST /tasks/{id}/children`、`GET /workspaces/{id}/task-search`；TaskCreate 移除 parent_id；children/task-search 响应行内增补 `tags`（当页批量填充，修订 D11）与 `children_count`；task-search 补 assignee、免 regex/fuzzy 强制（≥1 过滤条件）；protocol_version 1→2 | 破坏 | CLI/Web 锁步适配（快照 v2） |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -515,17 +518,26 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 > 2026-09-09 设计复审修订：T-ws-7 撤销「需绑定模型」前提（D9，用既有表实现）；
 > 新增 D10（session 绝对上限）与 D11（tag 关联链路补全）两项设计修复。
 > 优先级原则：先闭合「已宣称完成但实际断链」的功能（D11），再做新面。
+> 2026-09-10 API 重构复审（用户主导）：任务读取模型定案容器化 v2（D14/D15，
+> 破坏性）；**v2 落地前，排在后面的 CLI tags/msg 命令暂缓**，避免在 v1 上白干；
+> 第 13 轮 web 全量拉取与第 14 轮 CLI todo list/search 均在 v2 轮中重构。
 
 1. 【✅ 第 9 轮完成】D11 tag attach/detach + D9 T-ws-7 + D10 session 上限 + 凭证/会话撤销断流
 2. 【✅ 第 10 轮完成】CI 修复（goose embed 目录、迁移 StatementBegin/End）+ 双仓库卫生轮
 3. 【✅ 第 11 轮完成】CLI login/init 实装（按 D12/D13 预审施工，双仓库端到端闭环；
    端到端联调依赖真实服务器 + 浏览器审批，留待部署环境手动验收）
-4. 【✅ 第 13 轮完成】Web 任务树视图（消费 list/search API + SSE 实时刷新 +
-   snapshot.required 处理）
+4. 【✅ 第 13 轮完成】Web 任务树视图（v2 轮中将重构为逐容器懒加载）
 5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图
 6. 【✅ 第 12 轮完成】Web device 审批页联调收尾：pending 自动轮询
-7. rate limit（auth/device 端点优先；phase-6）
-8. 【✅ 第 14 轮完成】astral-cli todo/tags/msg 业务命令——todo 命令族已落地；
-   tags（两步确认）/ msg / event listen 为下一批
-9. astral-cli 端到端联调验收（第 11 轮遗留：需真实服务器 + 浏览器审批，
-   部署环境手动执行，覆盖 login → web 审批 → whoami → init → todo 全链路）
+7. 【✅ 第 14 轮完成】astral-cli todo 命令族（v2 轮中适配容器端点）
+8. **v2 server 轮（下一步）**：openapi 升版重写（移除三个旧端点、新增
+   children×2 + task-search）、统一容器集合 handler、tags 批量填充 +
+   children_count、protocol_version=2、openapi 契约门与 app 集成测试重写、
+   协议快照 v2 发布至 astral-cli
+9. v2 CLI 轮：kProtocolVersion=2、todo list/search/add 适配容器端点、
+   default/<user>/todo 约定的 CLI 引导（D14）、快照 v2 契约测试
+10. v2 web 轮：任务树视图改逐容器懒加载 + task-search，删除全量拉取
+11. CLI tags（两步确认）/ msg / event listen 命令（基于 v2）
+12. rate limit（auth/device 端点优先；phase-6）
+13. astral-cli 端到端联调验收（需真实服务器 + 浏览器审批，部署环境手动执行，
+    覆盖 login → web 审批 → whoami → init → todo 全链路，按 v2 契约）
