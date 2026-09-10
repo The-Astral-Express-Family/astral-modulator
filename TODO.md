@@ -372,6 +372,30 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - 门禁：go build/vet/test、redocly lint、vue-tsc + vite build 全绿；
   零行为变化。
 
+### 第 19 轮（2026-09-10）：CLI tags/msg 命令实装（astral-cli，基于 v2）
+
+- **`astral tags`**（替换桩命令）：`list` 词典；`create <name>` propose →
+  人读输出携带完整可复制的确认命令行（`--proposal <id> --confirm <code>`，
+  无本地状态，与服务端 code↔actor/workspace/action/name 绑定语义一一对应）；
+  `rename <name-or-id> <new>` / `delete <name-or-id>` 先经 tag 词典按名解析
+  `target_tag_id`（`tag_` 前缀参数直接作 id；delete 的 confirm name 用服务端
+  canonical 名）；
+- **`astral msg`**：`send <target> <body> [--thread <id>]`——目标语法
+  `workspace`（广播）| `actor:<id>` | `task:<id>`（非法 → USAGE exit 2）；
+  发送携带确定性 Idempotency-Key（内容 FNV-1a，重跑同命令 24h 内服务端重放
+  首次 2xx 不双发）；`list [--task <id>] [--thread <id>] [--limit] [--all]`
+  ——`--task` 走任务线程集合端点，其余走 workspace messages；
+- **auth/api 共用件**：`openWorkspace`（目标解析 + 单次 discovery +
+  workspace 解析合一；LOCAL_WORKSPACE_ERROR/WORKSPACE_NOT_FOUND 附带 D14
+  default/<user>/todo 提示）与 `fetchPageItems`（分页取尽），todo_cmd 同步
+  去重；CLI 文档（README/ARCHITECTURE §11）同步；`event listen`（SSE 流式
+  消费）列为下一轮；
+- 测试：runApp 级脚手架抽至 tests/unit/support/api_fixture.hpp（EnvGuard/
+  CwdGuard/FakeApi/ApiFixture 共享，test_todo_cmd 改用），新增
+  test_tags_msg_cmd（两步确认流程、target 解析、线程选择、幂等键、D14 提示
+  等用例），全仓 85/85 绿；clang-format 过；
+- CLI 侧对应提交：astral-cli@0e757da。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -595,10 +619,8 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 8. 【✅ 第 14 轮完成】astral-cli todo 命令族（v1；第 16 轮已适配 v2）
 9. 【✅ 第 16 轮完成】v2 CLI 轮（kProtocolVersion=2、容器端点适配、快照 v2）
 10. 【✅ 第 17 轮完成】v2 web 轮（任务树逐容器懒加载 + task-search）
-11. CLI tags（两步确认）/ msg / event listen 命令（基于 v2）；含 D14 的 CLI
-    引导——todo add 无绑定时提示 default/<user>/todo 约定（登录名经 whoami
-    可得）
-12. rate limit（auth/device 端点优先；phase-6）
-13. astral-cli 端到端联调验收（需真实服务器 + 浏览器审批，部署环境手动执行，
-    覆盖 login → web 审批 → whoami → init → todo 全链路，按 v2 契约；
-    本机无 docker/PG，v2 链路尚未跑过真服务器）
+11. 【✅ 第 19 轮完成】CLI tags（两步确认）/ msg 命令（基于 v2）+ D14 CLI 引导
+12. CLI event listen（SSE 流式消费，JSON Lines + 断线续传；client/sse.cpp
+    FrameParser 已就绪，需接 libcurl 流式读取 + 重连循环）
+13. rate limit（auth/device 端点优先；phase-6）
+
