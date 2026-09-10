@@ -51,6 +51,7 @@ onUnmounted(() => unsubscribe?.())
     </p>
     <p>
       SSE 状态：{{ sseState }}
+      · <RouterLink :to="`/workspaces/${workspaceId}/tasks`">任务树</RouterLink>
       · <RouterLink :to="`/workspaces/${workspaceId}/approvals`">裁决队列</RouterLink>
     </p>
   </div>
@@ -58,7 +59,6 @@ onUnmounted(() => unsubscribe?.())
     <h3>实时事件</h3>
     <pre>{{ events.length ? JSON.stringify(events.slice(0, 10), null, 2) : '（等待事件…）' }}</pre>
   </div>
-  <!-- TODO(phase-3): TODO 树视图（搜索框支持 regex+fuzzy 双输入，对应 CLI --regex/--fuzzy）。 -->
   <!-- TODO(phase-4): presence 总览、消息流。 -->
   <!-- TODO(phase-5): 文档活动与冲突解决。 -->
 </template>

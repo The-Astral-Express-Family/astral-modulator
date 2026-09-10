@@ -256,6 +256,29 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   请求在别处被批准/拒绝/过期时页面自动跟进；裁决或终态后停止轮询；
 - workspace 总览页增加裁决队列入口。
 
+### 第 13 轮（2026-09-10）：Web 任务树视图（§11 第 4 项）
+
+- **`/workspaces/{id}/tasks` 视图**：
+  - 树模式（默认）：list 端点全量分页拉取（limit=200 循环到 next_cursor=null）→
+    前端按 parent_id 组树；兄弟按 id（UUIDv7 字典序=时间序）排序；折叠状态按
+    任务 id 记忆；孤儿任务（parent 不在集合内，防御性）标「孤儿」徽标；
+  - 搜索模式：search 端点（regex 过滤 / fuzzy 排序，可叠加 tag/status；
+    客户端强制 regex/fuzzy 至少其一，对齐服务端 400 语义），flat 结果表 +
+    score 列 + 「加载更多」（cursor 续页）；
+  - 状态过滤（树模式为前端树形过滤，保留命中节点到根的路径并忽略折叠；
+    搜索模式下透传给服务端）；
+  - 详情侧栏：`GET /tasks/{id}`（tags/lease 仅详情响应填充，D11）——
+    tag 徽标、租约 holder/到期、revision、description；
+  - **SSE 实时刷新**：task.* 事件 300ms 防抖重载当前模式；snapshot.required
+    立即全量重拉（游标超窗语义）；tag.* 刷新打开中的详情；
+  - tag 搜索输入带 datalist 联想（GET /workspaces/{id}/tags）；成员列表
+    （GET /members）做 actor id → 显示名映射，失败降级显示原始 id；
+- api/modules/task.ts 新增（list/search/getDetail）；workspace.ts 补 listTags/
+  listMembers；types.ts 补 Task/Lease/Tag/Member/TaskSearchHit（手工对齐
+  openapi，注意 list/search 省略 tags、lease 恒 null 的 DTO 差异）；
+- workspace 总览页加任务树入口（phase-3 的 TODO 注释兑现删除）；
+- 无契约变更（纯消费既有端点）；vue-tsc + vite build 全绿。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -466,8 +489,12 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 2. 【✅ 第 10 轮完成】CI 修复（goose embed 目录、迁移 StatementBegin/End）+ 双仓库卫生轮
 3. 【✅ 第 11 轮完成】CLI login/init 实装（按 D12/D13 预审施工，双仓库端到端闭环；
    端到端联调依赖真实服务器 + 浏览器审批，留待部署环境手动验收）
-4. Web 任务树视图（消费 search API + SSE 实时刷新 + snapshot.required 处理；
-   D11 后 tag 过滤/展示数据源才真实可用）
+4. 【✅ 第 13 轮完成】Web 任务树视图（消费 list/search API + SSE 实时刷新 +
+   snapshot.required 处理）
 5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图
 6. 【✅ 第 12 轮完成】Web device 审批页联调收尾：pending 自动轮询
 7. rate limit（auth/device 端点优先；phase-6）
+8. astral-cli todo/tags/msg 业务命令（服务端 API 均已可用；按 docs/ARCHITECTURE.md §11
+   命令面施工，消费 protocol/snapshots/v1）
+9. astral-cli 端到端联调验收（第 11 轮遗留：需真实服务器 + 浏览器审批，
+   部署环境手动执行，覆盖 login → web 审批 → whoami → init 全链路）

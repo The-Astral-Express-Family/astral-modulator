@@ -101,6 +101,50 @@ export interface Approval {
 
 export interface ApprovalPage extends Page<Approval> {}
 
+// ---- Tasks / Tags（手工对齐 openapi Task/Tag/Lease schema）----
+// 注意：list/search 响应的 Task 省略 tags 字段（D11：仅 get/update/claim/attach
+// 响应填充）；因此任务树视图展示 tag 走 GET /tasks/{id} 详情。
+
+export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled'
+
+export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
+
+export interface Lease {
+  holder_actor_id: ID
+  expires_at: string
+  renewed_at?: string
+}
+
+export interface Tag {
+  id: ID
+  workspace_id: ID
+  name: string
+}
+
+export interface Task {
+  id: ID
+  workspace_id: ID
+  parent_id: ID | null
+  title: string
+  description: string
+  status: TaskStatus
+  priority: TaskPriority
+  assignee_actor_id: ID | null
+  revision: number
+  tags?: Tag[]
+  lease?: Lease | null
+  created_at: string
+  updated_at: string
+}
+
+// search 端点的条目 = Task + fuzzy 排序分（仅 fuzzy 查询时出现）。
+export type TaskSearchHit = Task & { score?: number }
+
+export interface Member {
+  actor: Actor
+  role: 'viewer' | 'contributor' | 'agent' | 'maintainer' | 'owner'
+}
+
 // SSE 事件 envelope（api/schemas/event.json）。
 export interface EventEnvelope<T = Record<string, unknown>> {
   id: string

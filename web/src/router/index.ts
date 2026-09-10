@@ -27,6 +27,11 @@ export const router = createRouter({
       component: () => import('../views/WorkspaceOverviewView.vue'),
     },
     {
+      path: '/workspaces/:workspaceId/tasks',
+      name: 'workspace-tasks',
+      component: () => import('../views/TaskTreeView.vue'),
+    },
+    {
       path: '/workspaces/:workspaceId/approvals',
       name: 'workspace-approvals',
       component: () => import('../views/ApprovalsView.vue'),
