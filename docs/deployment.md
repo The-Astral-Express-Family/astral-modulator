@@ -20,8 +20,10 @@ ASTRAL_SERVER_ID='srv_dev_local' \
 go run ./cmd/astral-server
 ```
 
-无数据库也能启动（桩模式）：发现/能力/健康/SSE 可用，受保护端点返回 401、
-存储相关端点返回 503。环境变量全集见 `server/internal/config/config.go`。
+无数据库也能启动（桩模式）：发现/能力/健康/SSE 可用，受保护端点返回 401；
+需要存储的端点在鉴权后返回 503 INTERNAL_ERROR；未实装端点返回 501
+（document/audit，phase-5/6）；memory 因 M1 未裁决未注册路由（404）。
+环境变量全集见 `server/internal/config/config.go`。
 
 ### 小型自托管（推荐基线）
 
@@ -44,7 +46,10 @@ ASTRAL_DATABASE_DSN=postgres://...
 ASTRAL_PUBLIC_URL=https://astral.example.com   # canonical URL，写入 /.well-known/astral
 ASTRAL_SERVER_ID=srv_...                        # 首启后固化进 server_meta，库中值优先
 ASTRAL_HTTP_ADDR=:8080
+ASTRAL_LOG_LEVEL=info                           # 可选
 ```
+
+（非全集；完整说明以 `server/internal/config/config.go` 为准。）
 
 Secrets 只走环境变量/secret manager，不提交配置库。
 

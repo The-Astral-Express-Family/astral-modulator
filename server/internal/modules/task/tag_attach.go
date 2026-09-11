@@ -38,19 +38,12 @@ func (m *Module) loadTaskTags(ctx context.Context, taskID string) []tag.TagDTO {
 // 权限（task:write）→ tag 同 workspace → 幂等/revision 预检 → 单事务
 // 条件 bump + 关联行 + audit + 事件。
 func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID string, expectedRevision *int64) (*model.Task, []tag.TagDTO, error) {
-	var t model.Task
-	err := m.DB.WithContext(ctx).First(&t, "id = ?", taskID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, apiErr := m.Auth.RequireWorkspaceScopes(ctx, p, t.WorkspaceID, auth.ScopeTaskWrite); apiErr != nil {
+	t, apiErr := m.LoadForWorkspace(ctx, p, taskID, auth.ScopeTaskWrite)
+	if apiErr != nil {
 		return nil, nil, apiErr
 	}
 	var tagRow model.Tag
-	err = m.DB.WithContext(ctx).First(&tagRow, "id = ? AND workspace_id = ?", tagID, t.WorkspaceID).Error
+	err := m.DB.WithContext(ctx).First(&tagRow, "id = ? AND workspace_id = ?", tagID, t.WorkspaceID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, httpx.NotFound("tag not found in this workspace")
 	}
@@ -68,23 +61,13 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 		return nil, nil, err
 	}
 	if linked > 0 {
-		return &t, m.loadTaskTags(ctx, taskID), nil
+		return t, m.loadTaskTags(ctx, taskID), nil
 	}
 
 	var fresh model.Task
 	err = m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&model.Task{}).
-			Where("id = ? AND revision = ?", taskID, t.Revision).
-			Updates(map[string]any{"revision": t.Revision + 1, "updated_by": p.ActorID})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			var current model.Task
-			if e := tx.First(&current, "id = ?", taskID).Error; e != nil {
-				return e
-			}
-			return revisionConflict(current.Revision)
+		if err := bumpRevisionTx(tx, taskID, t.Revision, map[string]any{"updated_by": p.ActorID}); err != nil {
+			return err
 		}
 		if err := tx.Create(&model.TaskTag{TaskID: taskID, TagID: tagID, AddedBy: p.ActorID}).Error; err != nil {
 			// 并发重复挂载：整体回滚（含 revision bump），等价目标状态已达成。
@@ -121,15 +104,8 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 
 // DetachTag 摘除关联。未挂载（或 tag 已删连带清理）→ no-op，不动 revision。
 func (m *Module) DetachTag(ctx context.Context, p *auth.Principal, taskID, tagID string) error {
-	var t model.Task
-	err := m.DB.WithContext(ctx).First(&t, "id = ?", taskID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
-	}
-	if err != nil {
-		return err
-	}
-	if _, apiErr := m.Auth.RequireWorkspaceScopes(ctx, p, t.WorkspaceID, auth.ScopeTaskWrite); apiErr != nil {
+	t, apiErr := m.LoadForWorkspace(ctx, p, taskID, auth.ScopeTaskWrite)
+	if apiErr != nil {
 		return apiErr
 	}
 
@@ -143,18 +119,8 @@ func (m *Module) DetachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 	}
 
 	return m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&model.Task{}).
-			Where("id = ? AND revision = ?", taskID, t.Revision).
-			Updates(map[string]any{"revision": t.Revision + 1, "updated_by": p.ActorID})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			var current model.Task
-			if e := tx.First(&current, "id = ?", taskID).Error; e != nil {
-				return e
-			}
-			return revisionConflict(current.Revision)
+		if err := bumpRevisionTx(tx, taskID, t.Revision, map[string]any{"updated_by": p.ActorID}); err != nil {
+			return err
 		}
 		if err := tx.Where("task_id = ? AND tag_id = ?", taskID, tagID).Delete(&model.TaskTag{}).Error; err != nil {
 			return err

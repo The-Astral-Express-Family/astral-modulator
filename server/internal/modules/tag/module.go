@@ -59,21 +59,31 @@ type proposalDTO struct {
 
 // ---- handlers ----
 
+// workspaceTags 取 workspace 全量 tag 并组装 DTO（list 端点与 propose 的
+// existing_tags 共用——查询、排序与行组装只有这一处实现）。
+func (m *Module) workspaceTags(ctx context.Context, wsID string) ([]tagDTO, error) {
+	var tags []model.Tag
+	if err := m.DB.WithContext(ctx).
+		Where("workspace_id = ?", wsID).Order("created_at ASC").Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	items := make([]tagDTO, 0, len(tags))
+	for _, t := range tags {
+		items = append(items, tagDTO{ID: t.ID, WorkspaceID: t.WorkspaceID, Name: t.Name})
+	}
+	return items, nil
+}
+
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTagRead); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
-	var tags []model.Tag
-	if err := m.DB.WithContext(r.Context()).
-		Where("workspace_id = ?", wsID).Order("created_at ASC").Find(&tags).Error; err != nil {
+	items, err := m.workspaceTags(r.Context(), wsID)
+	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
-	}
-	items := make([]tagDTO, 0, len(tags))
-	for _, t := range tags {
-		items = append(items, tagDTO{ID: t.ID, WorkspaceID: t.WorkspaceID, Name: t.Name})
 	}
 	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }
@@ -178,15 +188,10 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// existing_tags 全量返回：Agent 比对后“三思”的数据基础。
-	var tags []model.Tag
-	if err := m.DB.WithContext(r.Context()).
-		Where("workspace_id = ?", wsID).Order("created_at ASC").Find(&tags).Error; err != nil {
+	existing, err := m.workspaceTags(r.Context(), wsID)
+	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
-	}
-	existing := make([]tagDTO, 0, len(tags))
-	for _, t := range tags {
-		existing = append(existing, tagDTO{ID: t.ID, WorkspaceID: t.WorkspaceID, Name: t.Name})
 	}
 	httpx.WriteOK(w, r, http.StatusCreated, proposalDTO{
 		ProposalID:   proposal.ID,
@@ -219,7 +224,7 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 		}
 		// 绑定校验：actor / workspace / 输入与 canonical 一致 / TTL / 状态。
 		if proposal.ActorID != p.ActorID {
-			return &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "proposal belongs to another actor"}
+			return httpx.Forbidden("proposal belongs to another actor")
 		}
 		if _, apiErr := m.Auth.RequireWorkspaceScopes(ctx, p, proposal.WorkspaceID, auth.ScopeTagWrite); apiErr != nil {
 			return apiErr

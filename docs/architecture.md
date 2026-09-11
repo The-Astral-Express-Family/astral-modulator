@@ -274,8 +274,8 @@ GET /.well-known/astral
   "server_id": "srv_01...",
   "canonical_url": "https://astral.example.com",
   "api_base": "/api/v1",
-  "protocol_version": 1,
-  "min_cli_protocol_version": 1,
+  "protocol_version": 2,
+  "min_cli_protocol_version": 2,
   "auth": {
     "device_login": true
   }
@@ -533,6 +533,9 @@ fuzzy
 API 示例（v2 起端点为 /workspaces/{id}/task-search，TODO.md D15）：
 
 ```text
+（v2 起 task 创建/列表走容器端点 <container>/children；task-search 是平面
+逃生门。parent_id 在此是过滤参数；DB 与 TaskUpdate 中 parent_id 仍是真实列。）
+
 GET /api/v1/workspaces/{workspace_id}/task-search
   ?regex=...
   &fuzzy=...
@@ -595,9 +598,12 @@ POST /api/v1/tag-proposals/{proposal_id}/confirm
 
 ```json
 {
-  "confirm_code": "K7P4Q2"
+  "confirm_code": "K7P4Q2",
+  "name": "urgent"
 }
 ```
+
+`name` 必须与 propose 时的输入一致（服务端做 canonical 比对）。
 
 proposal 必须绑定：
 
@@ -812,28 +818,11 @@ Idempotency-Key: ...
 }
 ```
 
-稳定错误至少包括：
-
-```text
-AUTH_REQUIRED
-TOKEN_EXPIRED
-TOKEN_REVOKED
-INSUFFICIENT_SCOPE
-SERVER_NOT_FOUND
-WORKSPACE_NOT_FOUND
-WORKSPACE_ALREADY_BOUND
-TASK_NOT_FOUND
-TASK_ALREADY_CLAIMED
-TASK_LEASE_EXPIRED
-TAG_PROPOSAL_EXPIRED
-TAG_ALREADY_EXISTS
-REVISION_CONFLICT
-DOCUMENT_CONFLICT
-RATE_LIMITED
-CLIENT_VERSION_UNSUPPORTED
-VALIDATION_FAILED
-INTERNAL_ERROR
-```
+稳定错误码清单的**唯一事实来源**是 `api/openapi.yaml` 的 ErrorCode enum
+（`api/schemas/error.json` 为契约测试用的同步副本，服务端 `httpx/errors.go`
+受 openapi_contract_test 约束）。此处不再手抄清单——历史教训：手抄版先后
+漏掉 WORKSPACE_NAME_TAKEN、NOT_FOUND、AUTHORIZATION_PENDING、SLOW_DOWN、
+APPROVAL_EXPIRED 六个已登记码。
 
 ## 21. Idempotency 与并发
 
@@ -934,7 +923,10 @@ Web 不承担 CLI 多平台发行。
 /
 ├─ ARCHITECTURE.md
 ├─ README.md
+├─ TODO.md                        # 任务与契约登记中心（含轮次记录）
+├─ MANIFEST.md
 ├─ docs/
+│  ├─ README.md                   # 文档索引
 │  ├─ requirements.md
 │  ├─ protocol.md
 │  ├─ security.md
@@ -952,6 +944,7 @@ Web 不承担 CLI 多平台发行。
 │  │  ├─ idempotency/
 │  │  ├─ ids/
 │  │  ├─ model/                   # GORM 模型（与 migrations 手工同步）
+│  │  ├─ ptr/                     # ptr.Of 等取址小件
 │  │  ├─ store/                   # 连接 + goose migration + server_meta
 │  │  ├─ testsupport/
 │  │  └─ modules/
@@ -982,7 +975,9 @@ Web 不承担 CLI 多平台发行。
 5. `astral-cli` 更新自己的 protocol snapshot；
 6. CLI CI 验证兼容。
 
-兼容改动不要求两仓库同时发布；breaking protocol change 必须先设计服务端兼容窗口。
+兼容改动不要求两仓库同时发布。开发期（scaffold 阶段）裁决为**零兼容负担**：
+breaking change 直接升 protocol_version + 发布新快照，两仓库锁步适配
+（D15 先例）；对外发布前的稳定窗口另行裁决。
 
 ## 27. v0.1 实施顺序
 
@@ -1016,8 +1011,7 @@ Web 不承担 CLI 多平台发行。
 
 - parent task；
 - recursive queries；
-- `pg_trgm`；
-- regex -> fuzzy；
+- regex -> fuzzy（应用层 RE2 + trigram，D7；pg_trgm 仅是规模触发后的回迁路径）；
 - tag proposal/confirm；
 - claim lease。
 
@@ -1038,7 +1032,7 @@ Web 不承担 CLI 多平台发行。
 ### Phase 6：Web GUI / hardening
 
 - GUI；
-- approval；
+- approval（T-ws-6 已提前于 round 8 落地，非本 Phase 交付）；
 - audit browser；
 - rate limit；
 - deployment；

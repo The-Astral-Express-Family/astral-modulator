@@ -10,7 +10,9 @@
 > **里程碑视图**，用里程碑名而非编号，避免与实施 Phase 混淆。
 >
 > **当前进度**以根目录 [TODO.md](../TODO.md) 为准（实施 Phase 0-4 已落地，
-> CLI 骨架就绪待接 device flow；Memory/Sync 与 GUI 视图未开工）。
+> 含协议 v2 容器化任务树与 CLI 的 auth/todo/tags/msg 命令族；Phase 5
+> Memory/Sync 未开工（待裁决 M1）；Phase 6 已有登录/审批/任务树/裁决队列
+> 等视图，rate limit 与 audit.list 等硬化项未做）。
 
 ## 里程碑：Design Baseline（已完成）
 

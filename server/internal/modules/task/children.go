@@ -133,6 +133,23 @@ func (m *Module) createChild(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteOK(w, r, http.StatusCreated, dto)
 }
 
+// validateParent 校验 parent 存在且属于同一 workspace（update 换父与
+// createTask 共用同一实现与文案）。
+func (m *Module) validateParent(ctx context.Context, wsID, parentID string) error {
+	var parent model.Task
+	err := m.DB.WithContext(ctx).First(&parent, "id = ?", parentID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return httpx.Invalid("parent must exist in the same workspace")
+	}
+	if err != nil {
+		return err
+	}
+	if parent.WorkspaceID != wsID {
+		return httpx.Invalid("parent must exist in the same workspace")
+	}
+	return nil
+}
+
 // createTask 创建核心（两个容器端点共用）：校验 → tag 解析 → 单事务
 // （任务行 + tag 关联 + audit + outbox）。
 func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string, parentID *string, in taskCreateInput) (taskDTO, error) {
@@ -147,12 +164,7 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 		return taskDTO{}, httpx.Invalid("invalid priority")
 	}
 	if parentID != nil {
-		var parent model.Task
-		err := m.DB.WithContext(ctx).First(&parent, "id = ?", *parentID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && parent.WorkspaceID != wsID) {
-			return taskDTO{}, httpx.Invalid("parent must exist in the same workspace")
-		}
-		if err != nil {
+		if err := m.validateParent(ctx, wsID, *parentID); err != nil {
 			return taskDTO{}, err
 		}
 	}

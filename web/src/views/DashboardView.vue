@@ -36,7 +36,7 @@ onMounted(async () => {
 
   <div v-if="session.isLoggedIn" class="card">
     <h3>我的 Workspace</h3>
-    <p v-if="error" style="color: #b3261e">{{ error }}</p>
+    <p v-if="error" class="error-text">{{ error }}</p>
     <ul v-if="workspaces.length">
       <li v-for="ws in workspaces" :key="ws.id">
         <RouterLink :to="`/workspaces/${ws.id}`">{{ ws.name }}</RouterLink>

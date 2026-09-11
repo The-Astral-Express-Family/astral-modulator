@@ -1,7 +1,7 @@
 // 认证相关 API。路径与 api/openapi.yaml（D1/D2/D6/A3）一致。
 // Web 会话模型：refresh token 存 HttpOnly Cookie，access token 存内存（见 stores/session）。
 
-import { apiFetch } from '../client'
+import { apiFetch, apiPath } from '../client'
 import type { Actor, ID } from '../types'
 
 export interface MeResponse {
@@ -46,7 +46,7 @@ export interface DeviceAuthorizationView {
 }
 
 export function findDeviceAuthorization(userCode: string): Promise<DeviceAuthorizationView> {
-  return apiFetch(`/api/v1/auth/device/authorizations?user_code=${encodeURIComponent(userCode)}`)
+  return apiFetch(apiPath('/api/v1/auth/device/authorizations', { user_code: userCode }))
 }
 
 export function approveDeviceAuthorization(id: ID): Promise<void> {

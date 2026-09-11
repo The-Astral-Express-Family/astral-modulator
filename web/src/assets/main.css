@@ -63,6 +63,15 @@ body {
   color: #6b7075;
 }
 
+/* 文本提示色（视图统一用类，不再内联色值）。 */
+.error-text {
+  color: #b3261e;
+}
+
+.notice-text {
+  color: #1b7f3b;
+}
+
 pre {
   background: #14161a;
   color: #9ee7a3;

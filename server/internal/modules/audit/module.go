@@ -29,7 +29,11 @@ type Entry struct {
 func (m *Module) RegisterRoutes(r chi.Router) {
 	// GET /api/v1/workspaces/{workspace_id}/audit（audit:read）。
 	// TODO(phase-6): 时间范围/actor/action 过滤 + cursor 分页；GUI audit timeline 数据源。
-	// TODO(phase-1): 登录/授权失败属于服务器级审计，跨 workspace 查询接口后续单独设计。
+	// TODO(phase-2, 服务器级审计的集中登记处): 认证/授权失败写 audit——
+	// 现状 Authenticate 中间件只拒不记；需要向 auth.Service 注入 audit recorder
+	// 并覆盖 login 失败、refresh 重放、device 兑换失败等路径（security.md 审计要求，
+	// TODO.md §3.2；auth/middleware.go、auth/service.go、app/router.go 的相关
+	// 注释均指向本条，不重复登记）。
 	r.Get("/workspaces/{workspace_id}/audit", m.list)
 }
 

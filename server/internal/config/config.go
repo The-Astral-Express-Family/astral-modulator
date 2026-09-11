@@ -1,7 +1,8 @@
 // Package config 汇集服务端运行配置。
 //
 // v0.1 只用环境变量（docs/deployment.md §Binary Deployment 提到 server.toml，
-// 属 phase-6 事项，见 TODO.md）。secrets 只允许来自环境变量/secret manager，
+// 属 phase-6 事项，见 TODO.md）。DSN 为空时受保护端点先被 401 或
+// 503 INTERNAL_ERROR（dbOrError）挡下；secrets 只允许来自环境变量/secret manager，
 // 严禁写进仓库。
 package config
 

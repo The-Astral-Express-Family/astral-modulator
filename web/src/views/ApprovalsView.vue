@@ -7,6 +7,7 @@ import { useRoute } from 'vue-router'
 import { formatApiError } from '../api/client'
 import { decideApproval, listApprovals } from '../api/modules/workspace'
 import { useSessionStore } from '../stores/session'
+import { fmtTime } from '../lib/format'
 import type { Approval } from '../api/types'
 
 const route = useRoute()
@@ -52,10 +53,6 @@ async function decide(item: Approval, approve: boolean): Promise<void> {
   }
 }
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
-
 onMounted(async () => {
   await session.boot()
   await load()
@@ -72,8 +69,8 @@ onUnmounted(() => {
   <h2>裁决队列</h2>
   <div class="card">
     <p class="muted">workspace: <code>{{ workspaceId }}</code>（每 15 秒自动刷新）</p>
-    <p v-if="error" style="color: #b3261e">{{ error }}</p>
-    <p v-if="notice" style="color: #1b7f3b">{{ notice }}</p>
+    <p v-if="error" class="error-text">{{ error }}</p>
+    <p v-if="notice" class="notice-text">{{ notice }}</p>
 
     <p v-if="loaded && !approvals.length && !error" class="muted">没有待裁决的请求。</p>
     <table v-if="approvals.length" style="width: 100%; border-collapse: collapse">

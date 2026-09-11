@@ -6,7 +6,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { setAuthTokenProvider } from '../api/client'
+import { formatApiError, setAuthTokenProvider } from '../api/client'
 import { getCapabilities, getWellKnown } from '../api/modules/core'
 import * as authApi from '../api/modules/auth'
 import type { Actor, Capabilities, WellKnown } from '../api/types'
@@ -81,7 +81,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       wellKnown.value = await getWellKnown()
     } catch (e) {
-      bootError.value = String(e)
+      bootError.value = formatApiError(e)
       booted.value = true
       return
     }

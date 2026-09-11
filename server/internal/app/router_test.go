@@ -39,7 +39,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		Auth:        &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},
 		Workspace:   &workspace.Module{DB: db, Auth: svc},
 		Task:        &task.Module{DB: db, Auth: svc},
-		Tag:        &tag.Module{DB: db, Auth: svc},
+		Tag:         &tag.Module{DB: db, Auth: svc},
 		Memory:      &memory.Module{},
 		Document:    &document.Module{},
 		Message:     &message.Module{DB: db, Auth: svc},
@@ -47,6 +47,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		Audit:       &audit.Module{},
 		Events:      &event.SSEHandler{Hub: hub, DB: db},
 	}
+	mods.Message.Tasks = mods.Task
 	ts := httptest.NewServer(NewRouter(config.Config{ServerID: "srv_test", PublicURL: "https://astral.example.com"}, log, db, mods))
 	t.Cleanup(ts.Close)
 	return ts

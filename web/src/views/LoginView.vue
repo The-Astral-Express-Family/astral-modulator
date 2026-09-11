@@ -39,7 +39,7 @@ async function submit(): Promise<void> {
       <p>
         <label>密码<br /><input v-model="password" type="password" required autocomplete="current-password" style="width: 100%" /></label>
       </p>
-      <p v-if="error" style="color: #b3261e">{{ error }}</p>
+      <p v-if="error" class="error-text">{{ error }}</p>
       <button type="submit" :disabled="busy">{{ busy ? '登录中…' : '登录' }}</button>
     </form>
     <p class="muted">

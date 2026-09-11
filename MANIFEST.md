@@ -7,6 +7,8 @@
 - `TODO.md` — 进度登记簿：已完成工作、契约裁决、待办清单、CLI 联调清单。
 - `docker-compose.yml` — 开发用 PostgreSQL。
 - `Makefile` — 常用开发命令。
+- `redocly.yaml` — openapi lint 配置（CI 契约门）。
+- `LICENSE`、`.github/workflows/`（CI）。
 
 ## 契约（与 astral-cli 的唯一耦合点）
 
@@ -32,6 +34,8 @@
 - `docs/roadmap.md` — 里程碑视图与 MVP Definition of Done（实施 Phase 划分见 architecture.md §27）。
 
 ## ADR
+
+（索引见 `docs/adr/README.md`；文件清单以 `git ls-files docs/adr` 为准。）
 
 - `docs/adr/0001-cpp20-cli.md`
 - `docs/adr/0002-server-language.md`

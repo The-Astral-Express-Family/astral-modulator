@@ -53,23 +53,12 @@ Workspace config 定义 include/exclude：
 
 ## 5. 本地状态
 
-`.astral/state.json` 保存非敏感同步状态：
+本地文件布局（`.astral/` 下的 state/conflict artifact 形状）**归属
+astral-cli 仓库**（CLI UX 与本地文件的本仓约定，见其 docs/ARCHITECTURE.md）；
+本文只锁 wire 语义（revision/hash/conflict artifact 的协议形状）。phase-5
+动工时以 CLI 仓库的定义为准，避免两仓各说一套。
 
-```json
-{
-  "workspace_id": "ws_123",
-  "documents": {
-    "docs/design.md": {
-      "base_revision": 12,
-      "base_hash": "sha256:...",
-      "local_hash": "sha256:..."
-    }
-  },
-  "last_event_id": "evt_..."
-}
-```
-
-不要保存 token。
+原则不变：本地状态文件不保存 token。
 
 ## 6. 三方模型
 
@@ -180,15 +169,9 @@ status
 
 ### 本地 conflict artifact
 
-一种可行布局：
-
-```text
-.astral/conflicts/<conflict-id>/
-  base.md
-  local.md
-  remote.md
-  metadata.json
-```
+本地布局（目录/文件名）由 astral-cli 定义；协议层只要求 conflict artifact
+携带 base/local/metadata 三类信息（形状见 openapi 的 ConflictResolve /
+DocumentConflict）。
 
 原始工作文件是否替换为 conflict marker 需要谨慎。推荐默认 **不破坏 local 当前版本**，而是生成 conflict artifact + 明确状态。
 

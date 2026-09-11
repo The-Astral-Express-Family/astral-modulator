@@ -113,8 +113,8 @@ onUnmounted(stopPolling)
       <button :disabled="busy" @click="lookup(manualCode)">查询</button>
     </p>
 
-    <p v-if="error" style="color: #b3261e">{{ error }}</p>
-    <p v-if="notice" style="color: #1b7f3b">{{ notice }}</p>
+    <p v-if="error" class="error-text">{{ error }}</p>
+    <p v-if="notice" class="notice-text">{{ notice }}</p>
 
     <div v-if="view && !notice">
       <p>

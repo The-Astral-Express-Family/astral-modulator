@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// 前缀注册表（protocol.md 初稿列 usr/agt/svc/ws/tsk/msg/evt，本表为超集；
-// 以下为服务端内部资源补充的前缀（已在 TODO.md「新增契约登记」处登记）：
+// 前缀注册表。基础前缀 usr/agt/svc/ws/tsk/msg/evt 见 openapi Id schema；
+// 以下为服务端内部资源补充的前缀（变更须经 TODO.md「契约变更登记」）：
 //
-//	srv req dev ses cred tgp tag doc cfl prs aud obx apv
+//	srv req dev ses cred tgp tag doc cfl prs aud apv
 type Prefix string
 
 const (

@@ -170,9 +170,9 @@ type TagProposal struct {
 
 func (TagProposal) TableName() string { return "tag_proposals" }
 
-// TaskTag 见 00004_tags.sql：task 与 tag 多对多关联。
-// 目前只经参数化 SQL（task/search.go 的 JOIN）使用，无 GORM 读写路径；
-// 保留结构体供 AutoMigrate 建表（sqlite 测试库）。
+// TaskTag 见 00004_tags.sql：task 与 tag 多对多关联。task 模块经 GORM
+// Create/Delete/Count 与批量 JOIN（tagsForTasks）读写；task-search 的
+// tag 过滤走参数化 SQL JOIN。
 type TaskTag struct {
 	TaskID  string `gorm:"primaryKey;size:40"`
 	TagID   string `gorm:"primaryKey;size:40"`

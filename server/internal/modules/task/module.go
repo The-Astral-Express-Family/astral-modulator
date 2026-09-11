@@ -4,7 +4,6 @@ package task
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -28,9 +27,9 @@ import (
 // Lease 时长钳制边界（openapi TaskClaimInput.lease_seconds 的服务端约束）。
 // 归属本模块：lease 是 task 领域概念，与 auth 无关。
 var (
-	LeaseDefault = 5 * time.Minute
-	LeaseMin     = 30 * time.Second
-	LeaseMax     = time.Hour
+	leaseDefault = 5 * time.Minute
+	leaseMin     = 30 * time.Second
+	leaseMax     = time.Hour
 )
 
 type Module struct {
@@ -94,10 +93,8 @@ func (m *Module) sweepOnce(ctx context.Context) {
 			if err := tx.First(&t, "id = ?", lease.TaskID).Error; err != nil {
 				return err
 			}
-			updates := map[string]any{"assignee_actor_id": nil, "revision": t.Revision + 1}
-			if t.Status == "in_progress" {
-				updates["status"] = "open"
-			}
+			updates := releaseOwnershipFields(t.Status)
+			updates["revision"] = t.Revision + 1
 			if err := tx.Model(&model.Task{}).Where("id = ?", t.ID).Updates(updates).Error; err != nil {
 				return err
 			}
@@ -160,21 +157,28 @@ func toTaskDTO(t model.Task, lease *model.TaskLease, tags []tag.TagDTO, childCou
 	return dto
 }
 
-// requireTask：加载任务 + workspace scope 校验。
-func (m *Module) requireTask(r *http.Request, taskID string, need string) (*model.Task, *httpx.APIError) {
+// LoadForWorkspace 是「task 主语」端点的统一入口：加载任务（查无此行用专用码
+// TASK_NOT_FOUND，DB 故障如实 500）并执行 workspace 级 scope 校验。以 ctx 为介质，
+// 供本模块 handler/service 与跨模块消费方（message 线程端点）共用——
+// task 的加载与 404 语义全仓只有这一处实现。
+func (m *Module) LoadForWorkspace(ctx context.Context, p *auth.Principal, taskID, need string) (*model.Task, *httpx.APIError) {
 	var t model.Task
-	err := m.DB.WithContext(r.Context()).First(&t, "id = ?", taskID).Error
+	err := m.DB.WithContext(ctx).First(&t, "id = ?", taskID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
 	}
 	if err != nil {
 		return nil, httpx.Internal("task lookup failed")
 	}
-	p := auth.PrincipalFrom(r.Context())
-	if _, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, t.WorkspaceID, need); apiErr != nil {
+	if _, apiErr := m.Auth.RequireWorkspaceScopes(ctx, p, t.WorkspaceID, need); apiErr != nil {
 		return nil, apiErr
 	}
 	return &t, nil
+}
+
+// requireTask 是 LoadForWorkspace 的 handler 侧便捷入口。
+func (m *Module) requireTask(r *http.Request, taskID string, need string) (*model.Task, *httpx.APIError) {
+	return m.LoadForWorkspace(r.Context(), auth.PrincipalFrom(r.Context()), taskID, need)
 }
 
 // ---- CRUD：创建走容器端点（children.go）；读取集合走容器集合（children.go）----
@@ -217,13 +221,18 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var lease model.TaskLease
-	hasLease := m.DB.WithContext(r.Context()).First(&lease, "task_id = ?", t.ID).Error == nil
-	if hasLease && lease.ExpiresAt.Before(time.Now()) {
-		hasLease = false
-	}
 	var leasePtr *model.TaskLease
-	if hasLease {
+	err := m.DB.WithContext(r.Context()).First(&lease, "task_id = ?", t.ID).Error
+	switch {
+	case err == nil && lease.ExpiresAt.After(time.Now()):
 		leasePtr = &lease
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		// 无租约，lease 保持 nil。
+	case err == nil:
+		// 有行但已过期：读路径视同无租约（过期清扫器会异步删除）。
+	default:
+		httpx.RespondError(w, r, err)
+		return
 	}
 	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*t, leasePtr, m.loadTags(r, t.ID), m.childCount(r.Context(), t.ID)))
 }
@@ -254,7 +263,6 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updates := map[string]any{
-		"revision":   t.Revision + 1,
 		"updated_by": p.ActorID,
 	}
 	if in.Title != nil {
@@ -285,13 +293,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	if in.ParentID != nil {
 		parent := *in.ParentID // *string
 		if parent != nil {
-			var parentTask model.Task
-			err := m.DB.WithContext(r.Context()).First(&parentTask, "id = ?", *parent).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && parentTask.WorkspaceID != t.WorkspaceID) {
-				httpx.WriteError(w, r, httpx.Invalid("parent must exist in the same workspace"))
-				return
-			}
-			if err != nil {
+			if err := m.validateParent(r.Context(), t.WorkspaceID, *parent); err != nil {
 				httpx.RespondError(w, r, err)
 				return
 			}
@@ -317,17 +319,8 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	// 分离提交会让客户端在“已生效但无事件”的窗口里重试撞 REVISION_CONFLICT。
 	var fresh model.Task
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&model.Task{}).
-			Where("id = ? AND revision = ?", t.ID, t.Revision).Updates(updates)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			var current model.Task
-			if e := tx.First(&current, "id = ?", t.ID).Error; e != nil {
-				return e
-			}
-			return revisionConflict(current.Revision)
+		if err := bumpRevisionTx(tx, t.ID, t.Revision, updates); err != nil {
+			return err
 		}
 		if err := tx.First(&fresh, "id = ?", t.ID).Error; err != nil {
 			return err
@@ -375,20 +368,18 @@ func (m *Module) checkCycle(r *http.Request, taskID, newParent string) (bool, er
 }
 
 // Claim 原子认领核心（HTTP handler 与测试共用；roadmap spike 验收项）。
-// 单事务内完成：revision 校验 → 抢租约 → 条件更新任务 → audit + outbox。
+// 授权（task:claim，经 LoadForWorkspace）内聚在服务层——与 AttachTag/DetachTag
+// 同规矩，任何入口复用本核心都不会绕过校验。单事务内完成：revision 校验 →
+// 抢租约 → 条件更新任务 → audit + outbox。
 func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, expectedRevision *int64, leaseSeconds int) (*model.Task, *model.TaskLease, error) {
-	var current model.Task
-	err := m.DB.WithContext(ctx).First(&current, "id = ?", taskID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
-	}
-	if err != nil {
-		return nil, nil, err
+	current, apiErr := m.LoadForWorkspace(ctx, p, taskID, auth.ScopeTaskClaim)
+	if apiErr != nil {
+		return nil, nil, apiErr
 	}
 	lease := time.Duration(leaseSecondsValue(leaseSeconds)) * time.Second
 
 	var claimedLease model.TaskLease
-	err = m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. revision 校验（可选但推荐）。
 		if expectedRevision != nil && *expectedRevision != current.Revision {
 			return revisionConflict(current.Revision)
@@ -416,19 +407,13 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 			}
 			return err
 		}
-		// 3. 更新任务归属（同样条件更新防并发）。
-		updates := map[string]any{
+		// 3. 更新任务归属（同样条件更新防并发，bumpRevisionTx 单点）。
+		if err := bumpRevisionTx(tx, taskID, current.Revision, map[string]any{
 			"assignee_actor_id": p.ActorID,
 			"status":            "in_progress",
-			"revision":          current.Revision + 1,
 			"updated_by":        p.ActorID,
-		}
-		res = tx.Model(&model.Task{}).Where("id = ? AND revision = ?", taskID, current.Revision).Updates(updates)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return revisionConflict(current.Revision)
+		}); err != nil {
+			return err
 		}
 		// 4. audit + outbox 同事务。
 		if err := audit.RecordInTx(tx, audit.Entry{
@@ -448,7 +433,7 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 	// 认领已提交，读回失败不应整体报错：用事务内已知状态兜底构造。
 	var fresh model.Task
 	if e := m.DB.WithContext(ctx).First(&fresh, "id = ?", taskID).Error; e != nil {
-		fresh = current
+		fresh = *current
 		fresh.AssigneeActorID = &p.ActorID
 		fresh.Status = "in_progress"
 		fresh.Revision = current.Revision + 1
@@ -458,10 +443,7 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 
 func (m *Module) claim(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "task_id")
-	if _, apiErr := m.requireTask(r, taskID, auth.ScopeTaskClaim); apiErr != nil {
-		httpx.WriteError(w, r, apiErr)
-		return
-	}
+	// 授权在 Claim 内部（LoadForWorkspace）；此处只负责解码与组装。
 	p := auth.PrincipalFrom(r.Context())
 	var in struct {
 		ExpectedRevision *int64 `json:"expected_revision"`
@@ -489,8 +471,11 @@ func (m *Module) renewLease(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		LeaseSeconds int `json:"lease_seconds"`
 	}
-	// body 可选（全默认时长）；非 JSON body 视为未携带。
-	_ = json.NewDecoder(r.Body).Decode(&in)
+	// body 可选（全默认时长；DecodeJSON 对空 body 放行），但非法 JSON 如实 400，
+	// 与其余端点同一解码纪律。
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
 	lease := time.Duration(leaseSecondsValue(in.LeaseSeconds)) * time.Second
 
 	now := time.Now()
@@ -505,7 +490,7 @@ func (m *Module) renewLease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing.HolderActorID != p.ActorID {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "only the lease holder can renew"})
+		httpx.WriteError(w, r, httpx.Forbidden("only the lease holder can renew"))
 		return
 	}
 	updates := map[string]any{"expires_at": now.Add(lease), "renewed_at": now}
@@ -543,7 +528,7 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 	if lease.HolderActorID != p.ActorID {
 		scopes, _ := m.Auth.WorkspaceScopes(r.Context(), p, t.WorkspaceID)
 		if !scopes[auth.ScopeTaskOverride] {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "only holder or task:override can release"})
+			httpx.WriteError(w, r, httpx.Forbidden("only holder or task:override can release"))
 			return
 		}
 	}
@@ -553,20 +538,8 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("task_id = ?", taskID).Delete(&model.TaskLease{}).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"assignee_actor_id": nil, "revision": t.Revision + 1}
-		if t.Status == "in_progress" {
-			updates["status"] = "open"
-		}
-		res := tx.Model(&model.Task{}).Where("id = ? AND revision = ?", taskID, t.Revision).Updates(updates)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			var current model.Task
-			if e := tx.First(&current, "id = ?", taskID).Error; e != nil {
-				return e
-			}
-			return revisionConflict(current.Revision)
+		if err := bumpRevisionTx(tx, taskID, t.Revision, releaseOwnershipFields(t.Status)); err != nil {
+			return err
 		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: t.WorkspaceID, ActorID: p.ActorID,
@@ -587,14 +560,47 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 
 // ---- helpers ----
 
+// releaseOwnershipFields 释放任务归属的字段集（清扫器与 release 共用）：
+// 清 assignee；in_progress 回退 open。revision 由调用方决定是否写入。
+func releaseOwnershipFields(status string) map[string]any {
+	updates := map[string]any{"assignee_actor_id": nil}
+	if status == "in_progress" {
+		updates["status"] = "open"
+	}
+	return updates
+}
+
+// bumpRevisionTx 条件 revision bump（乐观并发单点实现）：WHERE id AND
+// revision=expected，0 行 = 并发修改 → 事务内重读当前行并返回
+// REVISION_CONFLICT（details.current_revision 供客户端 re-read-retry）。
+// updates 不含 revision，由本函数统一写 expected+1。
+func bumpRevisionTx(tx *gorm.DB, taskID string, expected int64, updates map[string]any) error {
+	if updates == nil {
+		updates = map[string]any{}
+	}
+	updates["revision"] = expected + 1
+	res := tx.Model(&model.Task{}).Where("id = ? AND revision = ?", taskID, expected).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		var current model.Task
+		if e := tx.First(&current, "id = ?", taskID).Error; e != nil {
+			return e
+		}
+		return revisionConflict(current.Revision)
+	}
+	return nil
+}
+
 func leaseSecondsValue(in int) int {
 	switch {
 	case in <= 0:
-		return int(LeaseDefault.Seconds())
-	case in < int(LeaseMin.Seconds()):
-		return int(LeaseMin.Seconds())
-	case in > int(LeaseMax.Seconds()):
-		return int(LeaseMax.Seconds())
+		return int(leaseDefault.Seconds())
+	case in < int(leaseMin.Seconds()):
+		return int(leaseMin.Seconds())
+	case in > int(leaseMax.Seconds()):
+		return int(leaseMax.Seconds())
 	default:
 		return in
 	}

@@ -186,8 +186,7 @@ func (m *Module) decideApproval(decision string) http.HandlerFunc {
 			return
 		}
 		if !m.isOwner(r.Context(), row.WorkspaceID, p.ActorID) {
-			httpx.WriteError(w, r, &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope,
-				Message: "only an owner can decide approvals"})
+			httpx.WriteError(w, r, httpx.Forbidden("only an owner can decide approvals"))
 			return
 		}
 

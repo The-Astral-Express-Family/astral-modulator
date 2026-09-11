@@ -106,7 +106,7 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		// 公共 auth 端点（免鉴权；device create/exchange、register/login/refresh/logout）。
 		mods.Auth.RegisterPublic(api)
 
-		// 受保护 API。TODO: 认证/授权失败写 audit（见 TODO.md §3.2）。
+		// 受保护 API。TODO: 认证/授权失败写 audit（集中登记见 audit/module.go）。
 		api.Group(func(priv chi.Router) {
 			priv.Use(mods.Auth.Svc.Authenticate)
 			// 幂等：挂载于鉴权后（actor 身份参与键空间）；仅当客户端携带
@@ -156,19 +156,11 @@ func wellKnownHandler(cfg config.Config, log *slog.Logger) http.HandlerFunc {
 func readyzHandler(db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
-			httpx.WriteError(w, r, &httpx.APIError{
-				Status:  http.StatusServiceUnavailable,
-				Code:    httpx.CodeInternalError,
-				Message: "database not configured",
-			})
+			httpx.WriteError(w, r, httpx.Unavailable("database not configured"))
 			return
 		}
 		if err := store.Ping(r.Context(), db); err != nil {
-			httpx.WriteError(w, r, &httpx.APIError{
-				Status:  http.StatusServiceUnavailable,
-				Code:    httpx.CodeInternalError,
-				Message: "database unreachable",
-			})
+			httpx.WriteError(w, r, httpx.Unavailable("database unreachable"))
 			return
 		}
 		httpx.WriteOK(w, r, http.StatusOK, map[string]string{"status": "ready"})

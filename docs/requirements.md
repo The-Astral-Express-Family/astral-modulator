@@ -134,7 +134,8 @@ Task 必须至少包含：
 - `created_by` / `updated_by`；
 - timestamps。
 
-推荐状态：`open | claimed | in_progress | blocked | review | done | cancelled`。
+状态枚举以 openapi 的 TaskStatus 为准：`open | in_progress | blocked |
+review | done | cancelled`（claim 是 lease 语义，不是 status）。
 
 ### FR-006 Claim Lease
 

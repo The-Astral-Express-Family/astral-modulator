@@ -52,7 +52,7 @@ func run() error {
 	mods := &app.Modules{
 		Idempotency: idem,
 		Auth:        &auth.Module{PublicURL: cfg.PublicURL},
-		Tag:         &tag.Module{},
+		Tag:         &tag.Module{Auth: authSvc},
 		Memory:      &memory.Module{},
 		Document:    &document.Module{},
 		Audit:       &audit.Module{},
@@ -80,7 +80,7 @@ func run() error {
 		authSvc.OnRevoke = func(actorID string) { hub.DisconnectActor(actorID) }
 		wsMod := &workspace.Module{DB: gormDB, Auth: authSvc}
 		taskMod := &task.Module{DB: gormDB, Auth: authSvc, Log: log}
-		msgMod := &message.Module{DB: gormDB, Auth: authSvc}
+		msgMod := &message.Module{DB: gormDB, Auth: authSvc, Tasks: taskMod}
 		presMod := &presence.Module{DB: gormDB, Auth: authSvc}
 		tagMod := &tag.Module{DB: gormDB, Auth: authSvc}
 
@@ -110,8 +110,9 @@ func run() error {
 		// 业务模块在桩模式不注册 DB 依赖 —— 路由仍注册（401 后才到 500），
 		// 文档化的行为以有数据库模式为准。
 		mods.Workspace = &workspace.Module{Auth: authSvc}
-		mods.Task = &task.Module{Auth: authSvc}
-		mods.Message = &message.Module{Auth: authSvc}
+		taskMod := &task.Module{Auth: authSvc}
+		mods.Task = taskMod
+		mods.Message = &message.Module{Auth: authSvc, Tasks: taskMod}
 		mods.Presence = &presence.Module{Auth: authSvc}
 	}
 

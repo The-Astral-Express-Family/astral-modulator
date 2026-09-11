@@ -9,7 +9,7 @@ import (
 // EmitTx 同事务写入 outbox，再由 dispatcher 投递，保证不丢、可重放、顺序稳定；
 // 业务模块不得直接 Publish。断线补发（resume）由 sse.go 的 replay 负责。
 //
-// TODO(phase-6): dropped 事件计数指标；连续丢弃达到阈值时断开慢订阅者。
+// 慢订阅者的 dropped 事件计数/断流策略见 Publish 内注释（单一登记处）。
 type Hub struct {
 	mu   sync.RWMutex
 	subs map[uint64]*subscriber
@@ -84,7 +84,7 @@ func (h *Hub) Publish(env Envelope) {
 		select {
 		case sub.ch <- env:
 		default:
-			// TODO(phase-4): 记录 dropped 计数指标；连续丢弃达到阈值时断开慢订阅者。
+			// TODO(phase-6): 记录 dropped 计数指标；连续丢弃达到阈值时断开慢订阅者。
 		}
 	}
 }

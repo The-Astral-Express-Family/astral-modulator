@@ -12,6 +12,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 )
 
 // ---- Device Authorization Grant（RFC 8628 简化版；A1 语义见 TODO.md）----
@@ -151,11 +152,11 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 	case "pending":
 		// A1：过快轮询惩罚。CreatedAt==UpdatedAt 表示尚无轮询记录，首次轮询不罚。
 		if !row.UpdatedAt.Equal(row.CreatedAt) && time.Since(row.UpdatedAt) < s.DevicePollEvery/2 {
-			return nil, &httpx.APIError{Status: 400, Code: httpx.CodeSlowDown, Message: "polling too fast; back off", Retryable: boolPtr(true)}
+			return nil, &httpx.APIError{Status: 400, Code: httpx.CodeSlowDown, Message: "polling too fast; back off", Retryable: ptr.Of(true)}
 		}
 		// 触碰 updated_at 作为 last_poll 记录。
 		_ = s.DB.WithContext(ctx).Model(&model.DeviceAuthorization{}).Where("id = ?", row.ID).Update("updated_at", time.Now()).Error
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeAuthorizationPending, Message: "authorization pending", Retryable: boolPtr(true)}
+		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeAuthorizationPending, Message: "authorization pending", Retryable: ptr.Of(true)}
 	case "denied":
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "authorization denied"}
 	case "expired":
@@ -202,8 +203,6 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 		ActorID:      actor.ID,
 	}, nil
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 // ---- Agent / Service Credential ----
 

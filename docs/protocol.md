@@ -33,7 +33,7 @@ Idempotency-Key: <opaque-key>   # 对可重试写操作
 
 ```http
 X-Astral-Request-Id: <same-or-generated-id>
-X-Astral-Protocol-Version: 1
+X-Astral-Protocol-Version: 2
 ```
 
 Bearer token 三种来源共用一个头：human access token（`ata_`）、
@@ -46,6 +46,9 @@ security 定义与 auth 模块实现。
 - 所有非 2xx JSON 响应使用统一错误 envelope，稳定 `error.code` 枚举
   见 `api/schemas/error.json`；`message` 面向人类，客户端基于 `code` 处理；
 - 分页使用不透明 cursor（`{items, next_cursor}`），不暴露 offset 语义。
+  例外：presence、documents manifest、conflicts、audit 四个列表端点当前
+  返回内联 `{items}`（无 next_cursor，服务端不分页）；openapi 契约与此一致，
+  统一分页化登记为待办（TODO.md §11）。
 
 ## 4. 乐观并发与幂等
 

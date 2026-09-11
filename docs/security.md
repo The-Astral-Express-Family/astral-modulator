@@ -120,33 +120,13 @@ revoked_at
 
 Integration/CI 使用 Service Identity，不冒充 Agent。
 
-## 4. Scope 建议
+## 4. Scope 词表
 
-```text
-workspace:read
-workspace:manage_members
+**唯一事实来源**：[architecture.md §10](architecture.md#10-scope-模型)
+（openapi 的 CredentialCreate.scopes 描述也指向那里）。本文不再手抄词表——
+手抄版已漂移过一次（漏掉 workspace:write / tag:* / memory:*）。
 
-task:read
-task:write
-task:claim
-task:override
-
-document:read
-document:write
-
-message:read
-message:send
-
-presence:write
-
-audit:read
-
-agent:manage
-integration:use
-integration:manage
-```
-
-不要一开始定义几十个过细 scope；先覆盖明确安全边界。
+原则不变：不要一开始定义几十个过细 scope；先覆盖明确安全边界。
 
 ## 5. Role 与 Scope
 

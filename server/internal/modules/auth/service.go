@@ -53,11 +53,7 @@ func NewService(db *gorm.DB, log *slog.Logger) *Service {
 // dbOrError：无数据库（桩模式）时返回 503，避免 nil 指针 panic。
 func (s *Service) dbOrError() (*gorm.DB, *httpx.APIError) {
 	if s.DB == nil {
-		return nil, &httpx.APIError{
-			Status:  http.StatusServiceUnavailable,
-			Code:    httpx.CodeInternalError,
-			Message: "server running without storage (ASTRAL_DATABASE_DSN not set)",
-		}
+		return nil, httpx.Unavailable("server running without storage (ASTRAL_DATABASE_DSN not set)")
 	}
 	return s.DB, nil
 }
@@ -263,12 +259,11 @@ func (s *Service) createSession(ctx context.Context, actorID, clientType, ip, ua
 
 // TokenPair 是发给客户端的凭证组（web 只收 access；refresh 在 HttpOnly Cookie）。
 type TokenPair struct {
-	AccessToken  string      `json:"access_token"`
-	TokenType    string      `json:"token_type"`
-	ExpiresIn    int         `json:"expires_in"`
-	RefreshToken string      `json:"refresh_token,omitempty"`
-	ActorID      string      `json:"actor_id"`
-	Me           *MeResponse `json:"me,omitempty"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	ActorID      string `json:"actor_id"`
 }
 
 // Refresh 轮换 refresh token（A2：access 每请求查库，见 authenticate）。
@@ -360,7 +355,7 @@ func (s *Service) revokeFamily(ctx context.Context, sess *model.Session, reason 
 	}
 	s.Log.Warn("session family revoked", "reason", reason, "actor_id", sess.ActorID)
 	s.notifyRevoked(sess.ActorID)
-	// TODO: audit 记录撤销动作（需要向 Service 注入 audit recorder，见 TODO.md §3.2）。
+	// TODO: audit 记录撤销动作（集中登记见 audit/module.go 服务器级审计条目）。
 }
 
 // Logout 撤销 refresh token 对应的 session。
@@ -396,21 +391,22 @@ func (s *Service) notifyRevoked(actorID string) {
 	}
 }
 
-// actorDTO 是 actor 的公网形状（openapi Actor schema：id/kind/display_name）。
+// ActorDTO 是 actor 的公网形状（openapi Actor schema：id/kind/display_name），
+// 全仓单一来源：workspace 模块的 member/agent 响应复用本类型，不手写平行 DTO。
 // 直接序列化 model.Actor 会漏出大写字段名（E2E round 20 发现）。
-type actorDTO struct {
+type ActorDTO struct {
 	ID          string `json:"id"`
 	Kind        string `json:"kind"`
 	DisplayName string `json:"display_name"`
 }
 
-func toActorDTO(a model.Actor) actorDTO {
-	return actorDTO{ID: a.ID, Kind: a.Kind, DisplayName: a.DisplayName}
+func ToActorDTO(a model.Actor) ActorDTO {
+	return ActorDTO{ID: a.ID, Kind: a.Kind, DisplayName: a.DisplayName}
 }
 
 // MeResponse 是 /auth/me、/auth/register、/auth/login 的响应体。
 type MeResponse struct {
-	Actor   actorDTO     `json:"actor"`
+	Actor   ActorDTO     `json:"actor"`
 	Session *SessionInfo `json:"session,omitempty"`
 }
 

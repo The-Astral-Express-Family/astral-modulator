@@ -16,6 +16,7 @@
 7. [deployment.md](deployment.md) — 服务端部署与数据库升级（CLI 分发在 astral-cli 仓库）。
 8. [roadmap.md](roadmap.md) — 里程碑视图（Spike/MVP/Sync/分发/GUI）与 MVP Definition of Done。
 9. [adr/](adr/) — 关键技术选择与备选方案。
+10. [看我看我.md](看我看我.md) — 人工维护的原始构想笔记（AI 协作者只读）。
 
 > CLI 的命令 UX、输出契约与退出码文档在 `astral-cli` 仓库（docs/ARCHITECTURE.md）；
 > 原本暂存于此的 cli-ux.md 草稿已随双仓库拆分移除。

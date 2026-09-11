@@ -49,7 +49,7 @@ func (m *Module) register(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusCreated, MeResponse{Actor: toActorDTO(*actor)})
+	httpx.WriteOK(w, r, http.StatusCreated, MeResponse{Actor: ToActorDTO(*actor)})
 }
 
 func (m *Module) login(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +67,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, refresh, int(m.Svc.RefreshTTL.Seconds()))
 	httpx.WriteOK(w, r, http.StatusOK, MeResponse{
-		Actor:   toActorDTO(*actor),
+		Actor:   ToActorDTO(*actor),
 		Session: &SessionInfo{ClientType: "web"},
 	})
 }
@@ -119,7 +119,7 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 	}
 	// TODO(phase-6): 附 session 过期时间（Principal 已带 SessionID；MeResponse
 	// 契约增补属协议变更，需走 openapi 流程并登记 TODO.md §9）。
-	httpx.WriteOK(w, r, http.StatusOK, MeResponse{Actor: toActorDTO(actor)})
+	httpx.WriteOK(w, r, http.StatusOK, MeResponse{Actor: ToActorDTO(actor)})
 }
 
 func (m *Module) createDeviceAuthorization(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +151,7 @@ func (m *Module) findForApproval(w http.ResponseWriter, r *http.Request) {
 	// A3：审批页查询。必须 human（agent credential 不能审批人类登录）。
 	p := PrincipalFrom(r.Context())
 	if !p.IsHuman() {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "human session required"})
+		httpx.WriteError(w, r, httpx.Forbidden("human session required"))
 		return
 	}
 	view, err := m.Svc.FindByUserCode(r.Context(), r.URL.Query().Get("user_code"))
@@ -173,7 +173,7 @@ func (m *Module) deny(w http.ResponseWriter, r *http.Request) {
 func (m *Module) decide(w http.ResponseWriter, r *http.Request, fn func(context.Context, string, string) error) {
 	p := PrincipalFrom(r.Context())
 	if !p.IsHuman() {
-		httpx.WriteError(w, r, &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "human session required"})
+		httpx.WriteError(w, r, httpx.Forbidden("human session required"))
 		return
 	}
 	if err := fn(r.Context(), chi.URLParam(r, "id"), p.ActorID); err != nil {

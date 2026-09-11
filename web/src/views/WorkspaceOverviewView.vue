@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// Workspace 总览：presence + 任务概览 + 实时事件（Phase 2-4 逐步实装）。
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+// Workspace 总览：详情与实时事件流（presence/消息/文档视图见 TODO.md phase-4/5）。
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getWorkspace } from '../api/modules/core'
-import { subscribeEvents } from '../api/sse'
+import { useWorkspaceEvents } from '../composables/useWorkspaceEvents'
 import { useSessionStore } from '../stores/session'
 import type { EventEnvelope, Workspace } from '../api/types'
 
@@ -13,8 +13,11 @@ const session = useSessionStore()
 const workspaceId = computed(() => route.params.workspaceId as string)
 const workspace = ref<Workspace | null>(null)
 const events = ref<EventEnvelope[]>([])
-const sseState = ref<'connecting' | 'open' | 'closed'>('connecting')
-let unsubscribe: (() => void) | null = null
+
+const { sseState, subscribe } = useWorkspaceEvents(workspaceId, (env) => {
+  events.value.unshift(env)
+  if (events.value.length > 50) events.value.pop()
+})
 
 async function load(): Promise<void> {
   await session.boot()
@@ -23,15 +26,7 @@ async function load(): Promise<void> {
   } catch {
     workspace.value = null // 401 未登录 / 404 无权限；UI 显示占位
   }
-  unsubscribe?.()
-  unsubscribe = subscribeEvents({
-    workspaceId: workspaceId.value,
-    onEvent: (env) => {
-      events.value.unshift(env)
-      if (events.value.length > 50) events.value.pop()
-    },
-    onStateChange: (s) => (sseState.value = s),
-  })
+  subscribe()
 }
 
 onMounted(load)
@@ -39,7 +34,6 @@ watch(workspaceId, () => {
   events.value = []
   void load()
 })
-onUnmounted(() => unsubscribe?.())
 </script>
 
 <template>

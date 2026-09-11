@@ -89,6 +89,7 @@ func collectChiRoutes(t *testing.T) map[string]bool {
 		Audit:     &audit.Module{},
 		Events:    &event.SSEHandler{Hub: hub, DB: db},
 	}
+	mods.Message.Tasks = mods.Task
 	mux := NewRouter(config.Config{ServerID: "srv_test"}, log, db, mods).(*chi.Mux)
 
 	routes := map[string]bool{}

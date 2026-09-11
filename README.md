@@ -37,7 +37,8 @@ skills/         Agent 技能（astral-install / astral-cli / astral-collaboratio
 ## 快速开始（开发）
 
 前置：Go ≥ 1.27、Node ≥ 24。数据库可选（无 DB 时以桩模式启动：发现/能力/健康可用，
-受保护端点返回 401、readyz 返回 503；document/memory/audit 等未实装端点为 501）。
+受保护端点返回 401、readyz 返回 503；document/audit 端点为 501，memory 因 M1
+未裁决尚未注册路由）。
 
 ```bash
 # 1. 服务端（桩模式，监听 :8080）
@@ -67,6 +68,7 @@ go run ./cmd/astral-server               # 启动时自动 goose up（ASTRAL_AUT
 | `ASTRAL_SERVER_ID` | 随机 | 稳定服务器身份；首启固化进 server_meta，此后库中值优先 |
 | `ASTRAL_AUTO_MIGRATE` | `true` | 启动时 goose up；**生产多实例必须关闭** |
 | `ASTRAL_DEV_CORS_ORIGINS` | — | 开发期浏览器跨域白名单（生产同源应留空） |
+| `ASTRAL_LOG_LEVEL` | `info` | slog 级别（debug/info/warn/error） |
 
 ## 验证
 

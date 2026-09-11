@@ -16,8 +16,9 @@ import {
   searchTasks,
 } from '../api/modules/task'
 import { listMembers, listTags } from '../api/modules/workspace'
-import { subscribeEvents } from '../api/sse'
+import { useWorkspaceEvents } from '../composables/useWorkspaceEvents'
 import { useSessionStore } from '../stores/session'
+import { fmtTime } from '../lib/format'
 import type { EventEnvelope, Member, Tag, Task, TaskSearchHit, TaskStatus } from '../api/types'
 
 const route = useRoute()
@@ -46,9 +47,9 @@ const tagDict = ref<Tag[]>([])
 const selected = ref<Task | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(false)
-const sseState = ref<'connecting' | 'open' | 'closed'>('connecting')
+const hits = ref<TaskSearchHit[]>([])
 
-let unsubscribe: (() => void) | null = null
+const { sseState, subscribe } = useWorkspaceEvents(workspaceId, onEvent)
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 
 const memberNames = computed(() => {
@@ -78,8 +79,8 @@ async function fetchChildren(taskId: string): Promise<Task[]> {
   return page.items
 }
 
-// 重载所有可见集合：根层 + 每个「已展开且有缓存」的容器。集合数量 = 展开的
-// 节点数，与树规模解耦（v1 全量平铺的问题就此了结）。
+// 重载所有可见集合：根层 + 每个「已展开且有缓存」的容器。集合数量只随展开的
+// 节点数增长，与树规模解耦。
 async function reloadVisible(): Promise<void> {
   loading.value = true
   try {
@@ -135,10 +136,7 @@ function onEvent(env: EventEnvelope): void {
     return
   }
   if (env.type.startsWith('task.')) scheduleReload()
-  else if (env.type.startsWith('tag.')) {
-    void reloadVisible()
-    void refreshDetail()
-  }
+  else if (env.type.startsWith('tag.')) void reloadVisible() // reloadVisible 内部已刷新打开中的详情
 }
 
 // ---- 树展开 / 扁平化 ----
@@ -216,8 +214,6 @@ async function runSearch(): Promise<void> {
   }
 }
 
-const hits = ref<TaskSearchHit[]>([])
-
 function resetToTree(): void {
   regexInput.value = ''
   fuzzyInput.value = ''
@@ -241,16 +237,7 @@ async function load(): Promise<void> {
   } catch {
     /* 成员/tag 字典失败不阻塞主视图（显示原始 id / 无联想） */
   }
-  unsubscribe?.()
-  unsubscribe = subscribeEvents({
-    workspaceId: workspaceId.value,
-    onEvent,
-    onStateChange: (s) => (sseState.value = s),
-  })
-}
-
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString()
+  subscribe()
 }
 
 onMounted(load)
@@ -263,7 +250,6 @@ watch(workspaceId, () => {
   void load()
 })
 onUnmounted(() => {
-  unsubscribe?.()
   if (reloadTimer) clearTimeout(reloadTimer)
 })
 </script>
@@ -291,7 +277,7 @@ onUnmounted(() => {
       <button :disabled="!canSearch || loading" @click="runSearch">查询</button>
       <button :disabled="loading" @click="resetToTree">返回树</button>
     </div>
-    <p v-if="error" style="color: #b3261e">{{ error }}</p>
+    <p v-if="error" class="error-text">{{ error }}</p>
   </div>
 
   <div v-if="mode === 'tree'" class="card">

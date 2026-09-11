@@ -64,14 +64,8 @@ func toWorkspaceDTO(ws model.Workspace) workspaceDTO {
 }
 
 type memberDTO struct {
-	Actor actorDTO `json:"actor"`
-	Role  string   `json:"role"`
-}
-
-type actorDTO struct {
-	ID          string `json:"id"`
-	Kind        string `json:"kind"`
-	DisplayName string `json:"display_name"`
+	Actor auth.ActorDTO `json:"actor"`
+	Role  string        `json:"role"`
 }
 
 // requireWorkspace 加载 workspace 并走标准授权前置（语义见
@@ -253,14 +247,31 @@ func (m *Module) listMembers(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
+	// actor 展示信息一次 IN 查询取回（与 presence.list 同款）；
+	// DB 故障如实上抛，不呈现为「短列表」。
+	actorIDs := make([]string, 0, len(members))
+	for _, mem := range members {
+		actorIDs = append(actorIDs, mem.ActorID)
+	}
+	actorsByID := map[string]model.Actor{}
+	if len(actorIDs) > 0 {
+		var actors []model.Actor
+		if err := m.DB.WithContext(r.Context()).Where("id IN ?", actorIDs).Find(&actors).Error; err != nil {
+			httpx.RespondError(w, r, err)
+			return
+		}
+		for _, a := range actors {
+			actorsByID[a.ID] = a
+		}
+	}
 	items := make([]memberDTO, 0, len(members))
 	for _, mem := range members {
-		var actor model.Actor
-		if err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", mem.ActorID).Error; err != nil {
-			continue
+		actor, ok := actorsByID[mem.ActorID]
+		if !ok {
+			continue // 成员行在而 actor 行缺失（不应发生）：跳过而非 500
 		}
 		items = append(items, memberDTO{
-			Actor: actorDTO{ID: actor.ID, Kind: actor.Kind, DisplayName: actor.DisplayName},
+			Actor: auth.ToActorDTO(actor),
 			Role:  mem.Role,
 		})
 	}
@@ -291,12 +302,17 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var actor model.Actor
-	if err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", in.ActorID).Error; err != nil {
+	err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", in.ActorID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		httpx.WriteError(w, r, httpx.NotFound("actor not found"))
 		return
 	}
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
 	mem := model.WorkspaceMember{WorkspaceID: ws.ID, ActorID: in.ActorID, Role: in.Role}
-	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&mem).Error; err != nil {
 			return err
 		}
@@ -317,7 +333,7 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteOK(w, r, http.StatusCreated, memberDTO{
-		Actor: actorDTO{ID: actor.ID, Kind: actor.Kind, DisplayName: actor.DisplayName}, Role: in.Role,
+		Actor: auth.ToActorDTO(actor), Role: in.Role,
 	})
 }
 
@@ -409,23 +425,53 @@ func (m *Module) removeMember(w http.ResponseWriter, r *http.Request) {
 // ---- agent identity / credential ----
 
 func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
-	_, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeAgentManage)
-	if apiErr != nil {
+	wsID := chi.URLParam(r, "workspace_id")
+	if _, _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeAgentManage); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
-	// TODO(phase-3): 当前无 agent-workspace 绑定模型，返回服务器全局 agent 列表
-	// （仅 id/kind/display_name，低敏感）。绑定模型定稿后改为按 workspace 过滤
-	// （登记 TODO.md T-ws-7）。
-	var actors []model.Actor
+	// workspace 内的 agent 视图（D9/T-ws-7）：membership 行（role='agent'）∪
+	// 有效 credential 绑定本 workspace 的 actor——后者覆盖存量只发过 credential、
+	// 无 membership 行的 agent。「谁在 workspace」的事实来源只有 membership，
+	// credential 绑定是纯授权载体（scope 容器），故两路并集去重。
+	var members []model.WorkspaceMember
 	if err := m.DB.WithContext(r.Context()).
-		Where("kind IN ('agent','service')").Find(&actors).Error; err != nil {
+		Where("workspace_id = ? AND role = 'agent'", wsID).Find(&members).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	items := make([]actorDTO, 0, len(actors))
-	for _, a := range actors {
-		items = append(items, actorDTO{ID: a.ID, Kind: a.Kind, DisplayName: a.DisplayName})
+	var creds []model.Credential
+	if err := m.DB.WithContext(r.Context()).
+		Where("workspace_id = ? AND revoked_at IS NULL", wsID).Find(&creds).Error; err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	actorIDs := make([]string, 0, len(members)+len(creds))
+	seen := make(map[string]struct{}, len(members)+len(creds))
+	add := func(id string) {
+		if _, dup := seen[id]; !dup {
+			seen[id] = struct{}{}
+			actorIDs = append(actorIDs, id)
+		}
+	}
+	for _, mem := range members {
+		add(mem.ActorID)
+	}
+	for _, c := range creds {
+		add(c.ActorID)
+	}
+	items := make([]auth.ActorDTO, 0, len(actorIDs))
+	if len(actorIDs) > 0 {
+		var actors []model.Actor
+		if err := m.DB.WithContext(r.Context()).
+			Where("id IN ? AND kind IN ('agent','service')", actorIDs).
+			Order("created_at ASC").Find(&actors).Error; err != nil {
+			httpx.RespondError(w, r, err)
+			return
+		}
+		for _, a := range actors {
+			items = append(items, auth.ToActorDTO(a))
+		}
 	}
 	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
 }
@@ -482,15 +528,20 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusCreated, actorDTO{ID: actor.ID, Kind: actor.Kind, DisplayName: actor.DisplayName})
+	httpx.WriteOK(w, r, http.StatusCreated, auth.ToActorDTO(actor))
 }
 
 func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 	p := auth.PrincipalFrom(r.Context())
 	agentID := chi.URLParam(r, "agent_id")
 	var actor model.Actor
-	if err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", agentID).Error; err != nil {
+	err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", agentID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		httpx.WriteError(w, r, httpx.NotFound("agent not found"))
+		return
+	}
+	if err != nil {
+		httpx.RespondError(w, r, err)
 		return
 	}
 	if actor.Kind != "agent" && actor.Kind != "service" {
@@ -565,8 +616,13 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 	p := auth.PrincipalFrom(r.Context())
 	credentialID := chi.URLParam(r, "credential_id")
 	var cred model.Credential
-	if err := m.DB.WithContext(r.Context()).First(&cred, "id = ?", credentialID).Error; err != nil {
+	err := m.DB.WithContext(r.Context()).First(&cred, "id = ?", credentialID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		httpx.WriteError(w, r, httpx.NotFound("credential not found"))
+		return
+	}
+	if err != nil {
+		httpx.RespondError(w, r, err)
 		return
 	}
 	wsScope := ""
@@ -586,7 +642,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: wsScope, ActorID: p.ActorID,
 			Action: "credential.revoke", Outcome: "allowed",
@@ -613,7 +669,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 func requireHuman(r *http.Request) *httpx.APIError {
 	p := auth.PrincipalFrom(r.Context())
 	if p == nil || !p.IsHuman() {
-		return &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "human session required for unbound credentials"}
+		return httpx.Forbidden("human session required for unbound credentials")
 	}
 	return nil
 }

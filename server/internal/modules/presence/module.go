@@ -4,24 +4,21 @@
 package presence
 
 import (
-	"errors"
-	"net/http"
-	"time"
-
-	"github.com/go-chi/chi/v5"
-	"gorm.io/gorm"
-
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/go-chi/chi/v5"
+	"gorm.io/gorm"
+	"net/http"
+	"time"
 )
 
 // TTL 钳制边界（openapi PresenceInput.ttl_seconds 的服务端约束）。
 var (
-	TTLDefault = 90 * time.Second
-	TTLMin     = 30 * time.Second
-	TTLMax     = 5 * time.Minute
+	ttlDefault = 90 * time.Second
+	ttlMin     = 30 * time.Second
+	ttlMax     = 5 * time.Minute
 )
 
 type Module struct {
@@ -116,8 +113,9 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	names := map[string]string{}
 	if len(actorIDs) > 0 {
 		var actors []model.Actor
+		// Find 不会返回 ErrRecordNotFound，错误只需区分「有错/无错」。
 		if err := m.DB.WithContext(r.Context()).Select("id", "display_name").
-			Where("id IN ?", actorIDs).Find(&actors).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			Where("id IN ?", actorIDs).Find(&actors).Error; err != nil {
 			httpx.RespondError(w, r, err)
 			return
 		}
@@ -139,19 +137,21 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt:       row.ExpiresAt.UTC().Format(time.RFC3339),
 		})
 	}
+	// envelope 是内联 {items}（openapi PresenceList 无 next_cursor，与
+	// children/messages 等 NewPage 列表不同——见 protocol.md §3 分页说明）。
 	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"items": items})
 }
 
 func clampTTL(in int) time.Duration {
 	ttl := time.Duration(in) * time.Second
 	if ttl <= 0 {
-		ttl = TTLDefault
+		ttl = ttlDefault
 	}
-	if ttl < TTLMin {
-		ttl = TTLMin
+	if ttl < ttlMin {
+		ttl = ttlMin
 	}
-	if ttl > TTLMax {
-		ttl = TTLMax // 服务端钳制，防“声明一周在线”
+	if ttl > ttlMax {
+		ttl = ttlMax // 服务端钳制，防“声明一周在线”
 	}
 	return ttl
 }

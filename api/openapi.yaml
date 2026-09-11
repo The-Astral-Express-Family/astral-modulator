@@ -24,10 +24,9 @@ info:
     平面查询走 /workspaces/{id}/task-search。protocol_version 升为 2，
     与 v1 不兼容（破坏性变更，开发期不做兼容窗口）。
 
-    已裁决的文档分歧（详见 TODO.md「文档分歧裁决」）：
-    - Device flow 采用 architecture.md 路径 `/auth/device/authorizations*`
-      （protocol.md §8 的 `/auth/device*` 废弃）。
-    - 当前身份端点为 `/auth/me`（protocol.md §8 的 `/auth/session` 废弃）。
+    已裁决的文档分歧（详见 TODO.md「文档分歧裁决」D1-D4）：
+    - Device flow 采用 `/auth/device/authorizations*` 路径。
+    - 当前身份端点为 `/auth/me`。
 
     通用约定：
     - 所有时间戳为 RFC3339 UTC。
@@ -36,7 +35,8 @@ info:
     - 乐观并发统一使用 body 内 expected_revision（protocol §6 方案 A）。
 servers:
   - url: /api/v1
-    description: API v1 基线（实际 host 由 /.well-known/astral 发现）
+    description: 路径前缀固定 /api/v1（不随协议大版本变化）；协议大版本以
+      /.well-known/astral 的 protocol_version 为准
 tags:
   - name: discovery
   - name: auth
@@ -878,7 +878,7 @@ paths:
                 properties:
                   items:
                     type: array
-                    items: { $ref: "#/components/schemas/Conflict" }
+                    items: { $ref: "#/components/schemas/DocumentConflict" }
 
   /workspaces/{workspace_id}/conflicts/{conflict_id}/resolve:
     post:
@@ -1059,6 +1059,17 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotFound:
+      description: 次级资源不存在（404 NOT_FOUND，语义见 error.code）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Conflict:
+      description: 状态冲突（409：REVISION_CONFLICT / APPROVAL_EXPIRED /
+        TASK_ALREADY_CLAIMED 等，细分语义见 error.code 与 error.details）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
     RateLimited:
       description: 限流（Retry-After 头 + retryable=true）
       headers:
@@ -1173,7 +1184,8 @@ components:
         access_token: { type: string }
         token_type: { type: string, const: Bearer }
         expires_in: { type: integer, description: 5~15 分钟 }
-        refresh_token: { type: string, description: rotating；重放触发整族撤销 }
+        refresh_token: { type: string, description: rotating；重放触发整族撤销。
+          web cookie 模式下省略（refresh 存 HttpOnly Cookie，响应体只带 access） }
         actor_id: { $ref: "#/components/schemas/Id" }
 
     DeviceAuthorizationView:
@@ -1285,7 +1297,8 @@ components:
 
     Task:
       type: object
-      required: [id, workspace_id, title, status, revision, tags, children_count, created_at, updated_at]
+      required: [id, workspace_id, title, description, status, priority, parent_id,
+        assignee_actor_id, revision, tags, children_count, created_at, updated_at]
       properties:
         id: { $ref: "#/components/schemas/Id" }
         workspace_id: { $ref: "#/components/schemas/Id" }
@@ -1431,12 +1444,7 @@ components:
         content: { type: string }
         content_hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$", description: 可选；服务端会重算并以重算值为准 }
 
-    NotFound:
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
-
-    Conflict:
+    DocumentConflict:
       type: object
       required: [id, path, base_revision, created_at]
       properties:

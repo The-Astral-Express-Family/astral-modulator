@@ -17,11 +17,14 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/task"
 )
 
 type Module struct {
 	DB   *gorm.DB
 	Auth *auth.Service
+	// Tasks 提供 task 主语端点的统一加载/404 语义（本模块不重复实现）。
+	Tasks *task.Module
 }
 
 func (m *Module) RegisterRoutes(r chi.Router) {
@@ -137,6 +140,12 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 			httpx.RespondError(w, r, err)
 			return
 		}
+		// 与 actor/task 目标同规矩：thread parent 必须属于本 workspace，
+		// 否则可用他 workspace 的 thread_id 建立跨 workspace 关联。
+		if parent.WorkspaceID != wsID {
+			httpx.WriteError(w, r, httpx.NotFound("thread_id not found"))
+			return
+		}
 		thread = in.ThreadID
 	}
 	meta, _ := json.Marshal(in.Metadata)
@@ -218,26 +227,18 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 
 // listTaskThread 任务线程消息（phase-4 遗留 501 桩的实装）：task 归属校验 +
 // workspace 级 message:read scope；线程按时间正序（阅读序），与 workspace
-// 列表的最新在前互为场景。
+// 列表的最新在前互为场景。task 加载/404 语义复用 task.LoadForWorkspace
+// （task 是本端点主语 → 404 用专用码 TASK_NOT_FOUND）。
 func (m *Module) listTaskThread(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "task_id")
-	var task model.Task
-	err := m.DB.WithContext(r.Context()).First(&task, "id = ?", taskID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		httpx.WriteError(w, r, httpx.NotFound("task not found"))
-		return
-	}
-	if err != nil {
-		httpx.RespondError(w, r, err)
-		return
-	}
-	if apiErr := auth.RequireWorkspace(r, m.Auth, task.WorkspaceID, auth.ScopeMessageRead); apiErr != nil {
+	loaded, apiErr := m.Tasks.LoadForWorkspace(r.Context(), auth.PrincipalFrom(r.Context()), taskID, auth.ScopeMessageRead)
+	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	var rows []model.Message
 	if err := m.DB.WithContext(r.Context()).
-		Where("workspace_id = ? AND target_type = 'task' AND target_id = ?", task.WorkspaceID, taskID).
+		Where("workspace_id = ? AND target_type = 'task' AND target_id = ?", loaded.WorkspaceID, taskID).
 		Order("id ASC").Limit(100).Find(&rows).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return

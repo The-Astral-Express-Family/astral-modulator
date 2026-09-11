@@ -103,6 +103,18 @@ func Internal(message string) *APIError {
 	return &APIError{Status: http.StatusInternalServerError, Code: CodeInternalError, Message: message}
 }
 
+// Unavailable 是依赖不可用构造器（503 INTERNAL_ERROR，retryable=true）：
+// 无存储桩模式与 readyz 探测共用，客户端应退避重试。
+func Unavailable(message string) *APIError {
+	return &APIError{Status: http.StatusServiceUnavailable, Code: CodeInternalError, Message: message}
+}
+
+// Forbidden 是授权拒绝构造器（403 INSUFFICIENT_SCOPE）：scope 不足或
+// 主体类别不符（如全局 credential 要求 human 会话）。
+func Forbidden(message string) *APIError {
+	return &APIError{Status: http.StatusForbidden, Code: CodeInsufficientScope, Message: message}
+}
+
 func Conflict(code, message string) *APIError {
 	return &APIError{Status: http.StatusConflict, Code: code, Message: message}
 }
