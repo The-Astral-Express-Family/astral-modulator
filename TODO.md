@@ -567,8 +567,8 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 1. `GET /.well-known/astral` — server_id/api_base/protocol_version（已实装 ✅）
 2. `GET /api/v1/meta/capabilities` — features 门控（已实装 ✅，features 暂为空）
 3. 错误 envelope 解析 — 所有非 2xx（已实装 ✅；`NOT_IMPLEMENTED` 501 桩仅剩
-   document 5 端点（phase-5）与 audit.list（phase-6）；memory 因 M1 未裁决
-   尚未注册路由）
+   document 5 端点（phase-5）与 audit.list（phase-6）；task.messages.list 已于
+   第 20 轮实装；memory 因 M1 未裁决尚未注册路由）
 4. 公共响应头回显 — `X-Astral-Request-Id`/`X-Astral-Protocol-Version`（已实装 ✅）
 5. ID 形状 `^[a-z]{2,3}_<uuidv7>` — CLI 只做透传与展示（已实装 ✅）
 6. **Device Flow 全链路（已实装 ✅，第 2 轮）**：

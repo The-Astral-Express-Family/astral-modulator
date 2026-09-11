@@ -396,9 +396,21 @@ func (s *Service) notifyRevoked(actorID string) {
 	}
 }
 
-// MeResponse 是 /auth/me 的响应体。
+// actorDTO 是 actor 的公网形状（openapi Actor schema：id/kind/display_name）。
+// 直接序列化 model.Actor 会漏出大写字段名（E2E round 20 发现）。
+type actorDTO struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	DisplayName string `json:"display_name"`
+}
+
+func toActorDTO(a model.Actor) actorDTO {
+	return actorDTO{ID: a.ID, Kind: a.Kind, DisplayName: a.DisplayName}
+}
+
+// MeResponse 是 /auth/me、/auth/register、/auth/login 的响应体。
 type MeResponse struct {
-	Actor   model.Actor  `json:"actor"`
+	Actor   actorDTO     `json:"actor"`
 	Session *SessionInfo `json:"session,omitempty"`
 }
 

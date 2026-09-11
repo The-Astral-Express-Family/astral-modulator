@@ -62,9 +62,6 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Delete("/tasks/{task_id}/lease", m.release)
 	r.Put("/tasks/{task_id}/tags/{tag_id}", m.attachTag)
 	r.Delete("/tasks/{task_id}/tags/{tag_id}", m.detachTag)
-	r.Get("/tasks/{task_id}/messages", func(w http.ResponseWriter, r *http.Request) {
-		httpx.NotImplemented(w, r, "task.messages.list", "phase-4", "api/openapi.yaml /tasks/{task_id}/messages")
-	})
 }
 
 // StartSweeper 启动租约清扫 goroutine（由 app 装配调用，ctx 取消即退出）。

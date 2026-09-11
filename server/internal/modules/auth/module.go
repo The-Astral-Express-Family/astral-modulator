@@ -49,7 +49,7 @@ func (m *Module) register(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusCreated, MeResponse{Actor: *actor})
+	httpx.WriteOK(w, r, http.StatusCreated, MeResponse{Actor: toActorDTO(*actor)})
 }
 
 func (m *Module) login(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +67,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, refresh, int(m.Svc.RefreshTTL.Seconds()))
 	httpx.WriteOK(w, r, http.StatusOK, MeResponse{
-		Actor:   *actor,
+		Actor:   toActorDTO(*actor),
 		Session: &SessionInfo{ClientType: "web"},
 	})
 }
@@ -119,7 +119,7 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 	}
 	// TODO(phase-6): 附 session 过期时间（Principal 已带 SessionID；MeResponse
 	// 契约增补属协议变更，需走 openapi 流程并登记 TODO.md §9）。
-	httpx.WriteOK(w, r, http.StatusOK, MeResponse{Actor: actor})
+	httpx.WriteOK(w, r, http.StatusOK, MeResponse{Actor: toActorDTO(actor)})
 }
 
 func (m *Module) createDeviceAuthorization(w http.ResponseWriter, r *http.Request) {

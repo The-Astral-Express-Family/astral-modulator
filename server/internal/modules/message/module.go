@@ -27,6 +27,7 @@ type Module struct {
 func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/workspaces/{workspace_id}/messages", m.send)
 	r.Get("/workspaces/{workspace_id}/messages", m.list)
+	r.Get("/tasks/{task_id}/messages", m.listTaskThread)
 }
 
 type messageDTO struct {
@@ -205,6 +206,39 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows []model.Message
 	if err := query.Order("id DESC").Limit(100).Find(&rows).Error; err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	items := make([]messageDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toMessageDTO(row))
+	}
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
+}
+
+// listTaskThread 任务线程消息（phase-4 遗留 501 桩的实装）：task 归属校验 +
+// workspace 级 message:read scope；线程按时间正序（阅读序），与 workspace
+// 列表的最新在前互为场景。
+func (m *Module) listTaskThread(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "task_id")
+	var task model.Task
+	err := m.DB.WithContext(r.Context()).First(&task, "id = ?", taskID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		httpx.WriteError(w, r, httpx.NotFound("task not found"))
+		return
+	}
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	if apiErr := auth.RequireWorkspace(r, m.Auth, task.WorkspaceID, auth.ScopeMessageRead); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	var rows []model.Message
+	if err := m.DB.WithContext(r.Context()).
+		Where("workspace_id = ? AND target_type = 'task' AND target_id = ?", task.WorkspaceID, taskID).
+		Order("id ASC").Limit(100).Find(&rows).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
