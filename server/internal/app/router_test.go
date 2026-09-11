@@ -45,7 +45,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		Message:     &message.Module{DB: db, Auth: svc},
 		Presence:    &presence.Module{DB: db, Auth: svc},
 		Audit:       &audit.Module{},
-		Events:      &event.SSEHandler{Hub: hub, DB: db},
+		Events:      &event.SSEHandler{Hub: hub, DB: db, Auth: svc},
 	}
 	mods.Message.Tasks = mods.Task
 	ts := httptest.NewServer(NewRouter(config.Config{ServerID: "srv_test", PublicURL: "https://astral.example.com"}, log, db, mods))

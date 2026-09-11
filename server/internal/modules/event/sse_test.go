@@ -13,7 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
@@ -35,16 +38,40 @@ func readSSEEvents(t *testing.T, body string) []Envelope {
 	return out
 }
 
-func TestSSEReplayFromLastEventID(t *testing.T) {
+// newAuthedStreamServer 构造带 workspace 级授权的 SSE 测试服务器：
+// 建一个 human actor 并设为 wsID 的 contributor 成员，请求自动携带其 principal。
+// 返回 handler 使用的同一 hub/db，供测试投递 outbox 行（PollOnce 需同源 hub）。
+func newAuthedStreamServer(t *testing.T, wsID string) (*httptest.Server, *Hub, *gorm.DB, string) {
+	t.Helper()
 	db := testsupport.NewTestDB(t)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := auth.NewService(db, log)
+	member := &model.Actor{ID: "act_member", Kind: "human", DisplayName: "member"}
+	if err := db.Create(member).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Workspace{ID: wsID, Name: wsID, Slug: wsID, CreatedBy: member.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.WorkspaceMember{WorkspaceID: wsID, ActorID: member.ID, Role: "contributor"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	hub := NewHub()
-	handler := &SSEHandler{Hub: hub, DB: db}
+	handler := &SSEHandler{Hub: hub, DB: db, Auth: svc}
 	r := chi.NewRouter()
-	r.Get("/api/v1/workspaces/{workspace_id}/events", handler.stream)
+	r.Get("/api/v1/workspaces/{workspace_id}/events", func(w http.ResponseWriter, req *http.Request) {
+		req = req.WithContext(auth.WithPrincipal(req.Context(),
+			&auth.Principal{ActorID: member.ID, Kind: "human", AuthKind: "access_token"}))
+		handler.stream(w, req)
+	})
 	ts := httptest.NewServer(r)
-	defer ts.Close()
+	t.Cleanup(ts.Close)
+	return ts, hub, db, member.ID
+}
 
+func TestSSEReplayFromLastEventID(t *testing.T) {
 	const ws = "ws_replay"
+	ts, hub, db, _ := newAuthedStreamServer(t, ws)
 	emit := func(id, typ string) {
 		row := model.OutboxEvent{
 			ID: id, Type: typ, Payload: []byte(`{"resource_revision":0,"data":{"n":"` + id + `"}}`),
@@ -134,18 +161,12 @@ readLoop:
 }
 
 func TestSSESnapshotRequiredOnExpiredCursor(t *testing.T) {
-	db := testsupport.NewTestDB(t)
-	hub := NewHub()
-	handler := &SSEHandler{Hub: hub, DB: db}
-	r := chi.NewRouter()
-	r.Get("/api/v1/workspaces/{workspace_id}/events", handler.stream)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	const wsID = "ws_gap"
+	ts, _, db, _ := newAuthedStreamServer(t, wsID)
 
 	// 窗口内一行已知 id；客户端游标确定早于它且行不存在 → gap。
-	wsID := "ws_gap"
 	row := model.OutboxEvent{
-		ID: "evt_ffffff", Type: TypeTaskCreated, WorkspaceID: &wsID,
+		ID: "evt_ffffff", Type: TypeTaskCreated, WorkspaceID: ptr.Of(wsID),
 		Payload:    []byte(`{"resource_revision":0,"data":{}}`),
 		OccurredAt: time.Now(), SentAt: ptr.Of(time.Now()),
 	}
@@ -177,6 +198,69 @@ func TestSSESnapshotRequiredOnExpiredCursor(t *testing.T) {
 	events := readSSEEvents(t, string(buf))
 	if len(events) == 0 || events[0].Type != TypeSnapshotRequired {
 		t.Fatalf("want snapshot.required, got %+v", events)
+	}
+}
+
+// TestSSERejectsNonMember 锁定 workspace 级授权语义（TODO.md §11 第 10 项）：
+// 非成员 404（不泄露存在性）；Auth 未接线时 fail closed（503）。
+func TestSSERejectsNonMember(t *testing.T) {
+	db := testsupport.NewTestDB(t)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := auth.NewService(db, log)
+	member := &model.Actor{ID: "act_member", Kind: "human", DisplayName: "member"}
+	outsider := &model.Actor{ID: "act_outsider", Kind: "human", DisplayName: "outsider"}
+	for _, a := range []*model.Actor{member, outsider} {
+		if err := db.Create(a).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Create(&model.Workspace{ID: "ws_x", Name: "ws_x", Slug: "ws_x", CreatedBy: member.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.WorkspaceMember{WorkspaceID: "ws_x", ActorID: member.ID, Role: "contributor"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	streamAs := func(handler *SSEHandler, actorID string) *httptest.Server {
+		r := chi.NewRouter()
+		r.Get("/api/v1/workspaces/{workspace_id}/events", func(w http.ResponseWriter, req *http.Request) {
+			req = req.WithContext(auth.WithPrincipal(req.Context(),
+				&auth.Principal{ActorID: actorID, Kind: "human", AuthKind: "access_token"}))
+			handler.stream(w, req)
+		})
+		ts := httptest.NewServer(r)
+		t.Cleanup(ts.Close)
+		return ts
+	}
+
+	ts := streamAs(&SSEHandler{Hub: NewHub(), DB: db, Auth: svc}, outsider.ID)
+	resp, err := http.Get(ts.URL + "/api/v1/workspaces/ws_x/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("non-member: want 404, got %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Error struct{ Code string }
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "WORKSPACE_NOT_FOUND" {
+		t.Fatalf("non-member: want WORKSPACE_NOT_FOUND, got %q", envelope.Error.Code)
+	}
+
+	// Auth 未接线 → fail closed，绝不放行为匿名实时流。
+	tsOpen := streamAs(&SSEHandler{Hub: NewHub(), DB: db}, member.ID)
+	respOpen, err := http.Get(tsOpen.URL + "/api/v1/workspaces/ws_x/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respOpen.Body.Close()
+	if respOpen.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unwired auth: want 503, got %d", respOpen.StatusCode)
 	}
 }
 

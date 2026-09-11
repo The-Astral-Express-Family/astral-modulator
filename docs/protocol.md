@@ -73,6 +73,9 @@ GET /api/v1/workspaces/{workspace_id}/events
   保留窗口内按事件 ID 升序补发后接入实时流；保留窗口为 **24 小时**（S1 裁决），
   游标超窗时服务端下发 `snapshot.required` 控制事件（`data.reason=cursor_expired`）
   并断流，客户端必须重新拉取快照后再建立新游标；
+- **订阅授权**：与其他 workspace 端点同语义——非成员 404
+  （`WORKSPACE_NOT_FOUND`，不泄露存在性）、成员但缺 `workspace:read` scope 403；
+  凭证/会话撤销后服务端主动断开该 actor 的全部事件流；
 - 客户端必须把事件消费设计为幂等（重放与补发可能带来重复事件）。
 
 ## 6. Rate Limit

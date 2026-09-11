@@ -29,6 +29,9 @@ type SSEHandler struct {
 	Hub *Hub
 	// DB 为 nil 时（无数据库桩模式）不支持重放，仅实时流。
 	DB *gorm.DB
+	// Auth 用于订阅前的 workspace 级授权（非成员 404 / scope 不足 403）。
+	// 装配层必须挂载；nil 时端点 fail closed（503）。
+	Auth *auth.Service
 }
 
 // replayBatch 是单批补发行数；批间 flush，避免大窗口一次性占用内存。
@@ -53,8 +56,6 @@ func writeEvent(w http.ResponseWriter, flusher http.Flusher, env Envelope) bool 
 
 func (h *SSEHandler) stream(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "workspace_id")
-	// TODO(phase-4): 订阅按 actor 对 workspace 的可见性过滤；
-	// credential revoke 后主动断流（security.md）。
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -63,6 +64,18 @@ func (h *SSEHandler) stream(w http.ResponseWriter, r *http.Request) {
 			Code:    httpx.CodeInternalError,
 			Message: "streaming unsupported",
 		})
+		return
+	}
+
+	// 订阅前的 workspace 级授权（TODO.md §11 第 10 项）：非成员 404
+	// （不泄露存在性）/ scope 不足 403，语义与其余 workspace 端点一致。
+	// 撤销后断流由 Hub.DisconnectActor 覆盖（auth.OnRevoke 装配）。
+	if h.Auth == nil {
+		httpx.WriteError(w, r, httpx.Unavailable("event auth not wired"))
+		return
+	}
+	if apiErr := auth.RequireWorkspace(r, h.Auth, workspaceID, auth.ScopeWorkspaceRead); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 

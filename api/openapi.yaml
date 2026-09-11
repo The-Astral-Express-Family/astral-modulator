@@ -913,10 +913,12 @@ paths:
           description: 断线续传游标；超出保留窗口时服务端下发 snapshot.required
       responses:
         "200":
-          description: text/event-stream
+          description: text/event-stream（成员可见性校验通过后建立）
           content:
             text/event-stream:
               schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }   # 非成员：WORKSPACE_NOT_FOUND（不泄露存在性）
+        "403": { $ref: "#/components/responses/Error" }   # 成员但缺 workspace:read scope
 
   /workspaces/{workspace_id}/agents:
     parameters:

@@ -503,6 +503,54 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   refresh_token 补「cookie 模式省略」口径。
 - **已知遗留（登记为后续项，本轮不做）**：见 §11。
 
+### 第 22 轮（2026-09-12）：SSE workspace 级授权（安全）+ CLI event listen 端到端落地
+
+> §11 第 10 项（安全提级）+ 第 8 项（CLI event listen）同轮闭环；第 21 轮
+> 卫生提交验收（补一处 test_cli.cpp 缺 namespace 闭合的编译损坏，
+> astral-cli@8b51332）。全程本地双仓库端到端联测（PG 18 临时实例 + 真服务器
+> + 真 CLI 流式）。
+
+- **server：`GET /workspaces/{id}/events` 订阅授权**（此前仅要求已认证，
+  任何主体可订阅任意 workspace 事件流）：
+  - SSEHandler 增 `Auth *auth.Service` 依赖；stream 入口
+    `auth.RequireWorkspace(..., workspace:read)`——非成员 404
+    WORKSPACE_NOT_FOUND（不泄露存在性）/ scope 不足 403，与其余 workspace
+    端点同语义；Auth 未接线 fail closed（503）；main.go 两个分支（有库/
+    桩模式）均接线；
+  - event 模块测试重构：带授权的流式测试夹具（actor+workspace+member 行 +
+    WithPrincipal 注入），新增非成员 404 与 fail-closed 用例；openapi
+    events 端点补 404/403 响应；protocol.md §5 补订阅授权语义。
+- **CLI：`astral event listen` 实装**（astral-cli c055744 + 两枚 E2E 修复）：
+  - `HttpClient::sendStreaming`：chunk 级 sink、无总超时、60s 停滞探测器
+    （keepalive 15s 兜底）、非 200 body 缓存供错误 envelope 解析、sink 返
+    false 干净中止；
+  - `events/listen` 重连循环（FrameParser 之上）：指数退避（1s 起步、30s
+    封顶，投递成功即重置）、Last-Event-ID 断线续传、snapshot.required 后
+    丢弃过期游标、429 遵循 Retry-After；401 经 withLazyRefresh 每连接一次
+    懒刷新重放，403/404 等终态走 throwApiError（协议 envelope 透传 +
+    标准退出码）；`--max-events N` 消费满干净退出（控制事件不计入）；
+    --json 输出原始 envelope JSON Lines，人读模式输出「时间 类型 ID」；
+  - 测试：test_event_cmd 7 用例（脚本化流式 fake：JSON Lines/max-events、
+    关流续传游标、跨 chunk 帧完整性、snapshot.required 清游标、传输错误
+    退避、5xx 重试 vs 404 终止、人读格式），全仓 92/92 绿。
+- **E2E 揪出并修复两枚真 bug（同类：lambda 按引用捕获已亡局部）**：
+  - astral-cli@f2cf2f3：makeAttempt 返回的 attempt 链捕获 helper 局部
+    （HttpClient/HttpFn），返回即悬垂，首个真实流上崩 INTERNAL
+    "string too long"；
+  - astral-cli@6f5bf20：LoginSession 仍声明在 else 分支块内被按引用捕获，
+    块结束即亡 → 空 Bearer 401 → 空 session 拼出无 scheme 的刷新 URL。
+    两枚都是单测 fake 覆盖不到的接线层生命周期错误。
+- **端到端联测结论（本地栈，三场景全过）**：
+  - A 成员流式：listener --json --max-events 2，`todo add` + `msg send`
+    触发 task.created/message.created，JSON Lines 按序各一行，干净退出；
+  - B 断线续传：listener 常驻，杀掉 astral-server 再重启，断线窗口内
+    创建的 task 经 outbox 按 Last-Event-ID 补发送达，无重复交付；
+  - C 越权 404：无成员关系的 workspace 绑定订阅事件流 → 服务端
+    WORKSPACE_NOT_FOUND，CLI exit 4 + 协议 envelope 透传（即本轮安全修复
+    的黑盒验证）。
+- CLI 侧对应提交：astral-cli@c055744、f2cf2f3、8b51332（卫生轮验收修复）。
+
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -671,6 +719,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-12 | 第 21 轮：`GET /workspaces/{id}/agents` 按 D9/T-ws-7 实装 workspace 过滤（membership ∪ 有效 credential 绑定）；此前恒返回服务器全局 agent 列表（round 9 已登记完成但代码未实施的断链） | 行为 | CLI/Web |
 | 2026-09-12 | 第 21 轮：openapi Task schema required 补齐 parent_id/description/priority/assignee_actor_id（服务端恒序列化、web 类型一致，契约文档落后于实现的修正，无 wire 变化）；TokenPair.refresh_token 补 cookie 模式省略说明；悬空 responses 组件补齐；死 schemas.NotFound 删除、schemas.Conflict 正名 DocumentConflict | 契约文档 | CLI/Web（无 wire 变化） |
 | 2026-09-12 | 第 21 轮：claim 冲突时 409 details.current_revision 改为事务内重读（原为请求开头快照；并发窗口内信息更准，正常路径无差异）；task get 的 lease 查询 DB 故障改 500（原呈现为「无租约」）；renewLease 非法 JSON 改 400（原静默视为空 body）；workspace 三处次级资源 404 补「查无此行 vs DB 故障」区分 | 行为（错误路径） | CLI/Web（正常路径无差异） |
+| 2026-09-12 | 第 22 轮：`GET /workspaces/{id}/events` 补 workspace 级订阅授权（非成员 404 / scope 不足 403，与 workspace 端点同语义；此前仅要求已认证，任何主体可订阅任意 workspace 流——§11 第 10 项安全修复）；openapi 补 404/403 响应 | 行为（安全） | CLI/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -729,13 +778,10 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图 + device 审批页联调收尾
 6. 【✅ 第 16/19 轮完成】CLI todo v2 适配 + tags/msg 命令族（原第 7/8 条合并）
 7. 【✅ 第 21 轮完成】双仓库卫生轮（冗余清理/补丁化收敛/文档重写）
-8. CLI event listen（SSE 流式消费，JSON Lines + 断线续传；client/sse.cpp
-   FrameParser 已就绪，需接 libcurl 流式读取 + 重连循环）
+8. 【✅ 第 22 轮完成】CLI event listen（SSE 流式消费，JSON Lines + 断线续传）
 9. rate limit（auth/device 端点优先；phase-6）
-10. **SSE workspace 级授权**（安全项提级）：`GET /workspaces/{id}/events` 目前
-    仅要求已认证，未校验主体对该 workspace 的可见性（event/sse.go 内
-    TODO(phase-4)），任何已认证主体可订阅任意 workspace 事件流——应在下一
-    行为轮最先处理
+10. 【✅ 第 22 轮完成】SSE workspace 级授权（安全项提级）：非成员 404 /
+    scope 不足 403，fail closed；E2E 黑盒验证过
 11. 分页统一（契约债务）：presence/documents manifest/conflicts/audit 四个
     列表端点补 `{items, next_cursor}` envelope（protocol.md §3 已注明例外）；
     web TaskTreeView 的搜索/树模式消费 next_cursor（当前超页静默丢弃）

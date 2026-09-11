@@ -56,7 +56,7 @@ func run() error {
 		Memory:      &memory.Module{},
 		Document:    &document.Module{},
 		Audit:       &audit.Module{},
-		Events:      &event.SSEHandler{Hub: hub}, // DB 在有库分支补挂（重放需要）
+		Events:      &event.SSEHandler{Hub: hub}, // DB/Auth 在有库分支补挂（重放/授权需要）
 	}
 
 	if cfg.DatabaseDSN != "" {
@@ -91,8 +91,9 @@ func run() error {
 		mods.Presence = presMod
 		mods.Tag = tagMod
 
-		// SSE 重放需要读 outbox。
+		// SSE 重放需要读 outbox；订阅授权需要 auth service。
 		mods.Events.DB = gormDB
+		mods.Events.Auth = authSvc
 		// outbox → SSE dispatcher（architecture §19）。
 		event.StartDispatcher(ctx, gormDB, hub, log, 500*time.Millisecond)
 		// outbox 保留窗口清扫（S1 = 24h）。
@@ -114,6 +115,7 @@ func run() error {
 		mods.Task = taskMod
 		mods.Message = &message.Module{Auth: authSvc, Tasks: taskMod}
 		mods.Presence = &presence.Module{Auth: authSvc}
+		mods.Events.Auth = authSvc // 订阅授权 fail closed：无库模式下查询失败 → 404/503
 	}
 
 	handler := app.NewRouter(cfg, log, db, mods)
