@@ -588,6 +588,63 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   vs 本线 `useWorkspaceEvents`）可择一收敛；自动化无障碍点击在 reka-ui
   Button 上超时（真用户点击正常，测试基建观察项，非应用 bug）。
 
+### 第 24 轮（2026-09-13）：三仓逻辑拉直轮 —— 单一抽象收编、深嵌套拆平
+
+> 三路并行审查（server Go / web Vue / CLI C++）产出 30 项缠绕点，本轮落地
+> 其中影响×安全度最高的一批；每仓库独立提交，全量测试兜底。原则：同一条
+> 业务规则/同一段管线只允许一个实现点，分支「决定语义」、尾部统一「执行」。
+
+- **server**（6850bbb）：
+  - `requireWorkspace` 删 scopes 死返回值（13 个调用点全部丢弃，`_` 白扛）；
+  - idempotency：两处逐字复制的重放块收编为 `replay()`；
+  - auth：`authenticateAccessToken`/`authenticateCookieSession` 双胞胎
+    （查行→404/500→撤销→过期→Principal）公共管线抽 `liveSession()`，
+    差异（列名/过期列/文案）留在各自入口显式可见；
+  - `model.ActorsByIDs`：「收集 ID→IN 查询→按 ID 建索引」三份手写
+    （workspace members/presence/listAgents）收单点；listAgents 顺带删掉
+    多余的收集期去重闭包（IN 按主键天然去重）；
+  - `tag.Confirm`：100 行事务闭包、全仓最深 6 层嵌套，拆为
+    `loadProposalTx/checkProposal/claimProposalTx/applyTagAction{Create,
+    Rename,Delete}`，闭包退化为 5 步直线（加载→校验→单次置位→动作→审计+事件）。
+- **web**（bd43640）：
+  - SSE 封装双轨合一（第 23 轮遗留项闭合）：`useEventStream` 增
+    `onEvent/maxEvents` 选项，删除 `useWorkspaceEvents`（TaskTreeView 迁移，
+    订阅时机从 load 末尾提前到 setup，重载本就有 300ms 防抖）；`SseState`
+    类型单点化到 `api/sse.ts`；
+  - `useApiAction` 删 notice 死代码路径（零调用方；成功提示归 vue-sonner），
+    run 收敛 busy/error 两态；
+  - `DeviceApproveView`：终态三个写入点收敛为 `enterTerminal` 单点 +
+    status→文案映射表；
+  - `TaskTreeView` 接入共享件：StatusBadge（map 补 task 六状态）/
+    Badge outline/ErrorAlert，删 15 行手写徽章 CSS 与死的 `session.boot()`
+    （路由守卫已保证）；`fmtTime` 去重（ApprovalsTable → lib/format）；
+    `loginLocation()` 统一 401 出口与路由守卫的登录跳转构造。
+- **astral-cli**（086de96）：
+  - `HttpClient`：`send`/`sendStreaming` 约 45 行逐行重复的 curl 接线
+    （URL 校验/init/header 组装/公共 setopt/清理）收编为 RAII
+    `PreparedRequest`，两函数只留差异项（TIMEOUT vs LOW_SPEED 停滞探测、
+    body 回调）；清理逻辑随 RAII 覆盖 throw 路径；
+  - `events/listen`：三段复制「sleep+growBackoff+continue」合一为单一
+    重连尾部，分支只产出 `reconnectIn+diagnose`（429/5xx 文案动词统一，
+    无测试断言依赖）；
+  - `commands/paging.hpp`：`appendParam/PageFlags/addPageFlags/addPageParams`
+    共享件落地，msg_cmd 删手搓 append lambda 与 limit_/all_ 对，todo_cmd
+    以 `TaskPageFlags` 组合共享旗标 + status；
+  - `tags_cmd`：runMutate 的字符串状态机改 `enum class Action`（协议串经
+    `wireName()` 单点转换），嵌套三元 outcome 改 switch。
+- **验证**：server `go build/vet/test` 12 包全绿；web `vue-tsc`+`vite build`
+  全绿；astral-cli 92/92。
+- **已识别未落地（下轮候选，按价值排序）**：
+  1. CLI `event_cmd` attempt 组装链（约 8 层 lambda 间接、认证策略与 api.cpp
+     重复、`&store/&session` 引用捕获靠作用域约定兜底）收编进
+     `ApiSession::sendStreaming`——本轮 listen 循环已动，此项涉及认证接线
+     形态，单独成提交；
+  2. server「First→NotFound/500」三行样板约 15 处（机械替换面大，收益中）；
+  3. server approval 状态机动作表（当前仅 promote_owner 一项，加第二动作前做）；
+  4. server `bootstrap.Run` 230 行主流程按段抽取（远端活跃开发中，避免踩线）；
+  5. web TaskTreeView 五处手写 try/catch 接入 useApiAction；session.login
+     三连请求（login 响应含 Me 却丢弃再 getMe）可省一次往返。
+
 
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
