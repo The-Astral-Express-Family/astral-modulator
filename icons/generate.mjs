@@ -167,21 +167,31 @@ function novaIcon(color) {
 }
 
 /* ---------------------------------------------------------- 概念 03 · Wave-A */
-/* 调制波作字母 A 的横杠：monoline 双腿 + 高斯包络正弦，Astral 与 Modulator 一形双关 */
+/* 解构式 A：圆拱 + 横贯画面的宽波 + 两根分离外撇的腿，三段互不相连；
+   波是主角（信号穿过 A），负空间撑开节奏 —— 用户草图方向 */
 function waveAIcon(color) {
-  const legs = 'M 84 436 L 256 110 L 428 436';
-  const cx = 256, yBar = 348, half = 80, sigma = 36, amp = 32, cycles = 2;
-  let d = '';
+  const w = 46; // 统一笔画
+  // 圆拱（A 的顶，钟形、双脚外撇）
+  const arch = 'M 176 192 C 182 124 198 68 256 68 C 314 68 330 124 336 192';
+  // 宽波：y = yMid + env·cos(π·dx/half)，中心浅谷、两端收平，跨度远超字宽
+  const cx = 256, yMid = 250, half = 198, sigma = 120, amp = 38;
+  let wave = '';
   for (let x = cx - half; x <= cx + half; x += 2) {
     const dx = x - cx;
     const env = amp * Math.exp(-(dx * dx) / (2 * sigma * sigma));
-    const y = yBar - env * Math.sin((2 * Math.PI * cycles * dx) / (2 * half));
-    d += `${d ? 'L' : 'M'} ${x.toFixed(1)} ${y.toFixed(1)} `;
+    const y = yMid + env * Math.cos((Math.PI * dx) / half);
+    wave += `${wave ? 'L' : 'M'} ${x.toFixed(1)} ${y.toFixed(1)} `;
   }
+  // 双腿（分离、细长外撇）
+  const legs = ['M 190 330 L 148 444', 'M 322 330 L 364 444'];
   return {
     body: `
-    <path d="${legs}" fill="none" stroke="${color}" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="${d}" fill="none" stroke="${color}" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>`,
+    <g fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">
+      <path d="${arch}"/>
+      <path d="${wave}"/>
+      <path d="${legs[0]}"/>
+      <path d="${legs[1]}"/>
+    </g>`,
   };
 }
 
