@@ -16,13 +16,14 @@ import {
   searchTasks,
 } from '../api/modules/task'
 import { listMembers, listTags } from '../api/modules/workspace'
-import { useWorkspaceEvents } from '../composables/useWorkspaceEvents'
-import { useSessionStore } from '../stores/session'
+import { useEventStream } from '@/composables/useEventStream'
+import ErrorAlert from '@/components/shared/ErrorAlert.vue'
+import StatusBadge from '@/components/shared/StatusBadge.vue'
+import { Badge } from '@/components/ui/badge'
 import { fmtTime } from '../lib/format'
 import type { EventEnvelope, Member, Tag, Task, TaskSearchHit, TaskStatus } from '../api/types'
 
 const route = useRoute()
-const session = useSessionStore()
 // 路由参数保持响应式：组件复用（/workspaces/a/tasks → /workspaces/b/tasks）时正确重载。
 const workspaceId = computed(() => route.params.workspaceId as string)
 
@@ -49,7 +50,7 @@ const error = ref<string | null>(null)
 const loading = ref(false)
 const hits = ref<TaskSearchHit[]>([])
 
-const { sseState, subscribe } = useWorkspaceEvents(workspaceId, onEvent)
+const { state: sseState } = useEventStream(workspaceId, { onEvent })
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 
 const memberNames = computed(() => {
@@ -225,7 +226,6 @@ function resetToTree(): void {
 }
 
 async function load(): Promise<void> {
-  await session.boot()
   await reloadVisible()
   try {
     const [mem, tags] = await Promise.all([
@@ -237,7 +237,6 @@ async function load(): Promise<void> {
   } catch {
     /* 成员/tag 字典失败不阻塞主视图（显示原始 id / 无联想） */
   }
-  subscribe()
 }
 
 onMounted(load)
@@ -277,7 +276,7 @@ onUnmounted(() => {
       <button :disabled="!canSearch || loading" @click="runSearch">查询</button>
       <button :disabled="loading" @click="resetToTree">返回树</button>
     </div>
-    <p v-if="error" class="error-text">{{ error }}</p>
+    <ErrorAlert v-if="error" :message="error" />
   </div>
 
   <div v-if="mode === 'tree'" class="card">
@@ -306,12 +305,12 @@ onUnmounted(() => {
             <a href="#" @click.prevent="openDetail(row.task)">{{ row.task.title }}</a>
           </td>
           <td>
-            <span class="badge" :class="`badge-${row.task.status}`">{{ row.task.status }}</span>
+            <StatusBadge :status="row.task.status" />
           </td>
           <td>{{ row.task.priority }}</td>
           <td>{{ row.task.children_count > 0 ? row.task.children_count : '—' }}</td>
           <td>
-            <span v-for="t in row.task.tags" :key="t.id" class="badge badge-tag">{{ t.name }}</span>
+            <Badge v-for="t in row.task.tags" :key="t.id" variant="outline">{{ t.name }}</Badge>
             <span v-if="!row.task.tags.length" class="muted">—</span>
           </td>
           <td>{{ memberName(row.task.assignee_actor_id) }}</td>
@@ -337,7 +336,7 @@ onUnmounted(() => {
       <tbody>
         <tr v-for="t in hits" :key="t.id">
           <td><a href="#" @click.prevent="openDetail(t)">{{ t.title }}</a></td>
-          <td><span class="badge" :class="`badge-${t.status}`">{{ t.status }}</span></td>
+          <td><StatusBadge :status="t.status" /></td>
           <td>{{ t.priority }}</td>
           <td>{{ memberName(t.assignee_actor_id) }}</td>
           <td>{{ t.score !== undefined ? t.score.toFixed(3) : '—' }}</td>
@@ -349,7 +348,7 @@ onUnmounted(() => {
   <div v-if="selected" class="card">
     <h3>
       {{ selected.title }}
-      <span class="badge" :class="`badge-${selected.status}`">{{ selected.status }}</span>
+      <StatusBadge :status="selected.status" />
     </h3>
     <p class="muted">
       <code>{{ selected.id }}</code> · revision {{ selected.revision }} · 优先级
@@ -360,7 +359,7 @@ onUnmounted(() => {
     <p>
       Tags：
       <span v-if="selected.tags.length">
-        <span v-for="t in selected.tags" :key="t.id" class="badge badge-tag">{{ t.name }}</span>
+        <Badge v-for="t in selected.tags" :key="t.id" variant="outline">{{ t.name }}</Badge>
       </span>
       <span v-else class="muted">（无）</span>
     </p>
@@ -402,19 +401,4 @@ onUnmounted(() => {
   cursor: pointer;
   padding: 0;
 }
-.badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 10px;
-  background: #eceef1;
-  font-size: 12px;
-  margin-right: 4px;
-}
-.badge-open { background: #e3edfd; color: #1a56b8; }
-.badge-in_progress { background: #fff3d6; color: #8a6100; }
-.badge-blocked { background: #fde3e3; color: #b3261e; }
-.badge-review { background: #ede1fb; color: #6b21a8; }
-.badge-done { background: #ddf3e2; color: #1b7f3b; }
-.badge-cancelled { background: #eceef1; color: #6b7075; }
-.badge-tag { background: #e0f2f1; color: #00695c; }
 </style>

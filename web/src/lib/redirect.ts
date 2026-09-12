@@ -8,3 +8,8 @@ export function sanitizeRedirect(raw: unknown): string | null {
   if (raw === '/login' || raw.startsWith('/login?')) return null
   return raw
 }
+
+// 401 出口与路由守卫共用的登录跳转目标（带 from 回跳）。
+export function loginLocation(from: string): { path: string; query: { from: string } } {
+  return { path: '/login', query: { from } }
+}

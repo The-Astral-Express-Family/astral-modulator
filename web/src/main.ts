@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import { router } from './router'
 import { setUnauthorizedHandler } from './api/client'
+import { loginLocation } from './lib/redirect'
 import { useSessionStore } from './stores/session'
 import './assets/index.css'
 
@@ -19,7 +20,7 @@ setUnauthorizedHandler(() => {
   session.expireSession()
   const current = router.currentRoute.value
   if (current.path === '/login') return
-  void router.push({ path: '/login', query: { from: current.fullPath } })
+  void router.push(loginLocation(current.fullPath))
 })
 
 app.mount('#app')

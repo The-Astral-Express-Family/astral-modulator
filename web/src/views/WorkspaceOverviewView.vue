@@ -55,8 +55,10 @@ watch(workspaceId, () => {
     </CardHeader>
     <CardContent class="flex flex-col gap-3">
       <KeyValue label="ID" :value="workspaceId" />
-      <KeyValue v-if="workspace" label="名称" :value="workspace.name" />
-      <KeyValue v-if="workspace" label="Code" :value="workspace.slug" />
+      <template v-if="workspace">
+        <KeyValue label="名称" :value="workspace.name" />
+        <KeyValue label="Code" :value="workspace.slug" />
+      </template>
       <div class="flex items-center justify-between gap-4">
         <span class="text-sm text-muted-foreground">SSE 状态</span>
         <Badge :variant="SSE_VARIANTS[sseState]">{{ sseState }}</Badge>

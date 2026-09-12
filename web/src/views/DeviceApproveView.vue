@@ -41,21 +41,28 @@ watch(
   },
 )
 
+// 终态文案单一映射：主动裁决与轮询发现（别处批准/拒绝/过期）共用同一展示。
+const TERMINAL_MESSAGES: Record<DeviceAuthorizationView['status'], string> = {
+  pending: '',
+  approved: '该请求已批准。请回到 CLI 终端，它会在几秒内完成登录。',
+  exchanged: '该请求已批准。请回到 CLI 终端，它会在几秒内完成登录。',
+  denied: '该请求已拒绝。该设备授权请求已终止。',
+  expired: '该请求已过期。该设备授权请求已终止。',
+}
+
+// 进入终态的单一写入点：清详情、落终态、停轮询。
+function enterTerminal(status: DeviceAuthorizationView['status']): void {
+  stop()
+  view.value = null
+  terminal.value = { status, message: TERMINAL_MESSAGES[status] }
+}
+
 async function pollOnce(): Promise<void> {
   const code = view.value?.user_code
   if (!code) return
   try {
     const fresh = await findDeviceAuthorization(code)
-    if (fresh.status !== 'pending') {
-      view.value = null
-      terminal.value = {
-        status: fresh.status,
-        message:
-          fresh.status === 'approved' || fresh.status === 'exchanged'
-            ? '该请求已批准。'
-            : `该请求已${fresh.status === 'expired' ? '过期' : '失效'}`,
-      }
-    }
+    if (fresh.status !== 'pending') enterTerminal(fresh.status)
   } catch {
     // 查询失败（网络抖动等）不打断轮询；下一次循环重试。
   }
@@ -83,11 +90,7 @@ async function decide(approve: boolean): Promise<void> {
     else await denyDeviceAuthorization(id)
   })
   if (!ok) return
-  view.value = null
-  stop()
-  terminal.value = approve
-    ? { status: 'approved', message: '已批准。请回到 CLI 终端，它会在几秒内完成登录。' }
-    : { status: 'denied', message: '已拒绝。该设备授权请求已终止。' }
+  enterTerminal(approve ? 'approved' : 'denied')
 }
 
 onMounted(() => {

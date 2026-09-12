@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from '../stores/session'
-import { sanitizeRedirect } from '../lib/redirect'
+import { loginLocation, sanitizeRedirect } from '../lib/redirect'
 import MainLayout from '../components/layout/MainLayout.vue'
 
 // 路由规划对齐 roadmap Phase 5（GUI 监控/干预面）。
@@ -83,7 +83,7 @@ router.beforeEach(async (to) => {
   await session.boot()
 
   if (to.meta.auth === 'required' && !session.isLoggedIn) {
-    return { path: '/login', query: { from: to.fullPath } }
+    return loginLocation(to.fullPath)
   }
   // 已登录访问 /login：直接送去 from 目标或总览（sanitize 已排除 /login 自身，无循环）。
   if (to.name === 'login' && session.isLoggedIn) {

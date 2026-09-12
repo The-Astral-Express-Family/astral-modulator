@@ -4,10 +4,13 @@
 
 import type { EventEnvelope } from './types'
 
+/** SSE 连接状态（订阅方统一引用此处的单一声明）。 */
+export type SseState = 'connecting' | 'open' | 'closed'
+
 export interface SseOptions {
   workspaceId: string
   onEvent: (env: EventEnvelope) => void
-  onStateChange?: (state: 'connecting' | 'open' | 'closed') => void
+  onStateChange?: (state: SseState) => void
   /** 初始游标（上次收到的最后一个事件 id），后续重连自动携带最新游标 */
   lastEventId?: string
   maxBackoffMs?: number

@@ -2,6 +2,7 @@
 // 待裁决列表表格：动作 / 目标 / 发起人 / 过期时间 / 操作。
 // 裁决只 emit，确认弹窗与请求由父视图（ApprovalsView）处理。
 import type { Approval } from '@/api/types'
+import { fmtTime } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -20,10 +21,6 @@ defineProps<{
 const emit = defineEmits<{
   decide: [id: string, decision: 'approve' | 'deny']
 }>()
-
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
 </script>
 
 <template>
