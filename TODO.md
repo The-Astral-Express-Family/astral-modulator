@@ -674,6 +674,20 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   见 §11 第 15 项）；next_cursor 消费仍在 §11 第 11 项。
 
 
+### 第 26 轮（2026-09-13）：任务树 UX 打磨 —— 骨架屏 + 过渡动画 + 事件闪烁
+
+- **骨架屏三处**：整树初始加载（既有）；容器展开时子层骨架挂在容器节点下
+  （缓存命中则即时展开不出骨架）；点选任务后详情面板结构化骨架（标题/选择器/
+  描述/标签/租约占位）。`expandingIds`/`detailLoading` 分路驱动。
+- **过渡动画**：树行 `TransitionGroup` 进出场/重排（leave 用 absolute 让留存行
+  立即上移配合 v-move）；搜索结果列表同动画；详情面板 out-in 淡入切换。
+  全部带 `prefers-reduced-motion` 降级。
+- **事件闪烁**：SSE/模拟事件改任务时，revision 发生变化的可见行底色闪烁 1.1s
+  （revision diff 驱动 `.task-row-flash` keyframe）——「实时事件驱动」可感知。
+- **mock 注入 250ms 延迟**：骨架/busy 态在演示模式下真实可见（约等于本地 API 往返）。
+- **验证**：vue-tsc/build 全绿；浏览器页内轮询实证（展开骨架 max=2、详情骨架
+  max=10、闪烁类命中）+ 定时截图自审（事件后子行无丢失/透明卡死）。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
