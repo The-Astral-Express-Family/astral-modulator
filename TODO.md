@@ -645,6 +645,34 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   5. web TaskTreeView 五处手写 try/catch 接入 useApiAction；session.login
      三连请求（login 响应含 Me 却丢弃再 getMe）可省一次往返。
 
+### 第 25 轮（2026-09-13）：任务树视图 UI 重设计（双栏，round13 分支移植）
+
+- **背景**：并行会话曾在 v1 契约上实现过完整任务视图（本地分支
+  `round13-task-view-alt`，视觉验收 10/10），因 D15 v2 落地而废弃；本轮把其
+  UI 层按 v2 容器契约移植到主线，**数据骨架沿用 round 17 的逐容器懒加载语义
+  不变**（reloadVisible/防抖/snapshot.required 原样保留）。
+- **数据层**：`api/modules/task.ts` 补写操作（createRoot/createChild/updateTask/
+  claim/renew/release/attachTag/detachTag——这些端点 v2 未变）；新增
+  `api/taskSource.ts` 数据源缝（mock/真实同签名）+ `lib/mockMode.ts` +
+  `mocks/`（v2 内存实现：children 过滤、task-search ≥1 条件守卫、claim/release/
+  租约清扫语义）；dev + `VITE_TASKS_MOCK=1` 时任务视图离线可演示（不触发
+  真实 API 401 全局登出）；session boot 在「后端不可达/在线未登录」时落演示
+  身份（仅 mock 开启时生效，真实会话优先）。
+- **视图**：TaskTreeView 从原生 HTML 表格重写为双栏（左缩进树 + 右详情面板）；
+  工具栏 shadcn 组件化（fuzzy/regex/assignee/状态/标签；状态与标签变更即时
+  重载可见集合）；详情面板全操作——编辑标题/描述、状态/优先级、标签增删、
+  认领（时长可选）/续租/释放、新建子任务；REVISION_CONFLICT/租约过期 → 回源
+  + toast，不静默覆盖；新建对话框按 v2 寻址（无 parent_id，创建位置由容器
+  端点决定，支持按名附带标签），创建子任务后自动展开父容器保证新行可见；
+  搜索结果模式带匹配度徽章。
+- **顺带关闭** §11 第 13 项的搜索守卫缺口（assignee 纳入 canSearch，与契约
+  ≥1 条件语义一致）。
+- **验证**：vue-tsc/build 全绿；mock 模式浏览器实测 8 场景自审通过（主视图/
+  展开子层/创建对话框/创建后自动展开/搜索/模拟认领/快照重载）；真实 API
+  冒烟待有账号的环境点验（置 VITE_TASKS_MOCK=0）。
+- **已知未决**：fuzzy-only 搜索出现 0 分行（服务端无阈值语义，UI 忠实呈现，
+  见 §11 第 15 项）；next_cursor 消费仍在 §11 第 11 项。
+
 
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
@@ -884,10 +912,13 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
     web TaskTreeView 的搜索/树模式消费 next_cursor（当前超页静默丢弃）
 12. message.send 审计策略裁决：send 目前只写业务行 + outbox，无 audit
     （task/tag/workspace 全为三件套）——裁决「高频消息豁免」或补齐
-13. 小项打包：web 搜索守卫补 assignee（只填 assignee 时查询按钮 disabled，
-    与契约 ≥1 条件语义不符）；长度校验 byte vs rune 统一（message/task 按
+13. 小项打包：~~web 搜索守卫补 assignee~~（✅ 第 25 轮随 UI 移植关闭：assignee
+    已纳入 canSearch）；长度校验 byte vs rune 统一（message/task 按
     字节、tag 按字符）；409/403 搭配 VALIDATION_FAILED 的配对规则裁决
     （approval pending 重复 409、tag confirm_code 403）
+15. fuzzy-only task-search 的 0 分行展示策略：服务端无 score 阈值 → UI 出现
+    大量「匹配 0%」行（第 25 轮忠实呈现现语义）；裁决「服务端加阈值」或
+    「前端过滤/弱化零分行」
 14. 协议快照 v2.1 刷新（下次 CLI 消费契约变化时一并）：收拢 round 18 参数
     组件化与本轮 Task required/responses 组件对齐的形态漂移（均无语义变化，
     CLI 契约测试暂 pin 现有 v2 快照不受影响）
