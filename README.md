@@ -51,13 +51,21 @@ cd web && npm install && npm run dev
 
 ```bash
 docker compose up -d                     # postgres:17 @ localhost:5433（astral/astral/astral）
+cp server/.env.example server/.env       # 按需编辑；.env 已被 .gitignore 忽略
+cd server && go run ./cmd/astral-server  # 自动加载 .env；启动时自动 goose up（ASTRAL_AUTO_MIGRATE 默认开）
+```
+
+`.env` 在启动时由 godotenv 预加载（文件缺失可容忍，解析错误打 warning）；
+**shell 里已设置的真实环境变量优先**，`.env` 不会覆盖它们，因此临时覆盖仍用内联写法：
+
+```bash
 cd server
 ASTRAL_DATABASE_DSN='postgres://astral:astral@localhost:5433/astral?sslmode=disable' \
 ASTRAL_SERVER_ID='srv_dev_local' \
-go run ./cmd/astral-server               # 启动时自动 goose up（ASTRAL_AUTO_MIGRATE 默认开）
+go run ./cmd/astral-server
 ```
 
-主要环境变量（全部可选，完整说明见 `server/internal/config/config.go`）：
+主要环境变量（全部可选，完整说明见 `server/internal/config/config.go`，模板见 `server/.env.example`）：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|

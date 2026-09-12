@@ -1,8 +1,10 @@
 // Package config 汇集服务端运行配置。
 //
-// v0.1 只用环境变量（docs/deployment.md §Binary Deployment 提到 server.toml，
-// 属 phase-6 事项，见 TODO.md）。secrets 只允许来自环境变量/secret manager，
-// 严禁写进仓库。
+// v0.1 以环境变量为准：cmd 入口启动时用 godotenv 预加载本地 .env（缺失可容忍，
+// 已有环境变量优先，见 cmd/astral-server/main.go；模板 .env.example）。
+// docs/deployment.md §Binary Deployment 提到 server.toml，属 phase-6 事项，
+// 见 TODO.md。secrets 只允许来自环境变量/本地 .env（gitignore）/secret
+// manager，严禁写进仓库。
 package config
 
 import (
