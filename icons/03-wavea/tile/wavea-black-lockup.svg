@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<rect width="512" height="512" rx="115" fill="#FFFFFF"/><rect width="512" height="512" rx="115" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="2"/>
+    
+<g transform="translate(148 78.60) scale(0.421875)">
+    <path d="M 84 436 L 256 110 L 428 436" fill="none" stroke="#000000" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 176.0 348.0 L 178.0 347.5 L 180.0 346.9 L 182.0 346.2 L 184.0 345.5 L 186.0 344.6 L 188.0 343.7 L 190.0 342.7 L 192.0 341.7 L 194.0 340.8 L 196.0 340.0 L 198.0 339.4 L 200.0 338.9 L 202.0 338.7 L 204.0 338.9 L 206.0 339.4 L 208.0 340.3 L 210.0 341.6 L 212.0 343.3 L 214.0 345.5 L 216.0 348.0 L 218.0 350.9 L 220.0 354.0 L 222.0 357.3 L 224.0 360.7 L 226.0 364.0 L 228.0 367.1 L 230.0 370.0 L 232.0 372.4 L 234.0 374.2 L 236.0 375.4 L 238.0 375.9 L 240.0 375.6 L 242.0 374.4 L 244.0 372.5 L 246.0 369.8 L 248.0 366.4 L 250.0 362.3 L 252.0 357.8 L 254.0 353.0 L 256.0 348.0 L 258.0 343.0 L 260.0 338.2 L 262.0 333.7 L 264.0 329.6 L 266.0 326.2 L 268.0 323.5 L 270.0 321.6 L 272.0 320.4 L 274.0 320.1 L 276.0 320.6 L 278.0 321.8 L 280.0 323.6 L 282.0 326.0 L 284.0 328.9 L 286.0 332.0 L 288.0 335.3 L 290.0 338.7 L 292.0 342.0 L 294.0 345.1 L 296.0 348.0 L 298.0 350.5 L 300.0 352.7 L 302.0 354.4 L 304.0 355.7 L 306.0 356.6 L 308.0 357.1 L 310.0 357.3 L 312.0 357.1 L 314.0 356.6 L 316.0 356.0 L 318.0 355.2 L 320.0 354.3 L 322.0 353.3 L 324.0 352.3 L 326.0 351.4 L 328.0 350.5 L 330.0 349.8 L 332.0 349.1 L 334.0 348.5 L 336.0 348.0 " fill="none" stroke="#000000" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <path d="M 50 10 A 40 40 0 0 1 50 90 A 40 40 0 0 1 50 10" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(87.36 371.40000000000003) scale(0.62)"/>
+    <path d="M 90 10 L 90 90" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(87.36 371.40000000000003) scale(0.62)"/>
+    <path d="M 61 26 C 53 10 35 6 23 13 C 10 21 12 37 26 45 C 42 54 58 58 56 74 C 54 89 32 95 16 85" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(165.48 371.40000000000003) scale(0.62)"/>
+    <path d="M 30 -30 L 30 90" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(225.00 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 10 L 50 10" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(225.00 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 10 L 10 90" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(278.32 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 62 C 10 28 40 14 54 32" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(278.32 371.40000000000003) scale(0.62)"/>
+    <path d="M 50 10 A 40 40 0 0 1 50 90 A 40 40 0 0 1 50 10" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(334.12 371.40000000000003) scale(0.62)"/>
+    <path d="M 90 10 L 90 90" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(334.12 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 -30 L 10 90" fill="none" stroke="#000000" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(412.24 371.40000000000003) scale(0.62)"/>
+
+</svg>
