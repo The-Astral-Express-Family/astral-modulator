@@ -47,10 +47,20 @@ cd server && go run ./cmd/astral-server
 cd web && npm install && npm run dev
 ```
 
-带数据库：
+带数据库（推荐走交互式向导，一条命令完成配置问答 → 连库验证 → goose 迁移 →
+固化 server_id → 写 `.env` → 创建首个管理员账号，全程幂等可重跑）：
 
 ```bash
-docker compose up -d                     # postgres:17 @ localhost:5433（astral/astral/astral）
+docker compose up -d                          # postgres:17 @ localhost:5433（astral/astral/astral）
+cd server && go run ./cmd/astral-bootstrap    # 在 server/ 目录下运行；已有 .env 的值作为问答默认
+cd server && go run ./cmd/astral-server
+```
+
+向导写 `.env` 前会备份原文件为 `.env.bak`，并保留其中非向导管理的自定义键；
+首个管理员创建走的就是 `POST /api/v1/auth/register` 同一条 `Register` 路径
+（已有 human 账号时自动跳过）。也可以完全手动：
+
+```bash
 cp server/.env.example server/.env       # 按需编辑；.env 已被 .gitignore 忽略
 cd server && go run ./cmd/astral-server  # 自动加载 .env；启动时自动 goose up（ASTRAL_AUTO_MIGRATE 默认开）
 ```
