@@ -69,7 +69,7 @@ func (m *Module) registerApprovalRoutes(r chi.Router) {
 func (m *Module) createApproval(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	p := auth.PrincipalFrom(r.Context())
-	if _, _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeWorkspaceManageMember); apiErr != nil {
+	if _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeWorkspaceManageMember); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -141,7 +141,7 @@ func (m *Module) createApproval(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) listApprovals(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	if _, _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeWorkspaceManageMember); apiErr != nil {
+	if _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeWorkspaceManageMember); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -181,7 +181,7 @@ func (m *Module) decideApproval(decision string) http.HandlerFunc {
 			httpx.RespondError(w, r, err)
 			return
 		}
-		if _, _, apiErr := m.requireWorkspace(r, row.WorkspaceID, auth.ScopeWorkspaceManageMember); apiErr != nil {
+		if _, apiErr := m.requireWorkspace(r, row.WorkspaceID, auth.ScopeWorkspaceManageMember); apiErr != nil {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}

@@ -443,17 +443,28 @@ func (s *Service) ResolvePrincipal(ctx context.Context, bearer, cookieRefresh st
 	return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "authentication required"}
 }
 
-func (s *Service) authenticateAccessToken(ctx context.Context, token string) (*Principal, *httpx.APIError) {
+// liveSession 按 hash 列加载未撤销的 session；查无/撤销/DB 故障的语义是
+// Bearer access 与 Cookie session 两个认证入口的公共管线，差异只在
+// 列名、过期列与文案，由调用点显式给出。
+func (s *Service) liveSession(ctx context.Context, hashColumn, hash, notFoundMsg string) (*model.Session, *httpx.APIError) {
 	var sess model.Session
-	err := s.DB.WithContext(ctx).Where("access_token_hash = ?", HashToken(token)).First(&sess).Error
+	err := s.DB.WithContext(ctx).Where(hashColumn+" = ?", hash).First(&sess).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid access token"}
+		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: notFoundMsg}
 	}
 	if err != nil {
 		return nil, httpx.Internal("auth lookup failed")
 	}
 	if sess.RevokedAt != nil {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "session revoked"}
+	}
+	return &sess, nil
+}
+
+func (s *Service) authenticateAccessToken(ctx context.Context, token string) (*Principal, *httpx.APIError) {
+	sess, apiErr := s.liveSession(ctx, "access_token_hash", HashToken(token), "invalid access token")
+	if apiErr != nil {
+		return nil, apiErr
 	}
 	if time.Now().After(sess.AccessExpiresAt) {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "access token expired"}
@@ -496,16 +507,9 @@ func (s *Service) authenticateCredential(ctx context.Context, secret string) (*P
 // EventSource 无法携带 Authorization 头）。授予权限时按 human 成员角色计算，
 // 与 Bearer access 等效。
 func (s *Service) authenticateCookieSession(ctx context.Context, refresh string) (*Principal, *httpx.APIError) {
-	var sess model.Session
-	err := s.DB.WithContext(ctx).Where("refresh_token_hash = ?", HashToken(refresh)).First(&sess).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid session"}
-	}
-	if err != nil {
-		return nil, httpx.Internal("auth lookup failed")
-	}
-	if sess.RevokedAt != nil {
-		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "session revoked"}
+	sess, apiErr := s.liveSession(ctx, "refresh_token_hash", HashToken(refresh), "invalid session")
+	if apiErr != nil {
+		return nil, apiErr
 	}
 	if time.Now().After(sess.ExpiresAt) {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "session expired"}

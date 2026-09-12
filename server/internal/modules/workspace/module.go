@@ -70,21 +70,21 @@ type memberDTO struct {
 
 // requireWorkspace 加载 workspace 并走标准授权前置（语义见
 // auth.RequireWorkspaceScopes：非成员 404 / scope 不足 403）。
-func (m *Module) requireWorkspace(r *http.Request, workspaceID string, need ...string) (*model.Workspace, map[string]bool, *httpx.APIError) {
+// 需要具体 scope 集合的调用方直接调 m.Auth.RequireWorkspaceScopes。
+func (m *Module) requireWorkspace(r *http.Request, workspaceID string, need ...string) (*model.Workspace, *httpx.APIError) {
 	p := auth.PrincipalFrom(r.Context())
 	var ws model.Workspace
 	err := m.DB.WithContext(r.Context()).First(&ws, "id = ?", workspaceID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
+		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
 	}
 	if err != nil {
-		return nil, nil, httpx.Internal("workspace lookup failed")
+		return nil, httpx.Internal("workspace lookup failed")
 	}
-	scopes, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, workspaceID, need...)
-	if apiErr != nil {
-		return nil, nil, apiErr
+	if _, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, workspaceID, need...); apiErr != nil {
+		return nil, apiErr
 	}
-	return &ws, scopes, nil
+	return &ws, nil
 }
 
 // ---- workspace CRUD ----
@@ -171,7 +171,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
-	ws, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"))
+	ws, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"))
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -180,7 +180,7 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) update(w http.ResponseWriter, r *http.Request) {
-	ws, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceWrite)
+	ws, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceWrite)
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -237,7 +237,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 // ---- membership ----
 
 func (m *Module) listMembers(w http.ResponseWriter, r *http.Request) {
-	_, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceRead)
+	_, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceRead)
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -247,22 +247,16 @@ func (m *Module) listMembers(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	// actor 展示信息一次 IN 查询取回（与 presence.list 同款）；
+	// actor 展示信息一次 IN 查询取回（model.ActorsByIDs）；
 	// DB 故障如实上抛，不呈现为「短列表」。
 	actorIDs := make([]string, 0, len(members))
 	for _, mem := range members {
 		actorIDs = append(actorIDs, mem.ActorID)
 	}
-	actorsByID := map[string]model.Actor{}
-	if len(actorIDs) > 0 {
-		var actors []model.Actor
-		if err := m.DB.WithContext(r.Context()).Where("id IN ?", actorIDs).Find(&actors).Error; err != nil {
-			httpx.RespondError(w, r, err)
-			return
-		}
-		for _, a := range actors {
-			actorsByID[a.ID] = a
-		}
+	actorsByID, err := model.ActorsByIDs(r.Context(), m.DB, actorIDs)
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
 	}
 	items := make([]memberDTO, 0, len(members))
 	for _, mem := range members {
@@ -279,7 +273,7 @@ func (m *Module) listMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
-	ws, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceManageMember)
+	ws, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceManageMember)
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -338,7 +332,7 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) updateMember(w http.ResponseWriter, r *http.Request) {
-	ws, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceManageMember)
+	ws, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceManageMember)
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -389,7 +383,7 @@ func (m *Module) updateMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) removeMember(w http.ResponseWriter, r *http.Request) {
-	ws, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceManageMember)
+	ws, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeWorkspaceManageMember)
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -426,7 +420,7 @@ func (m *Module) removeMember(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
-	if _, _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeAgentManage); apiErr != nil {
+	if _, apiErr := m.requireWorkspace(r, wsID, auth.ScopeAgentManage); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -446,19 +440,13 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
+	// IN 查询对重复 id 天然去重（行按主键唯一），无需先收集时去重。
 	actorIDs := make([]string, 0, len(members)+len(creds))
-	seen := make(map[string]struct{}, len(members)+len(creds))
-	add := func(id string) {
-		if _, dup := seen[id]; !dup {
-			seen[id] = struct{}{}
-			actorIDs = append(actorIDs, id)
-		}
-	}
 	for _, mem := range members {
-		add(mem.ActorID)
+		actorIDs = append(actorIDs, mem.ActorID)
 	}
 	for _, c := range creds {
-		add(c.ActorID)
+		actorIDs = append(actorIDs, c.ActorID)
 	}
 	items := make([]auth.ActorDTO, 0, len(actorIDs))
 	if len(actorIDs) > 0 {
@@ -477,7 +465,7 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
-	ws, _, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeAgentManage)
+	ws, apiErr := m.requireWorkspace(r, chi.URLParam(r, "workspace_id"), auth.ScopeAgentManage)
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -559,7 +547,7 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 	// agent:manage 授权：绑定 workspace 的 credential 校验该 workspace 权限；
 	// 全局 credential 仅 human 可发（MVP 简化，TODO(phase-2): 服务器级 scope）。
 	if in.Workspace != "" {
-		if _, _, apiErr := m.requireWorkspace(r, in.Workspace, auth.ScopeAgentManage); apiErr != nil {
+		if _, apiErr := m.requireWorkspace(r, in.Workspace, auth.ScopeAgentManage); apiErr != nil {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}
@@ -630,7 +618,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 		wsScope = *cred.WorkspaceID
 	}
 	if wsScope != "" {
-		if _, _, apiErr := m.requireWorkspace(r, wsScope, auth.ScopeAgentManage); apiErr != nil {
+		if _, apiErr := m.requireWorkspace(r, wsScope, auth.ScopeAgentManage); apiErr != nil {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}

@@ -214,86 +214,21 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 
 	var tag model.Tag
 	err := m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var proposal model.TagProposal
-		e := tx.First(&proposal, "id = ?", proposalID).Error
-		if errors.Is(e, gorm.ErrRecordNotFound) {
-			return httpx.NotFound("proposal not found")
+		proposal, err := loadProposalTx(tx, proposalID)
+		if err != nil {
+			return err
 		}
-		if e != nil {
-			return e
+		if err := m.checkProposal(ctx, p, &proposal, confirmCode, normalized); err != nil {
+			return err
 		}
-		// 绑定校验：actor / workspace / 输入与 canonical 一致 / TTL / 状态。
-		if proposal.ActorID != p.ActorID {
-			return httpx.Forbidden("proposal belongs to another actor")
+		if err := claimProposalTx(tx, proposal.ID); err != nil {
+			return err
 		}
-		if _, apiErr := m.Auth.RequireWorkspaceScopes(ctx, p, proposal.WorkspaceID, auth.ScopeTagWrite); apiErr != nil {
-			return apiErr
+		newTag, evType, err := applyTagAction(tx, p.ActorID, &proposal, name, normalized)
+		if err != nil {
+			return err
 		}
-		if proposal.Status != "pending" || time.Now().After(proposal.ExpiresAt) {
-			return httpx.Conflict(httpx.CodeTagProposalExpired, "proposal expired or already used")
-		}
-		if !auth.HashEqual(confirmCode, proposal.ConfirmCodeHash) {
-			return &httpx.APIError{Status: 403, Code: httpx.CodeValidationFailed, Message: "confirm_code mismatch"}
-		}
-		if proposal.CanonicalName != normalized {
-			return httpx.Invalid("name does not match the proposed input")
-		}
-		// 单次使用：原子置 confirmed，抢不到即已使用/并发。
-		res := tx.Model(&model.TagProposal{}).
-			Where("id = ? AND status = 'pending'", proposal.ID).
-			Updates(map[string]any{"status": "confirmed", "confirmed_at": time.Now()})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return httpx.Conflict(httpx.CodeTagProposalExpired, "proposal already used")
-		}
-
-		// 执行动作（唯一约束在事务内二次检查，TOCTOU 兜底）。
-		var evType string
-		switch proposal.Action {
-		case "create":
-			tag = model.Tag{
-				ID: ids.New(ids.Tag), WorkspaceID: proposal.WorkspaceID,
-				Name: name, NormalizedName: normalized,
-				CreatedBy: p.ActorID, CreatedAt: time.Now(),
-			}
-			if err := tx.Create(&tag).Error; err != nil {
-				if store.IsUniqueViolation(err) {
-					return httpx.Conflict(httpx.CodeTagAlreadyExists, "tag already exists")
-				}
-				return err
-			}
-			evType = event.TypeTagCreated
-		case "rename":
-			res := tx.Model(&model.Tag{}).
-				Where("id = ? AND workspace_id = ?", *proposal.TargetTagID, proposal.WorkspaceID).
-				Updates(map[string]any{"name": name, "normalized_name": normalized})
-			if res.Error != nil {
-				if store.IsUniqueViolation(res.Error) {
-					return httpx.Conflict(httpx.CodeTagAlreadyExists, "target name already exists")
-				}
-				return res.Error
-			}
-			if res.RowsAffected == 0 {
-				return httpx.NotFound("target tag not found")
-			}
-			tag.ID, tag.Name = *proposal.TargetTagID, name
-			evType = event.TypeTagRenamed
-		case "delete":
-			res := tx.Where("id = ? AND workspace_id = ?", *proposal.TargetTagID, proposal.WorkspaceID).Delete(&model.Tag{})
-			if res.Error != nil {
-				return res.Error
-			}
-			if res.RowsAffected == 0 {
-				return httpx.NotFound("target tag not found")
-			}
-			tag.ID, tag.Name = *proposal.TargetTagID, name
-			evType = event.TypeTagDeleted
-		default:
-			return httpx.Internal("unknown proposal action")
-		}
-
+		tag = newTag
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: proposal.WorkspaceID, ActorID: p.ActorID,
 			Action: "tag." + proposal.Action + ".confirm", Outcome: "allowed",
@@ -309,6 +244,111 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 		return nil, err
 	}
 	return &tag, nil
+}
+
+// loadProposalTx 事务内加载 proposal 行。
+func loadProposalTx(tx *gorm.DB, proposalID string) (model.TagProposal, error) {
+	var proposal model.TagProposal
+	e := tx.First(&proposal, "id = ?", proposalID).Error
+	if errors.Is(e, gorm.ErrRecordNotFound) {
+		return proposal, httpx.NotFound("proposal not found")
+	}
+	if e != nil {
+		return proposal, e
+	}
+	return proposal, nil
+}
+
+// checkProposal 校验 proposal 与本次 confirm 的绑定关系：
+// actor / workspace scope / 状态与 TTL / confirm code / canonical name 一致。
+func (m *Module) checkProposal(ctx context.Context, p *auth.Principal, proposal *model.TagProposal, confirmCode, normalized string) error {
+	if proposal.ActorID != p.ActorID {
+		return httpx.Forbidden("proposal belongs to another actor")
+	}
+	if _, apiErr := m.Auth.RequireWorkspaceScopes(ctx, p, proposal.WorkspaceID, auth.ScopeTagWrite); apiErr != nil {
+		return apiErr
+	}
+	if proposal.Status != "pending" || time.Now().After(proposal.ExpiresAt) {
+		return httpx.Conflict(httpx.CodeTagProposalExpired, "proposal expired or already used")
+	}
+	if !auth.HashEqual(confirmCode, proposal.ConfirmCodeHash) {
+		return &httpx.APIError{Status: 403, Code: httpx.CodeValidationFailed, Message: "confirm_code mismatch"}
+	}
+	if proposal.CanonicalName != normalized {
+		return httpx.Invalid("name does not match the proposed input")
+	}
+	return nil
+}
+
+// claimProposalTx 单次使用：原子置 confirmed，抢不到即已使用/并发。
+func claimProposalTx(tx *gorm.DB, proposalID string) error {
+	res := tx.Model(&model.TagProposal{}).
+		Where("id = ? AND status = 'pending'", proposalID).
+		Updates(map[string]any{"status": "confirmed", "confirmed_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return httpx.Conflict(httpx.CodeTagProposalExpired, "proposal already used")
+	}
+	return nil
+}
+
+// applyTagAction 执行 proposal 动作（create/rename/delete），返回受影响的
+// tag 与对应领域事件类型。唯一约束冲突在事务内二次检查（TOCTOU 兜底）。
+func applyTagAction(tx *gorm.DB, actorID string, proposal *model.TagProposal, name, normalized string) (model.Tag, string, error) {
+	switch proposal.Action {
+	case "create":
+		return applyTagCreate(tx, actorID, proposal, name, normalized)
+	case "rename":
+		return applyTagRename(tx, proposal, name, normalized)
+	case "delete":
+		return applyTagDelete(tx, proposal, name)
+	default:
+		return model.Tag{}, "", httpx.Internal("unknown proposal action")
+	}
+}
+
+func applyTagCreate(tx *gorm.DB, actorID string, proposal *model.TagProposal, name, normalized string) (model.Tag, string, error) {
+	tag := model.Tag{
+		ID: ids.New(ids.Tag), WorkspaceID: proposal.WorkspaceID,
+		Name: name, NormalizedName: normalized,
+		CreatedBy: actorID, CreatedAt: time.Now(),
+	}
+	if err := tx.Create(&tag).Error; err != nil {
+		if store.IsUniqueViolation(err) {
+			return tag, "", httpx.Conflict(httpx.CodeTagAlreadyExists, "tag already exists")
+		}
+		return tag, "", err
+	}
+	return tag, event.TypeTagCreated, nil
+}
+
+func applyTagRename(tx *gorm.DB, proposal *model.TagProposal, name, normalized string) (model.Tag, string, error) {
+	res := tx.Model(&model.Tag{}).
+		Where("id = ? AND workspace_id = ?", *proposal.TargetTagID, proposal.WorkspaceID).
+		Updates(map[string]any{"name": name, "normalized_name": normalized})
+	if res.Error != nil {
+		if store.IsUniqueViolation(res.Error) {
+			return model.Tag{}, "", httpx.Conflict(httpx.CodeTagAlreadyExists, "target name already exists")
+		}
+		return model.Tag{}, "", res.Error
+	}
+	if res.RowsAffected == 0 {
+		return model.Tag{}, "", httpx.NotFound("target tag not found")
+	}
+	return model.Tag{ID: *proposal.TargetTagID, Name: name}, event.TypeTagRenamed, nil
+}
+
+func applyTagDelete(tx *gorm.DB, proposal *model.TagProposal, name string) (model.Tag, string, error) {
+	res := tx.Where("id = ? AND workspace_id = ?", *proposal.TargetTagID, proposal.WorkspaceID).Delete(&model.Tag{})
+	if res.Error != nil {
+		return model.Tag{}, "", res.Error
+	}
+	if res.RowsAffected == 0 {
+		return model.Tag{}, "", httpx.NotFound("target tag not found")
+	}
+	return model.Tag{ID: *proposal.TargetTagID, Name: name}, event.TypeTagDeleted, nil
 }
 
 // confirm：两步确认第二步的 HTTP 面（CLI 固定拼写 --confirm）。

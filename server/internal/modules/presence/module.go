@@ -110,18 +110,14 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		actorIDs = append(actorIDs, row.ActorID)
 	}
-	names := map[string]string{}
-	if len(actorIDs) > 0 {
-		var actors []model.Actor
-		// Find 不会返回 ErrRecordNotFound，错误只需区分「有错/无错」。
-		if err := m.DB.WithContext(r.Context()).Select("id", "display_name").
-			Where("id IN ?", actorIDs).Find(&actors).Error; err != nil {
-			httpx.RespondError(w, r, err)
-			return
-		}
-		for _, a := range actors {
-			names[a.ID] = a.DisplayName
-		}
+	actorsByID, err := model.ActorsByIDs(r.Context(), m.DB, actorIDs)
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	names := make(map[string]string, len(actorsByID))
+	for id, a := range actorsByID {
+		names[id] = a.DisplayName
 	}
 	now := time.Now()
 	items := make([]presenceDTO, 0, len(rows))

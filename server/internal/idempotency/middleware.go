@@ -92,10 +92,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 
 		// 命中窗口内的已有响应 → 重放。
 		if cached, ok := m.lookup(r, p.ActorID, endpoint, key, now); ok {
-			w.Header().Set("Content-Type", cached.ContentType)
-			w.Header().Set(HeaderReplayed, "true")
-			w.WriteHeader(cached.StatusCode)
-			_, _ = w.Write(cached.Body)
+			replay(w, cached)
 			return
 		}
 
@@ -118,15 +115,20 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		if err := m.DB.Create(&row).Error; err != nil {
 			// 并发同键：主键冲突 → 重读首到者的响应重放；读不到则放行本响应。
 			if cached, ok := m.lookup(r, p.ActorID, endpoint, key, now); ok {
-				w.Header().Set("Content-Type", cached.ContentType)
-				w.Header().Set(HeaderReplayed, "true")
-				w.WriteHeader(cached.StatusCode)
-				_, _ = w.Write(cached.Body)
+				replay(w, cached)
 				return
 			}
 			m.Log.Warn("idempotency store failed", "err", err)
 		}
 	})
+}
+
+// replay 写回缓存的 2xx 响应并标记重放头。
+func replay(w http.ResponseWriter, c cachedResponse) {
+	w.Header().Set("Content-Type", c.ContentType)
+	w.Header().Set(HeaderReplayed, "true")
+	w.WriteHeader(c.StatusCode)
+	_, _ = w.Write(c.Body)
 }
 
 type cachedResponse struct {
