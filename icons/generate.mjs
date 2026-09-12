@@ -242,6 +242,32 @@ function pulseIcon(color) {
   };
 }
 
+/* ---------------------------------------------------------- 概念 06 · Orbit-A */
+/* 解构 A 被一段轨道动线环绕：大半径圆弧从左侧平入、微垂、右端上扬，
+   终点收一颗实心卫星珠（与 01 Orbit 同语言）；A 双脚与双腿整体随动线右升。
+   草图仅取意图（环扫过山腰 + 彗星头动势），几何全部重构 */
+function orbitAIcon(color) {
+  const w = 46;
+  // A：不对称双脚（右脚随环抬高）
+  const a = 'M 194 254 L 266 102 L 326 224';
+  // 轨道弧：过 (72,290)/(256,308)/(448,196) 三点的外接圆，R≈331，圆心在画布上方
+  const ring = 'M 72 290 A 330.9 330.9 0 0 0 448 196';
+  // 卫星珠：轨道终点
+  const bead = { x: 448, y: 196, r: 34 };
+  // 双腿：随动线整体右升，右腿略高
+  const legs = ['M 150 368 L 118 460', 'M 330 350 L 362 442'];
+  return {
+    body: `
+    <g fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">
+      <path d="${a}"/>
+      <path d="${ring}"/>
+      <path d="${legs[0]}"/>
+      <path d="${legs[1]}"/>
+    </g>
+    <circle cx="${bead.x}" cy="${bead.y}" r="${bead.r}" fill="${color}"/>`,
+  };
+}
+
 /* ---------------------------------------------------------------- lockups */
 
 /** 横排 lockup（透明底用）：icon 左、wordmark 右，x-height 带对 icon 居中 */
@@ -292,6 +318,7 @@ const CONCEPTS = [
   { id: 'wavea', num: '03', name: 'Wave-A 调制波 A', icon: waveAIcon },
   { id: 'peak', num: '04', name: 'Peak 山岳 A', icon: peakIcon },
   { id: 'pulse', num: '05', name: 'Pulse 调制波', icon: pulseIcon },
+  { id: 'orbita', num: '06', name: 'Orbit-A 轨道 A', icon: orbitAIcon },
 ];
 
 const OUT = [];

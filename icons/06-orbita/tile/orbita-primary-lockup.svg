@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<rect width="512" height="512" rx="115" fill="#f1f3f3"/><rect width="512" height="512" rx="115" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="2"/>
+    
+<g transform="translate(148 78.60) scale(0.421875)">
+    <g fill="none" stroke="#161b1d" stroke-width="46" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 194 254 L 266 102 L 326 224"/>
+      <path d="M 72 290 A 330.9 330.9 0 0 0 448 196"/>
+      <path d="M 150 368 L 118 460"/>
+      <path d="M 330 350 L 362 442"/>
+    </g>
+    <circle cx="448" cy="196" r="34" fill="#161b1d"/></g>
+    <path d="M 50 10 A 40 40 0 0 1 50 90 A 40 40 0 0 1 50 10" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(87.36 371.40000000000003) scale(0.62)"/>
+    <path d="M 90 10 L 90 90" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(87.36 371.40000000000003) scale(0.62)"/>
+    <path d="M 61 26 C 53 10 35 6 23 13 C 10 21 12 37 26 45 C 42 54 58 58 56 74 C 54 89 32 95 16 85" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(165.48 371.40000000000003) scale(0.62)"/>
+    <path d="M 30 -30 L 30 90" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(225.00 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 10 L 50 10" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(225.00 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 10 L 10 90" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(278.32 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 62 C 10 28 40 14 54 32" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(278.32 371.40000000000003) scale(0.62)"/>
+    <path d="M 50 10 A 40 40 0 0 1 50 90 A 40 40 0 0 1 50 10" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(334.12 371.40000000000003) scale(0.62)"/>
+    <path d="M 90 10 L 90 90" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(334.12 371.40000000000003) scale(0.62)"/>
+    <path d="M 10 -30 L 10 90" fill="none" stroke="#161b1d" stroke-width="12.4" stroke-linecap="round" stroke-linejoin="round" transform="translate(412.24 371.40000000000003) scale(0.62)"/>
+
+</svg>
