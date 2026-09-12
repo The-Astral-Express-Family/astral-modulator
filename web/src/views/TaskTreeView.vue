@@ -1,33 +1,42 @@
 <script setup lang="ts">
-// 任务树视图（v2 容器语义，TODO.md D15）：
+// 任务树视图（v2 容器语义，TODO.md D15；round 25 起为双栏设计）：
 // - 逐容器懒加载：根层 = workspace children 集合；展开节点 = 该任务 children
 //   集合（只回传直接子层，行内带 tags/children_count）；不再全量平铺拉取；
 // - 过滤（status/tag）服务端生效：变更后重载所有可见集合；
 // - 搜索模式：task-search 平面查询（regex/fuzzy/tag/status/assignee 至少其一）；
 // - SSE 实时刷新：task.* 防抖重载可见集合，snapshot.required 立即全量重拉
-//   （游标超窗语义），tag.* 刷新打开中的详情。
+//   （游标超窗语义），tag.* 刷新打开中的详情；
+// - 双栏：左树 + 右详情面板（编辑/标签/认领租约/建子任务，round 25 自任务树
+//   round13 分支移植）；数据源经 @/api/taskSource（mock/真实可切换）。
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { ListTree, Plus } from '@lucide/vue'
+import { toast } from 'vue-sonner'
 import { formatApiError } from '../api/client'
-import {
-  getTask,
-  listTaskChildren,
-  listWorkspaceChildren,
-  searchTasks,
-} from '../api/modules/task'
-import { listMembers, listTags } from '../api/modules/workspace'
-import { useEventStream } from '@/composables/useEventStream'
-import ErrorAlert from '@/components/shared/ErrorAlert.vue'
-import StatusBadge from '@/components/shared/StatusBadge.vue'
-import { Badge } from '@/components/ui/badge'
-import { fmtTime } from '../lib/format'
+import { taskApi } from '../api/taskSource'
+import type { TaskCreatePayload } from '../api/modules/task'
 import type { EventEnvelope, Member, Tag, Task, TaskSearchHit, TaskStatus } from '../api/types'
+import { TASKS_MOCK } from '../lib/mockMode'
+import { useTaskLiveEvents } from '../composables/useTaskLiveEvents'
+import type { SseState } from '../composables/useEventStream'
+import PageHeader from '@/components/shared/PageHeader.vue'
+import { Badge } from '@/components/ui/badge'
+import type { BadgeVariants } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
+import EventSimulator from '@/components/tasks/EventSimulator.vue'
+import TaskCreateDialog from '@/components/tasks/TaskCreateDialog.vue'
+import TaskDetailPanel from '@/components/tasks/TaskDetailPanel.vue'
+import TaskFilters from '@/components/tasks/TaskFilters.vue'
+import TaskPriorityIcon from '@/components/tasks/TaskPriorityIcon.vue'
+import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
+import TaskTreeRow from '@/components/tasks/TaskTreeRow.vue'
 
 const route = useRoute()
 // 路由参数保持响应式：组件复用（/workspaces/a/tasks → /workspaces/b/tasks）时正确重载。
 const workspaceId = computed(() => route.params.workspaceId as string)
-
-const STATUSES: TaskStatus[] = ['open', 'in_progress', 'blocked', 'review', 'done', 'cancelled']
 
 const PAGE_LIMIT = 200
 
@@ -50,12 +59,21 @@ const error = ref<string | null>(null)
 const loading = ref(false)
 const hits = ref<TaskSearchHit[]>([])
 
-const { state: sseState } = useEventStream(workspaceId, { onEvent })
+const createOpen = ref(false)
+const createParent = ref<{ id: string | null; title: string | null }>({ id: null, title: null })
+const simulatorOpen = ref(false)
+
+const { state: sseState } = useTaskLiveEvents(workspaceId, onEvent)
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 
 const memberNames = computed(() => {
   const m = new Map<string, string>()
   for (const mem of members.value) m.set(mem.actor.id, mem.actor.display_name)
+  return m
+})
+const membersById = computed(() => {
+  const m = new Map<string, Member['actor']>()
+  for (const mem of members.value) m.set(mem.actor.id, mem.actor)
   return m
 })
 function memberName(id: string | null): string {
@@ -71,12 +89,12 @@ function filterParams(): { status?: string; tag?: string; limit: number } {
 }
 
 async function fetchRoots(): Promise<Task[]> {
-  const page = await listWorkspaceChildren(workspaceId.value, filterParams())
+  const page = await taskApi.listWorkspaceChildren(workspaceId.value, filterParams())
   return page.items
 }
 
 async function fetchChildren(taskId: string): Promise<Task[]> {
-  const page = await listTaskChildren(taskId, filterParams())
+  const page = await taskApi.listTaskChildren(taskId, filterParams())
   return page.items
 }
 
@@ -93,7 +111,7 @@ async function reloadVisible(): Promise<void> {
       ...containers.map((id) => fetchChildren(id)),
     ])
     roots.value = freshRoots
-    containers.forEach((id, i) => childrenByContainer.value.set(id, freshChildren[i]))
+    containers.forEach((id, i) => childrenByContainer.value.set(id, freshChildren[i]!))
     error.value = null
     if (selected.value) await refreshDetail()
   } catch (e) {
@@ -115,7 +133,7 @@ function scheduleReload(): void {
 async function refreshDetail(): Promise<void> {
   if (!selected.value) return
   try {
-    selected.value = await getTask(selected.value.id)
+    selected.value = await taskApi.getTask(selected.value.id)
   } catch {
     selected.value = null // 被删除/无权限：收起详情
   }
@@ -123,7 +141,7 @@ async function refreshDetail(): Promise<void> {
 
 async function openDetail(task: Pick<Task, 'id'>): Promise<void> {
   try {
-    selected.value = await getTask(task.id)
+    selected.value = await taskApi.getTask(task.id)
     error.value = null
   } catch (e) {
     error.value = formatApiError(e)
@@ -133,6 +151,7 @@ async function openDetail(task: Pick<Task, 'id'>): Promise<void> {
 function onEvent(env: EventEnvelope): void {
   if (env.type === 'snapshot.required') {
     // 游标超窗断流：SSE 封装会自动重连，这里负责补齐错过的数据。
+    toast.warning('事件游标已超出服务端保留窗口，正在重载任务快照…')
     void reloadVisible()
     return
   }
@@ -167,13 +186,15 @@ async function toggle(task: Task): Promise<void> {
 interface FlatRow {
   task: Task
   depth: number
+  hasChildren: boolean
+  expanded: boolean
 }
 
 const rows = computed<FlatRow[]>(() => {
   const out: FlatRow[] = []
   const walk = (list: Task[], depth: number): void => {
     for (const task of list) {
-      out.push({ task, depth })
+      out.push({ task, depth, hasChildren: task.children_count > 0, expanded: expanded.value.has(task.id) })
       if (expanded.value.has(task.id)) {
         const kids = childrenByContainer.value.get(task.id)
         if (kids) walk(kids, depth + 1)
@@ -187,17 +208,23 @@ const rows = computed<FlatRow[]>(() => {
 // ---- 搜索模式（task-search 平面查询）----
 
 const canSearch = computed(() =>
-  Boolean(regexInput.value || fuzzyInput.value || tagFilter.value || statusFilter.value),
+  Boolean(
+    regexInput.value ||
+      fuzzyInput.value ||
+      tagFilter.value ||
+      statusFilter.value ||
+      assigneeInput.value,
+  ),
 )
 
 async function runSearch(): Promise<void> {
   if (!canSearch.value) {
-    error.value = '搜索至少需要一个条件（regex / fuzzy / tag / status）'
+    error.value = '搜索至少需要一个条件（regex / fuzzy / tag / status / assignee）'
     return
   }
   loading.value = true
   try {
-    const page = await searchTasks(workspaceId.value, {
+    const page = await taskApi.searchTasks(workspaceId.value, {
       regex: regexInput.value || undefined,
       fuzzy: fuzzyInput.value || undefined,
       tag: tagFilter.value || undefined,
@@ -225,18 +252,64 @@ function resetToTree(): void {
   void reloadVisible()
 }
 
+// 状态/标签过滤在树模式下即时生效（服务端过滤，重载可见集合）。
+watch([statusFilter, tagFilter], () => {
+  if (mode.value === 'tree') void reloadVisible()
+})
+
 async function load(): Promise<void> {
   await reloadVisible()
   try {
     const [mem, tags] = await Promise.all([
-      listMembers(workspaceId.value),
-      listTags(workspaceId.value),
+      taskApi.listMembers(workspaceId.value),
+      taskApi.listTags(workspaceId.value),
     ])
     members.value = mem.items
     tagDict.value = tags.items
   } catch {
     /* 成员/tag 字典失败不阻塞主视图（显示原始 id / 无联想） */
   }
+}
+
+// 展开容器；无缓存时立即拉取子层（新建子任务后保证新行可见）。
+async function expandContainer(taskId: string): Promise<void> {
+  expanded.value = new Set([...expanded.value, taskId])
+  if (!childrenByContainer.value.has(taskId)) {
+    childrenByContainer.value.set(taskId, await fetchChildren(taskId))
+  }
+}
+
+// ---- 创建 / 详情写操作回写 ----
+
+function openCreate(parent: Task | null): void {
+  createParent.value = parent ? { id: parent.id, title: parent.title } : { id: null, title: null }
+  createOpen.value = true
+}
+
+async function handleCreate(payload: TaskCreatePayload): Promise<void> {
+  createOpen.value = false
+  try {
+    const created = createParent.value.id
+      ? await taskApi.createChild(createParent.value.id, payload)
+      : await taskApi.createRoot(workspaceId.value, payload)
+    toast.success('任务已创建。')
+    if (createParent.value.id) await expandContainer(createParent.value.id)
+    void openDetail(created)
+    scheduleReload()
+  } catch (e) {
+    error.value = formatApiError(e)
+  }
+}
+
+// 详情面板写操作成功：即时回写选中详情 + 防抖刷新行。
+function onChanged(task: Task): void {
+  if (selected.value?.id === task.id) selected.value = task
+  scheduleReload()
+}
+
+// 冲突/租约过期：回源刷新选中详情（面板不发第二次写）。
+function onStale(): void {
+  void refreshDetail()
 }
 
 onMounted(load)
@@ -246,159 +319,177 @@ watch(workspaceId, () => {
   expanded.value = new Set()
   hits.value = []
   selected.value = null
+  mode.value = 'tree'
   void load()
 })
 onUnmounted(() => {
   if (reloadTimer) clearTimeout(reloadTimer)
 })
+
+const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
+  connecting: 'secondary',
+  open: 'default',
+  closed: 'outline',
+}
 </script>
 
 <template>
-  <h2>任务树</h2>
-
-  <div class="card">
-    <p class="muted">
-      workspace: <code>{{ workspaceId }}</code> · SSE：{{ sseState }}
-      · <RouterLink :to="`/workspaces/${workspaceId}`">返回总览</RouterLink>
-    </p>
-    <div class="toolbar">
-      <input v-model="regexInput" placeholder="regex（过滤 title/description）" />
-      <input v-model="fuzzyInput" placeholder="fuzzy（排序）" />
-      <input v-model="tagFilter" placeholder="tag" list="tag-options" />
-      <datalist id="tag-options">
-        <option v-for="t in tagDict" :key="t.id" :value="t.name" />
-      </datalist>
-      <select v-model="statusFilter">
-        <option value="">全部状态</option>
-        <option v-for="s in STATUSES" :key="s" :value="s">{{ s }}</option>
-      </select>
-      <input v-model="assigneeInput" placeholder="assignee id（可选）" />
-      <button :disabled="!canSearch || loading" @click="runSearch">查询</button>
-      <button :disabled="loading" @click="resetToTree">返回树</button>
+  <div class="flex w-full flex-col gap-4">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <PageHeader title="任务树" description="逐容器懒加载 · 实时事件驱动 · 详情面板支持认领租约与标签。" />
+      <div class="flex items-center gap-2">
+        <Badge :variant="SSE_VARIANTS[sseState]">SSE {{ sseState }}</Badge>
+        <Button v-if="TASKS_MOCK" variant="outline" size="sm" @click="simulatorOpen = true">
+          事件模拟器
+        </Button>
+        <Button size="sm" @click="openCreate(null)">
+          <Plus class="size-4" />
+          新建任务
+        </Button>
+      </div>
     </div>
-    <ErrorAlert v-if="error" :message="error" />
-  </div>
 
-  <div v-if="mode === 'tree'" class="card">
-    <p class="muted">逐容器懒加载：点击展开箭头拉取该任务直接子层。</p>
-    <p v-if="loading && !rows.length" class="muted">加载中…</p>
-    <p v-else-if="!rows.length" class="muted">没有任务。</p>
-    <table v-else class="task-table">
-      <thead>
-        <tr>
-          <th style="text-align: left">标题</th>
-          <th style="text-align: left">状态</th>
-          <th style="text-align: left">优先级</th>
-          <th style="text-align: left">子任务</th>
-          <th style="text-align: left">Tags</th>
-          <th style="text-align: left">负责人</th>
-          <th style="text-align: left">更新时间</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in rows" :key="row.task.id">
-          <td :style="{ paddingLeft: `${row.depth * 24 + 8}px` }">
-            <button v-if="row.task.children_count > 0" class="toggle" @click="toggle(row.task)">
-              {{ expanded.has(row.task.id) ? '▾' : '▸' }}
+    <p
+      v-if="TASKS_MOCK"
+      class="text-muted-foreground rounded-lg border border-dashed px-3 py-2 text-xs"
+    >
+      演示数据模式（VITE_TASKS_MOCK=1）：数据为内存夹具、事件由模拟器注入，不依赖后端；
+      置 0 切换真实 API。
+    </p>
+
+    <TaskFilters
+      v-model:fuzzy="fuzzyInput"
+      v-model:regex="regexInput"
+      v-model:assignee="assigneeInput"
+      v-model:status="statusFilter"
+      v-model:tag="tagFilter"
+      :tags="tagDict"
+      @search="runSearch"
+      @reset="resetToTree"
+    />
+
+    <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
+
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
+      <!-- 左栏：树 / 搜索结果 -->
+      <Card class="flex min-h-[60vh] flex-col overflow-hidden">
+        <CardContent class="min-h-0 flex-1 overflow-y-auto p-2">
+          <div v-if="loading && !rows.length && mode === 'tree'" class="flex flex-col gap-2 p-2">
+            <Skeleton v-for="i in 8" :key="i" class="h-8" :style="{ width: `${95 - i * 6}%` }" />
+          </div>
+
+          <!-- 搜索结果模式 -->
+          <template v-else-if="mode === 'search'">
+            <p class="text-muted-foreground px-2 py-1 text-xs">
+              查询结果（{{ hits.length }} 条）——「返回树」恢复树模式。
+            </p>
+            <button
+              v-for="hit in hits"
+              :key="hit.id"
+              type="button"
+              class="hover:bg-muted/60 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
+              :class="selected?.id === hit.id ? 'bg-muted' : ''"
+              @click="openDetail(hit)"
+            >
+              <TaskStatusBadge :status="hit.status" show-label class="w-[62px] shrink-0" />
+              <TaskPriorityIcon :priority="hit.priority" />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm">{{ hit.title }}</span>
+                <span class="text-muted-foreground block truncate text-xs">
+                  {{ memberName(hit.assignee_actor_id) }}
+                </span>
+              </span>
+              <Badge
+                v-for="t in hit.tags.slice(0, 2)"
+                :key="t.id"
+                variant="outline"
+                class="hidden shrink-0 lg:inline-flex"
+              >
+                {{ t.name }}
+              </Badge>
+              <Badge v-if="hit.score !== undefined" variant="outline" class="shrink-0">
+                匹配 {{ Math.round(hit.score * 100) }}%
+              </Badge>
             </button>
-            <span v-else class="toggle muted">·</span>
-            <a href="#" @click.prevent="openDetail(row.task)">{{ row.task.title }}</a>
-          </td>
-          <td>
-            <StatusBadge :status="row.task.status" />
-          </td>
-          <td>{{ row.task.priority }}</td>
-          <td>{{ row.task.children_count > 0 ? row.task.children_count : '—' }}</td>
-          <td>
-            <Badge v-for="t in row.task.tags" :key="t.id" variant="outline">{{ t.name }}</Badge>
-            <span v-if="!row.task.tags.length" class="muted">—</span>
-          </td>
-          <td>{{ memberName(row.task.assignee_actor_id) }}</td>
-          <td>{{ fmtTime(row.task.updated_at) }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+            <Empty v-if="!loading && !hits.length">
+              <EmptyHeader>
+                <EmptyTitle>没有匹配的任务。</EmptyTitle>
+                <EmptyDescription>放宽过滤条件，或换一个关键词。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </template>
 
-  <div v-else class="card">
-    <p class="muted">查询结果：{{ hits.length }} 条</p>
-    <p v-if="!hits.length" class="muted">没有匹配的任务。</p>
-    <table v-if="hits.length" class="task-table">
-      <thead>
-        <tr>
-          <th style="text-align: left">标题</th>
-          <th style="text-align: left">状态</th>
-          <th style="text-align: left">优先级</th>
-          <th style="text-align: left">负责人</th>
-          <th style="text-align: left">score</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="t in hits" :key="t.id">
-          <td><a href="#" @click.prevent="openDetail(t)">{{ t.title }}</a></td>
-          <td><StatusBadge :status="t.status" /></td>
-          <td>{{ t.priority }}</td>
-          <td>{{ memberName(t.assignee_actor_id) }}</td>
-          <td>{{ t.score !== undefined ? t.score.toFixed(3) : '—' }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+          <!-- 树模式 -->
+          <template v-else>
+            <TaskTreeRow
+              v-for="row in rows"
+              :key="row.task.id"
+              :row="row"
+              :selected="selected?.id === row.task.id"
+              :assignee="membersById.get(row.task.assignee_actor_id ?? '') ?? null"
+              @select="openDetail(row.task)"
+              @toggle="toggle(row.task)"
+            />
+            <Empty v-if="!loading && !rows.length && !error">
+              <EmptyHeader>
+                <EmptyTitle>没有任务。</EmptyTitle>
+                <EmptyDescription>当前过滤条件下无结果，或工作区还没有任务。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </template>
+        </CardContent>
+        <div class="text-muted-foreground border-t px-3 py-1.5 text-xs">
+          {{
+            mode === 'search'
+              ? `搜索 ${hits.length} 条`
+              : `${rows.length} 行可见（展开 ${expanded.size} 个容器）`
+          }}
+          <template v-if="statusFilter || tagFilter"> · 过滤中</template>
+        </div>
+      </Card>
 
-  <div v-if="selected" class="card">
-    <h3>
-      {{ selected.title }}
-      <StatusBadge :status="selected.status" />
-    </h3>
-    <p class="muted">
-      <code>{{ selected.id }}</code> · revision {{ selected.revision }} · 优先级
-      {{ selected.priority }}
-    </p>
-    <p>负责人：{{ memberName(selected.assignee_actor_id) }}</p>
-    <p v-if="selected.parent_id">父任务：<code>{{ selected.parent_id }}</code></p>
-    <p>
-      Tags：
-      <span v-if="selected.tags.length">
-        <Badge v-for="t in selected.tags" :key="t.id" variant="outline">{{ t.name }}</Badge>
-      </span>
-      <span v-else class="muted">（无）</span>
-    </p>
-    <p v-if="selected.lease">
-      租约：{{ memberName(selected.lease.holder_actor_id) }} 至
-      {{ fmtTime(selected.lease.expires_at) }}
-    </p>
-    <p v-else class="muted">无租约。</p>
-    <pre v-if="selected.description">{{ selected.description }}</pre>
-    <p class="muted">创建 {{ fmtTime(selected.created_at) }} · 更新 {{ fmtTime(selected.updated_at) }}</p>
+      <!-- 右栏：详情面板 -->
+      <div class="min-h-[60vh]">
+        <TaskDetailPanel
+          v-if="selected"
+          :key="selected.id"
+          :task="selected"
+          :actors-by-id="membersById"
+          :all-tags="tagDict"
+          @changed="onChanged"
+          @stale="onStale"
+          @create-subtask="openCreate(selected)"
+        />
+        <Card v-else class="flex min-h-[60vh] flex-col">
+          <CardContent class="flex flex-1 items-center justify-center">
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle class="flex items-center gap-2">
+                  <ListTree class="size-4" />
+                  选择一个任务
+                </EmptyTitle>
+                <EmptyDescription>
+                  左侧选择任务后，在此查看详情、编辑字段、管理标签与认领租约。
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+
+    <TaskCreateDialog
+      v-model:open="createOpen"
+      :tags="tagDict"
+      :parent-title="createParent.title"
+      @submit="handleCreate"
+    />
+
+    <EventSimulator
+      v-if="TASKS_MOCK"
+      v-model:open="simulatorOpen"
+      :selected-task-id="selected?.id ?? null"
+      :tags="tagDict"
+    />
   </div>
 </template>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.toolbar input,
-.toolbar select {
-  padding: 6px 8px;
-  border: 1px solid #d0d3d8;
-  border-radius: 6px;
-}
-.toolbar input[list] {
-  width: 90px;
-}
-.task-table td,
-.task-table th {
-  padding: 6px 8px;
-  border-bottom: 1px solid #eceef1;
-}
-.toggle {
-  width: 20px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-}
-</style>

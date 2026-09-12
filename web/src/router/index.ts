@@ -49,7 +49,7 @@ export const router = createRouter({
           path: 'workspaces/:workspaceId/tasks',
           name: 'workspace-tasks',
           component: () => import('../views/TaskTreeView.vue'),
-          meta: { auth: 'required' },
+          meta: { auth: 'required', wide: true },
         },
         {
           path: 'workspaces/:workspaceId/approvals',
@@ -71,6 +71,8 @@ declare module 'vue-router' {
   interface RouteMeta {
     /** required=未登录跳 /login 并带 from；optional/缺省=匿名可看，视图自行降级 */
     auth?: 'required' | 'optional'
+    /** wide=内容列放宽（任务树等双栏视图需要横向空间） */
+    wide?: boolean
   }
 }
 
