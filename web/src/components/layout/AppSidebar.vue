@@ -24,7 +24,7 @@ const NAV_ITEMS: NavItem[] = [
         v-for="item in NAV_ITEMS"
         :key="item.to"
         :to="item.to"
-        class="rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&.router-link-active]:bg-sidebar-accent [&.router-link-active]:text-sidebar-accent-foreground"
+        class="rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&.router-link-exact-active]:bg-sidebar-accent [&.router-link-exact-active]:text-sidebar-accent-foreground"
       >
         {{ item.label }}
       </RouterLink>

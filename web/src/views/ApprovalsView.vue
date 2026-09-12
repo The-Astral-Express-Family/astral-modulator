@@ -6,7 +6,6 @@ import { computed, onMounted, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { decideApproval, listApprovals } from '@/api/modules/workspace'
 import type { Approval } from '@/api/types'
-import { useSessionStore } from '@/stores/session'
 import { useApiAction } from '@/composables/useApiAction'
 import { usePolling } from '@/composables/usePolling'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
@@ -26,7 +25,6 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 
-const session = useSessionStore()
 const workspaceId = useWorkspaceId()
 const { error, run } = useApiAction()
 
@@ -83,7 +81,6 @@ async function confirmDecision(): Promise<void> {
 }
 
 onMounted(async () => {
-  await session.boot()
   await load()
   start()
 })

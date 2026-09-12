@@ -29,8 +29,8 @@ function setAccessToken(pair: { access_token: string; expires_in: number }): voi
   accessExpiresAt = Date.now() + pair.expires_in * 1000
 }
 
-// scheduleRenewal 到期前 60s 静默续期；失败不打断用户（Cookie 兜底），
-// 下一次 API 401 时由登录页流程处理。
+// scheduleRenewal 到期前 60s 静默续期；失败不打断用户（Cookie 兜底）。
+// 会话真正失效时由全局 401 出口接管（main.ts 注入 api/client，见 expireSession）。
 function scheduleRenewal(): void {
   if (renewalTimer) clearTimeout(renewalTimer)
   if (!accessToken) return
@@ -63,6 +63,7 @@ export const useSessionStore = defineStore('session', () => {
   const capabilities = ref<Capabilities | null>(null)
   const booted = ref(false)
   const bootError = ref<string | null>(null)
+  let bootPromise: Promise<void> | null = null
 
   const isLoggedIn = computed(() => actor.value !== null)
 
@@ -75,9 +76,14 @@ export const useSessionStore = defineStore('session', () => {
     actor.value = me.actor
   }
 
-  /** 启动：well-known + 尝试 Cookie 续期恢复会话。 */
-  async function boot(): Promise<void> {
-    if (booted.value) return
+  /** 启动：well-known + 尝试 Cookie 续期恢复会话。并发安全：in-flight 复用同一 Promise。 */
+  function boot(): Promise<void> {
+    if (!bootPromise) bootPromise = runBoot()
+    return bootPromise
+  }
+
+  /** boot 的实际执行体；内部各步骤均已捕获，不会 reject（缓存该 Promise 是安全的）。 */
+  async function runBoot(): Promise<void> {
     try {
       wellKnown.value = await getWellKnown()
     } catch (e) {
@@ -110,5 +116,11 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  return { actor, wellKnown, capabilities, booted, bootError, isLoggedIn, boot, login, logout }
+  /** 本地会话失效（全局 401 出口调用）：清 token 与身份，不调服务端。 */
+  function expireSession(): void {
+    clearSession()
+    actor.value = null
+  }
+
+  return { actor, wellKnown, capabilities, booted, bootError, isLoggedIn, boot, login, logout, expireSession }
 })

@@ -11,14 +11,13 @@ import WorkspaceListCard from '@/components/dashboard/WorkspaceListCard.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 
 const session = useSessionStore()
 const { error: wsError, run } = useApiAction()
 const workspaces = ref<Workspace[]>([])
 
+// 路由守卫已保证 boot 完成后再挂载；未登录时本页匿名可看（下方登录引导卡片）。
 onMounted(async () => {
-  await session.boot()
   if (!session.isLoggedIn) return
   await run(async () => {
     workspaces.value = (await listWorkspaces()).items
@@ -30,22 +29,7 @@ onMounted(async () => {
   <div class="flex flex-col gap-4">
     <PageHeader title="总览" />
 
-    <!-- boot 未完成：Card 骨架占位。 -->
-    <div v-if="!session.booted" class="flex flex-col gap-4">
-      <Card v-for="i in 3" :key="i">
-        <CardHeader>
-          <Skeleton class="h-5 w-28" />
-          <Skeleton class="h-4 w-48" />
-        </CardHeader>
-        <CardContent class="flex flex-col gap-2">
-          <Skeleton class="h-4 w-full" />
-          <Skeleton class="h-4 w-2/3" />
-        </CardContent>
-      </Card>
-    </div>
-
-    <div v-else class="flex flex-col gap-4">
-      <ServerCard v-if="session.wellKnown" :well-known="session.wellKnown" />
+    <ServerCard v-if="session.wellKnown" :well-known="session.wellKnown" />
 
       <!-- 未登录：提示 + 登录入口。 -->
       <Card v-if="!session.isLoggedIn">
@@ -61,9 +45,8 @@ onMounted(async () => {
           </Button>
         </CardContent>
       </Card>
-      <WorkspaceListCard v-else :workspaces="workspaces" :error="wsError" />
+    <WorkspaceListCard v-else :workspaces="workspaces" :error="wsError" />
 
-      <CapabilitiesCard v-if="session.capabilities" :capabilities="session.capabilities" />
-    </div>
+    <CapabilitiesCard v-if="session.capabilities" :capabilities="session.capabilities" />
   </div>
 </template>

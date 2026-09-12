@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Device Flow 人类审批页（architecture §8.2 / TODO.md A3）：
 // CLI 发起登录后 verification_uri 指向 /device?code=XXXX-XXXX。
-// 需先登录（未登录跳转 /login 并带 redirect）。
+// 需先登录 —— 由路由守卫统一拦截（未登录带 from 跳 /login，登录后原路返回）。
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
@@ -10,9 +10,7 @@ import {
   findDeviceAuthorization,
 } from '@/api/modules/auth'
 import type { DeviceAuthorizationView } from '@/api/modules/auth'
-import { useSessionStore } from '@/stores/session'
 import { useApiAction } from '@/composables/useApiAction'
-import { useLoginRedirect } from '@/composables/useLoginRedirect'
 import { usePolling } from '@/composables/usePolling'
 import DeviceAuthorizationCard from '@/components/device/DeviceAuthorizationCard.vue'
 import DeviceCodeLookup from '@/components/device/DeviceCodeLookup.vue'
@@ -21,9 +19,7 @@ import PageHeader from '@/components/shared/PageHeader.vue'
 import StatusBadge from '@/components/shared/StatusBadge.vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
-const session = useSessionStore()
 const route = useRoute()
-const { redirectToLogin } = useLoginRedirect()
 
 const view = ref<DeviceAuthorizationView | null>(null)
 const manualCode = ref('')
@@ -74,10 +70,6 @@ async function lookup(code: string): Promise<void> {
   terminal.value = null
   view.value = null
   stop()
-  if (!session.isLoggedIn) {
-    redirectToLogin(route.fullPath)
-    return
-  }
   await run(async () => {
     view.value = await findDeviceAuthorization(code)
   })

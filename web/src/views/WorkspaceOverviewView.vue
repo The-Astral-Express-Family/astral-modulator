@@ -15,9 +15,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/u
 import { useEventStream } from '@/composables/useEventStream'
 import type { SseState } from '@/composables/useEventStream'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
-import { useSessionStore } from '@/stores/session'
 
-const session = useSessionStore()
 // 路由参数保持响应式：/workspaces/a → /workspaces/b 组件复用时正确重载。
 const workspaceId = useWorkspaceId()
 const workspace = ref<Workspace | null>(null)
@@ -30,12 +28,12 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
   closed: 'outline',
 }
 
+// 路由守卫保证登录态后本页才可到达；401（会话中途失效）由全局出口跳登录。
 async function load(): Promise<void> {
-  await session.boot()
   try {
     workspace.value = await getWorkspace(workspaceId.value)
   } catch {
-    workspace.value = null // 401 未登录 / 404 无权限；UI 显示占位
+    workspace.value = null // 404 不存在 / 403 无权限；UI 显示占位
   }
 }
 
