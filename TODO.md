@@ -416,6 +416,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-09 | 第 7 轮：refresh 并发轮换改条件更新：输家收到 401（token 已被替换），不再误触整族撤销 | 行为 | CLI |
 | 2026-09-09 | 第 8 轮：新增端点 POST/GET `/workspaces/{id}/approvals`、POST `/approvals/{id}/approve|deny`（T-ws-6，architecture §22）；新增错误码 `APPROVAL_EXPIRED`（409）；MVP 仅开放 `membership.promote_owner`，approve 同事务执行并重用 workspace.member.changed 事件（data.change=promoted） | 补充 | CLI/Web |
 | 2026-09-09 | 第 9 轮：新增端点 PUT/DELETE `/tasks/{id}/tags/{tag_id}`（D11，attach/detach 幂等；attach 响应=Task 含 tags）；task.updated 事件 data 增补 `tag_change`/`tag_id`；session 绝对寿命 90d（超期 refresh 返回 TOKEN_EXPIRED）；撤销（session family/credential/logout）后该 actor 的 SSE 流主动断开 | 行为 | CLI/Web |
+| 2026-09-12 | 第 10 轮：actors 表增 `bio`/`avatar_url`（00012，头像仅 http(s) 外链，服务端不抓取）；新增端点 `PATCH /auth/me`（部分更新语义：display_name/bio/avatar_url）；`Me` 响应增 `email`（human 只读）；Actor schema 增 `bio`/`avatar_url`。同时修复 /auth/register、/auth/login、/auth/me 直接序列化 model.Actor 导致字段名 PascalCase 与契约 snake_case 漂移的潜伏 bug（auth 模块引入 actorDTO） | 补充+修复 | CLI/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 

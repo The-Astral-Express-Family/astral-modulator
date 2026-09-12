@@ -396,9 +396,10 @@ func (s *Service) notifyRevoked(actorID string) {
 	}
 }
 
-// MeResponse 是 /auth/me 的响应体。
+// MeResponse 是 /auth/me、/auth/login、/auth/register 共用的响应体。
 type MeResponse struct {
-	Actor   model.Actor  `json:"actor"`
+	Actor   actorDTO     `json:"actor"`
+	Email   string       `json:"email,omitempty"` // human 本地登录邮箱；agent/service 省略
 	Session *SessionInfo `json:"session,omitempty"`
 }
 
