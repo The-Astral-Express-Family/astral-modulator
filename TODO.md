@@ -550,6 +550,44 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
     的黑盒验证）。
 - CLI 侧对应提交：astral-cli@c055744、f2cf2f3、8b51332（卫生轮验收修复）。
 
+### 第 23 轮（2026-09-13）：双线并行开发整合（merge origin/main）+ 全栈 E2E 回归
+
+> 远端 modenicheng 在本线 rounds 13-22 期间并行落地了 用户资料系统
+> （actors.bio/avatar_url + PATCH /auth/me + web 个人页）、astral-bootstrap
+> 交互式向导、godotenv .env 预加载、shadcn-vue reka-nova 主题重构 +
+> MainLayout/路由守卫。本轮合并两条线并解决冲突，全栈回归。
+
+- **合并与冲突解决**（10 文件冲突，双侧功能均保留）：
+  - **auth DTO 双轨合一**：远端为资料功能引入的私有 `actorDTO` 并入 round 20
+    的全仓单一来源 `ActorDTO`（增补 bio/avatar_url；AvatarURL nil→空串），
+    workspace 模块成员/agent 响应随之带上资料字段（与 openapi Actor schema
+    required 一致，wire 无破坏）；`newActorDTO` 删除，`meBody`（human 邮箱
+    查询）保留为 Me 响应组装单点；
+  - router：取远端 MainLayout + meta.auth 子路由结构，`workspace-tasks`
+    路由补回（auth: required）；5 个冲突视图取远端主题版，总览页补回
+    「任务树」入口；error/notice 文本色工具类移植进新 `index.css`
+    （TaskTreeView 等仍依赖）；
+  - openapi/TODO.md 双侧条目均保留，登记整合记录。
+- **验证**：server `go build/vet/test` 全绿（openapi↔路由契约测试含新
+  PATCH /auth/me）；web `vue-tsc` + `vite build` 全绿；openapi redocly
+  valid；astral-cli 92/92。
+- **端到端联测（本地栈：PG 18 临时实例 :5439 + 真服务器 + 真 CLI + 浏览器）**：
+  - CLI 全命令面：register/login（设备流 Web API 审批）/whoami/init/
+    todo add·list·search(fuzzy)/tags 两步确认/msg send/list 全通；
+  - `event listen --max-events 2`：todo add + msg send 触发双事件，
+    JSON Lines 按序、干净退出（round 22 场景 A 回归）；
+  - SSE 订阅授权回归：匿名 401 / 非成员 404（不泄露存在性）；
+  - 整合新面：PATCH/GET /auth/me（bio/avatar_url）；workspace members
+    响应含统一 ActorDTO 资料字段；astral-bootstrap 向导全流程（迁移校验、
+    server_id 沿用库中值、已有账号跳过、写 .env）；
+  - 浏览器黑盒：路由守卫匿名拦截 → 登录（新主题）→ 侧边栏用户菜单 →
+    总览 workspace 列表 → 任务树（SSE open、容器懒加载展开出子任务）→
+    个人资料页（API 写入的 bio 正确回显）。
+- **遗留观察（下轮可处理）**：astral-bootstrap 对 Public URL 缺 URL 形状
+  校验（任意字符串可写入 .env）；web 侧 SSE 封装双轨（远端 `useEventStream`
+  vs 本线 `useWorkspaceEvents`）可择一收敛；自动化无障碍点击在 reka-ui
+  Button 上超时（真用户点击正常，测试基建观察项，非应用 bug）。
+
 
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
