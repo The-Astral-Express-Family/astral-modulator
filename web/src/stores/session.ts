@@ -10,6 +10,8 @@ import { formatApiError, setAuthTokenProvider } from '../api/client'
 import { getCapabilities, getWellKnown } from '../api/modules/core'
 import * as authApi from '../api/modules/auth'
 import type { Actor, Capabilities, WellKnown } from '../api/types'
+import { TASKS_MOCK } from '../lib/mockMode'
+import { DEMO_ACTOR, DEMO_CAPABILITIES, DEMO_WELL_KNOWN } from '../mocks/fixture'
 
 // access token 内存态（模块级，刷新页面即失效——符合文档要求不进 JS 可读持久存储）。
 let accessToken: string | null = null
@@ -90,6 +92,12 @@ export const useSessionStore = defineStore('session', () => {
     try {
       wellKnown.value = await getWellKnown()
     } catch (e) {
+      if (TASKS_MOCK) {
+        // dev 演示兜底（后端不可达）：落演示登录态让任务视图可离线查看。
+        applyDemoIdentity()
+        booted.value = true
+        return
+      }
       bootError.value = formatApiError(e)
       booted.value = true
       return
@@ -99,10 +107,21 @@ export const useSessionStore = defineStore('session', () => {
     } catch {
       actor.value = null // 未登录（正常路径）
     }
+    if (!actor.value && TASKS_MOCK) {
+      // dev 演示兜底（后端在线但未登录）：任务视图的 mock 数据不要求真实会话。
+      // 后端在线时 wellKnown/capabilities 用真实值，仅身份为演示占位。
+      applyDemoIdentity()
+    }
     try {
       capabilities.value = await getCapabilities()
     } catch { /* 未登录时 capabilities 也可匿名访问；失败不阻塞 */ }
     booted.value = true
+  }
+
+  function applyDemoIdentity(): void {
+    if (!wellKnown.value) wellKnown.value = DEMO_WELL_KNOWN
+    actor.value = DEMO_ACTOR
+    if (!capabilities.value) capabilities.value = DEMO_CAPABILITIES
   }
 
   async function login(email: string, password: string): Promise<void> {

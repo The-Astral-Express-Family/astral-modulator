@@ -3,7 +3,7 @@
 // = 根层，task 容器 = 子层）；平面查询走 task-search（至少一个过滤条件）。
 
 import { apiFetch, apiPath } from '../client'
-import type { Page, Task, TaskSearchHit } from '../types'
+import type { Lease, Page, Task, TaskPriority, TaskSearchHit } from '../types'
 
 export interface TaskFilterParams {
   status?: string
@@ -48,4 +48,89 @@ export function searchTasks(
 // 详情响应填充 lease（tags/children_count 集合响应也带，详情另有 lease）。
 export function getTask(taskId: string): Promise<Task> {
   return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`)
+}
+
+// ---- 写操作（round 25 任务视图 UI 移植；端点在 v2 中未变，集合寻址见上）----
+
+export interface TaskCreatePayload {
+  title: string
+  description?: string
+  priority?: TaskPriority
+  /** 已存在 tag 名（按规范化名解析；任一不存在 → 404，整体不创建） */
+  tags?: string[]
+}
+
+// v2（D15）：创建 = 向容器 POST children；workspace 容器 = 根任务，task 容器 = 子任务。
+export function createRoot(workspaceId: string, payload: TaskCreatePayload): Promise<Task> {
+  return apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/children`, {
+    method: 'POST',
+    body: payload,
+  })
+}
+
+export function createChild(taskId: string, payload: TaskCreatePayload): Promise<Task> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/children`, {
+    method: 'POST',
+    body: payload,
+  })
+}
+
+export interface TaskUpdatePayload {
+  expected_revision: number
+  title?: string
+  description?: string
+  status?: string
+  priority?: string
+  assignee_actor_id?: string | null
+}
+
+// 乐观并发：expected_revision 不符 → 409 REVISION_CONFLICT（details.current_revision）。
+export function updateTask(taskId: string, payload: TaskUpdatePayload): Promise<Task> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH',
+    body: payload,
+  })
+}
+
+// 认领：事务内条件更新抢租约；竞争失败 409 TASK_ALREADY_CLAIMED。
+export function claimTask(
+  taskId: string,
+  payload: { expected_revision: number; lease_seconds?: number },
+): Promise<{ task: Task; lease: Lease }> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/claim`, {
+    method: 'POST',
+    body: payload,
+  })
+}
+
+export function renewLease(taskId: string, leaseSeconds?: number): Promise<Lease> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/lease/renew`, {
+    method: 'POST',
+    body: leaseSeconds ? { lease_seconds: leaseSeconds } : {},
+  })
+}
+
+// 释放：仅 holder（或 task:override）；清租约 + 清 assignee + in_progress→open。
+export function releaseLease(taskId: string): Promise<void> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/lease`, { method: 'DELETE' })
+}
+
+// attach 幂等：已关联时返回当前 Task、不 bump revision。
+export function attachTaskTag(
+  taskId: string,
+  tagId: string,
+  expectedRevision?: number,
+): Promise<Task> {
+  return apiFetch(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/tags/${encodeURIComponent(tagId)}`,
+    { method: 'PUT', body: expectedRevision ? { expected_revision: expectedRevision } : {} },
+  )
+}
+
+// detach 幂等：未关联时 204、不 bump revision。
+export function detachTaskTag(taskId: string, tagId: string): Promise<void> {
+  return apiFetch(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/tags/${encodeURIComponent(tagId)}`,
+    { method: 'DELETE' },
+  )
 }
