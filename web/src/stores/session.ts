@@ -59,6 +59,8 @@ function clearSession(): void {
 
 export const useSessionStore = defineStore('session', () => {
   const actor = ref<Actor | null>(null)
+  // 登录邮箱（human 只读展示；Me.email，agent/service 会话为 null）。
+  const email = ref<string | null>(null)
   const wellKnown = ref<WellKnown | null>(null)
   const capabilities = ref<Capabilities | null>(null)
   const booted = ref(false)
@@ -74,6 +76,7 @@ export const useSessionStore = defineStore('session', () => {
     scheduleRenewal()
     const me = await authApi.getMe()
     actor.value = me.actor
+    email.value = me.email ?? null
   }
 
   /** 启动：well-known + 尝试 Cookie 续期恢复会话。并发安全：in-flight 复用同一 Promise。 */
@@ -113,6 +116,7 @@ export const useSessionStore = defineStore('session', () => {
     } finally {
       clearSession()
       actor.value = null
+      email.value = null
     }
   }
 
@@ -120,7 +124,8 @@ export const useSessionStore = defineStore('session', () => {
   function expireSession(): void {
     clearSession()
     actor.value = null
+    email.value = null
   }
 
-  return { actor, wellKnown, capabilities, booted, bootError, isLoggedIn, boot, login, logout, expireSession }
+  return { actor, email, wellKnown, capabilities, booted, bootError, isLoggedIn, boot, login, logout, expireSession }
 })

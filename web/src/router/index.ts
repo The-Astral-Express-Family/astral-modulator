@@ -34,6 +34,12 @@ export const router = createRouter({
           meta: { auth: 'required' },
         },
         {
+          path: 'profile',
+          name: 'profile',
+          component: () => import('../views/ProfileView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
           path: 'workspaces/:workspaceId',
           name: 'workspace-overview',
           component: () => import('../views/WorkspaceOverviewView.vue'),
