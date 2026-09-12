@@ -38,6 +38,15 @@ export function setAuthTokenProvider(fn: () => string | null): void {
   tokenProvider = fn
 }
 
+// 401 统一出口：由 main.ts 注入（需要 router/session，client 保持零依赖）。
+// 登录态下的会话失效在此收敛为「清会话 + 跳登录」；匿名探测（boot 等）的
+// 401 由注入方自行忽略。
+let unauthorizedHandler: (() => void) | null = null
+
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  unauthorizedHandler = fn
+}
+
 function newRequestId(): string {
   // req_ 前缀 + 随机串；服务端会原样回显。
   return `req_${crypto.randomUUID()}`
@@ -92,6 +101,7 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
   }
 
   if (!resp.ok) {
+    if (resp.status === 401) unauthorizedHandler?.()
     const env = json as { error?: ApiErrorBody } | undefined
     if (env?.error) {
       throw new AstralApiError(resp.status, {

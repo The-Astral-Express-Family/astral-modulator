@@ -33,6 +33,7 @@ func (m *Module) RegisterPublic(r chi.Router) {
 // RegisterPrivate 挂载需要鉴权的 /auth/* 端点。路径裁决见 TODO.md D1/D2/A3。
 func (m *Module) RegisterPrivate(r chi.Router) {
 	r.Get("/auth/me", m.me)
+	r.Patch("/auth/me", m.updateMe)
 	// 审批页 API（A3）—— 需 human session
 	r.Get("/auth/device/authorizations", m.findForApproval)
 	r.Post("/auth/device/authorizations/{id}/approve", m.approve)
@@ -49,7 +50,7 @@ func (m *Module) register(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusCreated, MeResponse{Actor: ToActorDTO(*actor)})
+	httpx.WriteOK(w, r, http.StatusCreated, m.meBody(r.Context(), *actor))
 }
 
 func (m *Module) login(w http.ResponseWriter, r *http.Request) {
@@ -66,10 +67,9 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setSessionCookie(w, r, refresh, int(m.Svc.RefreshTTL.Seconds()))
-	httpx.WriteOK(w, r, http.StatusOK, MeResponse{
-		Actor:   ToActorDTO(*actor),
-		Session: &SessionInfo{ClientType: "web"},
-	})
+	resp := m.meBody(r.Context(), *actor)
+	resp.Session = &SessionInfo{ClientType: "web"}
+	httpx.WriteOK(w, r, http.StatusOK, resp)
 }
 
 func (m *Module) refreshToken(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +119,34 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 	}
 	// TODO(phase-6): 附 session 过期时间（Principal 已带 SessionID；MeResponse
 	// 契约增补属协议变更，需走 openapi 流程并登记 TODO.md §9）。
-	httpx.WriteOK(w, r, http.StatusOK, MeResponse{Actor: ToActorDTO(actor)})
+	httpx.WriteOK(w, r, http.StatusOK, m.meBody(r.Context(), actor))
+}
+
+// updateMe 是 PATCH /auth/me：改自己的资料（display_name/bio/avatar_url）。
+func (m *Module) updateMe(w http.ResponseWriter, r *http.Request) {
+	var in UpdateProfileInput
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	p := PrincipalFrom(r.Context())
+	actor, err := m.Svc.UpdateProfile(r.Context(), p.ActorID, in)
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	httpx.WriteOK(w, r, http.StatusOK, m.meBody(r.Context(), *actor))
+}
+
+// meBody 组装 Me 响应：actor DTO + human 登录邮箱。邮箱查询失败不致命
+// （省略字段），身份本身已由中间件担保。
+func (m *Module) meBody(ctx context.Context, actor model.Actor) MeResponse {
+	resp := MeResponse{Actor: ToActorDTO(actor)}
+	if email, err := m.Svc.HumanEmail(ctx, actor.ID); err == nil {
+		resp.Email = email
+	} else {
+		m.Svc.Log.Warn("me: human email lookup failed", "actor_id", actor.ID, "err", err)
+	}
+	return resp
 }
 
 func (m *Module) createDeviceAuthorization(w http.ResponseWriter, r *http.Request) {

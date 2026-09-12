@@ -85,11 +85,13 @@ web/*.local
 # ---- env / secrets（凭证只进系统 Credential Store 或 secret manager）----
 .env
 .env.*
+!.env.example
 
 # ---- editors/tooling ----
 .idea/
 .vscode/
 redocly.ignore
+.v2c/
 
 # ---- TS build cache ----
 *.tsbuildinfo

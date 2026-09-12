@@ -64,6 +64,8 @@ export interface Actor {
   id: ID
   kind: 'human' | 'agent' | 'service'
   display_name: string
+  bio: string
+  avatar_url: string
 }
 
 export interface Workspace {

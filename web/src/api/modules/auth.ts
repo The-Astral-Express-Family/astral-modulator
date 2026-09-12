@@ -6,6 +6,7 @@ import type { Actor, ID } from '../types'
 
 export interface MeResponse {
   actor: Actor
+  email?: string
   session?: { client_type: 'cli' | 'web'; expires_at?: string }
 }
 
@@ -32,6 +33,17 @@ export function logout(): Promise<void> {
 
 export function getMe(): Promise<MeResponse> {
   return apiFetch('/api/v1/auth/me')
+}
+
+export interface UpdateMeInput {
+  display_name?: string
+  bio?: string
+  avatar_url?: string
+}
+
+/** 更新自己的资料（PATCH 部分更新：出现的字段才提交）。 */
+export function updateMe(input: UpdateMeInput): Promise<MeResponse> {
+  return apiFetch('/api/v1/auth/me', { method: 'PATCH', body: input })
 }
 
 // ---- device 审批页（A3）----

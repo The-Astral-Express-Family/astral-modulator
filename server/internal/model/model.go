@@ -5,13 +5,16 @@ package model
 
 import "time"
 
-// Actor 见 00001_init.sql / architecture §6.1。
+// Actor 见 00001_init.sql / architecture §6.1；bio/avatar_url 见 00012_actor_profile.sql。
 type Actor struct {
 	ID          string `gorm:"primaryKey;size:40"`
 	Kind        string `gorm:"size:16"` // human | agent | service
 	DisplayName string `gorm:"size:200"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	Bio         string `gorm:"size:500"`
+	// AvatarURL 是头像外链（http/https）；nil = 未设置，由 API 层序列化为空串。
+	AvatarURL *string `gorm:"size:500"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	// Human 本地登录凭证在 human_auth 表（D6）；OIDC subject 字段后续迁移再加。
 }
 

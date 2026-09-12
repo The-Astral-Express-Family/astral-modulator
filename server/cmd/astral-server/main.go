@@ -13,6 +13,8 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/joho/godotenv"
+
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/app"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
@@ -37,6 +39,12 @@ func main() {
 }
 
 func run() error {
+	// 本地开发便利：存在 .env 时预加载（shell 已设置的真实环境变量优先，godotenv 不覆盖）。
+	// .env 已被 .gitignore 忽略，严禁提交真实凭证；模板见 server/.env.example。
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		slog.Warn("failed to load .env; ignoring", "err", err)
+	}
+
 	cfg := config.Load()
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(log)

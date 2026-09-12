@@ -391,22 +391,30 @@ func (s *Service) notifyRevoked(actorID string) {
 	}
 }
 
-// ActorDTO 是 actor 的公网形状（openapi Actor schema：id/kind/display_name），
-// 全仓单一来源：workspace 模块的 member/agent 响应复用本类型，不手写平行 DTO。
-// 直接序列化 model.Actor 会漏出大写字段名（E2E round 20 发现）。
+// ActorDTO 是 actor 的公网形状（openapi Actor schema：id/kind/display_name/
+// bio/avatar_url），全仓单一来源：workspace 模块的 member/agent 响应复用本
+// 类型，不手写平行 DTO。直接序列化 model.Actor 会漏出大写字段名（E2E round 20
+// 发现）；bio/avatar_url 恒为 string，空串 = 未设置。
 type ActorDTO struct {
 	ID          string `json:"id"`
 	Kind        string `json:"kind"`
 	DisplayName string `json:"display_name"`
+	Bio         string `json:"bio"`
+	AvatarURL   string `json:"avatar_url"`
 }
 
 func ToActorDTO(a model.Actor) ActorDTO {
-	return ActorDTO{ID: a.ID, Kind: a.Kind, DisplayName: a.DisplayName}
+	avatar := ""
+	if a.AvatarURL != nil {
+		avatar = *a.AvatarURL
+	}
+	return ActorDTO{ID: a.ID, Kind: a.Kind, DisplayName: a.DisplayName, Bio: a.Bio, AvatarURL: avatar}
 }
 
-// MeResponse 是 /auth/me、/auth/register、/auth/login 的响应体。
+// MeResponse 是 /auth/me、/auth/login、/auth/register 共用的响应体。
 type MeResponse struct {
 	Actor   ActorDTO     `json:"actor"`
+	Email   string       `json:"email,omitempty"` // human 本地登录邮箱；agent/service 省略
 	Session *SessionInfo `json:"session,omitempty"`
 }
 

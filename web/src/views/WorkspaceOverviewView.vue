@@ -1,58 +1,100 @@
+<!-- Workspace 总览：工作区信息 + 实时事件流（presence / TODO 树 phase-3+ 逐步实装）。 -->
 <script setup lang="ts">
-// Workspace 总览：详情与实时事件流（presence/消息/文档视图见 TODO.md phase-4/5）。
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { getWorkspace } from '../api/modules/core'
-import { useWorkspaceEvents } from '../composables/useWorkspaceEvents'
-import { useSessionStore } from '../stores/session'
-import type { EventEnvelope, Workspace } from '../api/types'
+import { onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { getWorkspace } from '@/api/modules/core'
+import type { Workspace } from '@/api/types'
+import JsonBlock from '@/components/shared/JsonBlock.vue'
+import KeyValue from '@/components/shared/KeyValue.vue'
+import PageHeader from '@/components/shared/PageHeader.vue'
+import { Badge } from '@/components/ui/badge'
+import type { BadgeVariants } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { useEventStream } from '@/composables/useEventStream'
+import type { SseState } from '@/composables/useEventStream'
+import { useWorkspaceId } from '@/composables/useWorkspaceId'
 
-const route = useRoute()
-const session = useSessionStore()
 // 路由参数保持响应式：/workspaces/a → /workspaces/b 组件复用时正确重载。
-const workspaceId = computed(() => route.params.workspaceId as string)
+const workspaceId = useWorkspaceId()
 const workspace = ref<Workspace | null>(null)
-const events = ref<EventEnvelope[]>([])
+// 事件缓冲与 SSE 生命周期（订阅 / 重订 / 退订）由 useEventStream 托管。
+const { events, state: sseState } = useEventStream(workspaceId)
 
-const { sseState, subscribe } = useWorkspaceEvents(workspaceId, (env) => {
-  events.value.unshift(env)
-  if (events.value.length > 50) events.value.pop()
-})
+const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
+  connecting: 'secondary',
+  open: 'default',
+  closed: 'outline',
+}
 
+// 路由守卫保证登录态后本页才可到达；401（会话中途失效）由全局出口跳登录。
 async function load(): Promise<void> {
-  await session.boot()
   try {
     workspace.value = await getWorkspace(workspaceId.value)
   } catch {
-    workspace.value = null // 401 未登录 / 404 无权限；UI 显示占位
+    workspace.value = null // 404 不存在 / 403 无权限；UI 显示占位
   }
-  subscribe()
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+})
+
 watch(workspaceId, () => {
-  events.value = []
   void load()
 })
 </script>
 
 <template>
-  <h2>Workspace</h2>
-  <div class="card">
-    <p>id: <code>{{ workspaceId }}</code></p>
-    <p class="muted">
-      {{ workspace ? workspace.name : '（无权访问或不存在）' }}
-    </p>
-    <p>
-      SSE 状态：{{ sseState }}
-      · <RouterLink :to="`/workspaces/${workspaceId}/tasks`">任务树</RouterLink>
-      · <RouterLink :to="`/workspaces/${workspaceId}/approvals`">裁决队列</RouterLink>
-    </p>
-  </div>
-  <div class="card">
-    <h3>实时事件</h3>
-    <pre>{{ events.length ? JSON.stringify(events.slice(0, 10), null, 2) : '（等待事件…）' }}</pre>
-  </div>
+  <PageHeader title="工作区总览" description="工作区基础信息与实时事件流。" />
+
+  <Card>
+    <CardHeader>
+      <CardTitle>工作区信息</CardTitle>
+    </CardHeader>
+    <CardContent class="flex flex-col gap-3">
+      <KeyValue label="ID" :value="workspaceId" />
+      <KeyValue v-if="workspace" label="名称" :value="workspace.name" />
+      <KeyValue v-if="workspace" label="Code" :value="workspace.slug" />
+      <div class="flex items-center justify-between gap-4">
+        <span class="text-sm text-muted-foreground">SSE 状态</span>
+        <Badge :variant="SSE_VARIANTS[sseState]">{{ sseState }}</Badge>
+      </div>
+      <div class="flex w-fit gap-2">
+        <Button as-child>
+          <RouterLink :to="`/workspaces/${workspaceId}/tasks`">任务树</RouterLink>
+        </Button>
+        <Button as-child variant="outline">
+          <RouterLink :to="`/workspaces/${workspaceId}/approvals`">裁决队列</RouterLink>
+        </Button>
+      </div>
+    </CardContent>
+  </Card>
+
+  <Empty v-if="!workspace">
+    <EmptyHeader>
+      <EmptyTitle>（无权访问或不存在）</EmptyTitle>
+      <EmptyDescription>当前工作区不存在，或登录态不足以访问。</EmptyDescription>
+    </EmptyHeader>
+  </Empty>
+
+  <Card>
+    <CardHeader>
+      <CardTitle>实时事件</CardTitle>
+    </CardHeader>
+    <CardContent>
+      <JsonBlock v-if="events.length > 0" :value="events" />
+      <Empty v-else>
+        <EmptyHeader>
+          <EmptyTitle>（等待事件…）</EmptyTitle>
+          <EmptyDescription>订阅已建立，事件到达后展示在此（最多保留 50 条）。</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </CardContent>
+  </Card>
+
+  <!-- TODO(phase-3): TODO 树视图（搜索框支持 regex+fuzzy 双输入，对应 CLI --regex/--fuzzy）。 -->
   <!-- TODO(phase-4): presence 总览、消息流。 -->
   <!-- TODO(phase-5): 文档活动与冲突解决。 -->
 </template>

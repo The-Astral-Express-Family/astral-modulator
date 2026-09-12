@@ -720,6 +720,8 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-12 | 第 21 轮：openapi Task schema required 补齐 parent_id/description/priority/assignee_actor_id（服务端恒序列化、web 类型一致，契约文档落后于实现的修正，无 wire 变化）；TokenPair.refresh_token 补 cookie 模式省略说明；悬空 responses 组件补齐；死 schemas.NotFound 删除、schemas.Conflict 正名 DocumentConflict | 契约文档 | CLI/Web（无 wire 变化） |
 | 2026-09-12 | 第 21 轮：claim 冲突时 409 details.current_revision 改为事务内重读（原为请求开头快照；并发窗口内信息更准，正常路径无差异）；task get 的 lease 查询 DB 故障改 500（原呈现为「无租约」）；renewLease 非法 JSON 改 400（原静默视为空 body）；workspace 三处次级资源 404 补「查无此行 vs DB 故障」区分 | 行为（错误路径） | CLI/Web（正常路径无差异） |
 | 2026-09-12 | 第 22 轮：`GET /workspaces/{id}/events` 补 workspace 级订阅授权（非成员 404 / scope 不足 403，与 workspace 端点同语义；此前仅要求已认证，任何主体可订阅任意 workspace 流——§11 第 10 项安全修复）；openapi 补 404/403 响应 | 行为（安全） | CLI/Web |
+| 2026-09-12 | 第 10 轮（modenicheng）：actors 表增 `bio`/`avatar_url`（00012，头像仅 http(s) 外链，服务端不抓取）；新增端点 `PATCH /auth/me`（部分更新语义：display_name/bio/avatar_url）；`Me` 响应增 `email`（human 只读）；Actor schema 增 `bio`/`avatar_url`。同时修复 /auth/register、/auth/login、/auth/me 直接序列化 model.Actor 导致字段名 PascalCase 与契约 snake_case 漂移的潜伏 bug（auth 模块引入 actorDTO） | 补充+修复 | CLI/Web |
+| 2026-09-13 | 整合轮（merge origin/main）：两侧并行开发的 DTO 双轨合一——第 10 轮引入的私有 `actorDTO` 并入 round 20 的全仓单一来源 `ActorDTO`（增补 bio/avatar_url，构造器仍为 `ToActorDTO`），workspace 模块复用点不变、openapi Actor schema（bio/avatar_url 必填）覆盖两端点；`newActorDTO` 删除 | 内部（重构） | 无（wire 不变，与 Actor schema 契约一致） |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 

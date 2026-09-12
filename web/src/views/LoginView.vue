@@ -1,50 +1,76 @@
 <script setup lang="ts">
-// Human 本地登录页（TODO.md D6）。登录成功后跳回来源页或总览。
+// Human 本地登录页（TODO.md D6）。独立布局（不套 MainLayout）。
+// 登录成功后跳回 from 指定的来源页或总览；已登录用户由路由守卫直接弹走。
 import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { formatApiError } from '../api/client'
-import { useSessionStore } from '../stores/session'
+import { useRouter } from 'vue-router'
+import { useApiAction } from '@/composables/useApiAction'
+import { useLoginRedirect } from '@/composables/useLoginRedirect'
+import { useSessionStore } from '@/stores/session'
+import ErrorAlert from '@/components/shared/ErrorAlert.vue'
+import PageHeader from '@/components/shared/PageHeader.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
 
 const session = useSessionStore()
-const route = useRoute()
 const router = useRouter()
+const { consumeRedirect } = useLoginRedirect()
+const { busy, error, run } = useApiAction()
 
 const email = ref('')
 const password = ref('')
-const error = ref<string | null>(null)
-const busy = ref(false)
 
 async function submit(): Promise<void> {
-  error.value = null
-  busy.value = true
-  try {
-    await session.login(email.value, password.value)
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-    void router.push(redirect)
-  } catch (e) {
-    error.value = formatApiError(e)
-  } finally {
-    busy.value = false
-  }
+  const ok = await run(() => session.login(email.value, password.value))
+  if (ok) void router.push(consumeRedirect() ?? '/')
 }
 </script>
 
 <template>
-  <h2>登录</h2>
-  <div class="card" style="max-width: 420px">
-    <form @submit.prevent="submit">
-      <p>
-        <label>邮箱<br /><input v-model="email" type="email" required autocomplete="username" style="width: 100%" /></label>
-      </p>
-      <p>
-        <label>密码<br /><input v-model="password" type="password" required autocomplete="current-password" style="width: 100%" /></label>
-      </p>
-      <p v-if="error" class="error-text">{{ error }}</p>
-      <button type="submit" :disabled="busy">{{ busy ? '登录中…' : '登录' }}</button>
-    </form>
-    <p class="muted">
-      首个账号通过服务器初始化时的 bootstrap 注册创建；CLI 登录请使用
-      <code>astral login</code>（设备授权流程），审批入口在「设备授权」页。
-    </p>
+  <div class="flex min-h-screen items-center justify-center px-4">
+    <div class="flex w-full max-w-md flex-col gap-4">
+      <PageHeader title="登录" />
+      <Card>
+        <CardContent>
+          <form class="flex flex-col gap-4" @submit.prevent="submit">
+            <ErrorAlert v-if="error" :message="error" />
+            <FieldGroup>
+              <Field>
+                <FieldLabel for="email">邮箱</FieldLabel>
+                <Input
+                  id="email"
+                  v-model="email"
+                  type="email"
+                  required
+                  autocomplete="username"
+                />
+              </Field>
+              <Field>
+                <FieldLabel for="password">密码</FieldLabel>
+                <Input
+                  id="password"
+                  v-model="password"
+                  type="password"
+                  required
+                  autocomplete="current-password"
+                />
+              </Field>
+            </FieldGroup>
+            <Button type="submit" :disabled="busy">
+              <Spinner v-if="busy" data-icon="inline-start" />
+              {{ busy ? '登录中…' : '登录' }}
+            </Button>
+          </form>
+        </CardContent>
+        <CardFooter>
+          <p class="text-muted-foreground text-sm">
+            首个账号通过服务器初始化时的 bootstrap 注册创建；CLI 登录请使用
+            <code>astral login</code>（设备授权流程），审批入口在「设备授权」页。
+          </p>
+        </CardFooter>
+      </Card>
+    </div>
   </div>
 </template>
