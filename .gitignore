@@ -91,6 +91,7 @@ web/*.local
 .idea/
 .vscode/
 redocly.ignore
+.v2c/
 
 # ---- TS build cache ----
 *.tsbuildinfo
