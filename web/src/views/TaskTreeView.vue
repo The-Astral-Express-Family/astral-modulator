@@ -23,7 +23,7 @@ import PageHeader from '@/components/shared/PageHeader.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import EventSimulator from '@/components/tasks/EventSimulator.vue'
@@ -58,6 +58,13 @@ const selected = ref<Task | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(false)
 const hits = ref<TaskSearchHit[]>([])
+
+// 加载态细化：展开容器的子层骨架 / 详情面板骨架 / 行更新闪烁
+const expandingIds = ref<Set<string>>(new Set())
+const detailLoading = ref(false)
+const flashIds = ref<Set<string>>(new Set())
+const seenRevisions = ref(new Map<string, number>())
+let flashTimer: ReturnType<typeof setTimeout> | null = null
 
 const createOpen = ref(false)
 const createParent = ref<{ id: string | null; title: string | null }>({ id: null, title: null })
@@ -140,11 +147,14 @@ async function refreshDetail(): Promise<void> {
 }
 
 async function openDetail(task: Pick<Task, 'id'>): Promise<void> {
+  detailLoading.value = true
   try {
     selected.value = await taskApi.getTask(task.id)
     error.value = null
   } catch (e) {
     error.value = formatApiError(e)
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -168,6 +178,7 @@ async function toggle(task: Task): Promise<void> {
   } else {
     next.add(task.id)
     if (!childrenByContainer.value.has(task.id)) {
+      expandingIds.value = new Set([...expandingIds.value, task.id])
       loading.value = true
       try {
         childrenByContainer.value.set(task.id, await fetchChildren(task.id))
@@ -177,6 +188,9 @@ async function toggle(task: Task): Promise<void> {
         next.delete(task.id)
       } finally {
         loading.value = false
+        const pending = new Set(expandingIds.value)
+        pending.delete(task.id)
+        expandingIds.value = pending
       }
     }
   }
@@ -312,6 +326,26 @@ function onStale(): void {
   void refreshDetail()
 }
 
+// ---- 行更新闪烁：revision 变化的可见行走一次底色动画（SSE/模拟事件可感知）----
+
+watch(rows, (next) => {
+  let flashed = false
+  for (const row of next) {
+    const prev = seenRevisions.value.get(row.task.id)
+    if (prev !== undefined && prev !== row.task.revision) {
+      flashIds.value = new Set([...flashIds.value, row.task.id])
+      flashed = true
+    }
+    seenRevisions.value.set(row.task.id, row.task.revision)
+  }
+  if (flashed) {
+    if (flashTimer) clearTimeout(flashTimer)
+    flashTimer = setTimeout(() => {
+      flashIds.value = new Set()
+    }, 1200)
+  }
+})
+
 onMounted(load)
 watch(workspaceId, () => {
   roots.value = []
@@ -320,10 +354,13 @@ watch(workspaceId, () => {
   hits.value = []
   selected.value = null
   mode.value = 'tree'
+  seenRevisions.value = new Map()
+  flashIds.value = new Set()
   void load()
 })
 onUnmounted(() => {
   if (reloadTimer) clearTimeout(reloadTimer)
+  if (flashTimer) clearTimeout(flashTimer)
 })
 
 const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
@@ -374,8 +411,14 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
       <!-- 左栏：树 / 搜索结果 -->
       <Card class="flex min-h-[60vh] flex-col overflow-hidden">
         <CardContent class="min-h-0 flex-1 overflow-y-auto p-2">
+          <!-- 初始加载骨架（整树） -->
           <div v-if="loading && !rows.length && mode === 'tree'" class="flex flex-col gap-2 p-2">
             <Skeleton v-for="i in 8" :key="i" class="h-8" :style="{ width: `${95 - i * 6}%` }" />
+          </div>
+
+          <!-- 搜索骨架 -->
+          <div v-else-if="loading && mode === 'search' && !hits.length" class="flex flex-col gap-2 p-2">
+            <Skeleton v-for="i in 6" :key="i" class="h-9 w-full" />
           </div>
 
           <!-- 搜索结果模式 -->
@@ -383,34 +426,39 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
             <p class="text-muted-foreground px-2 py-1 text-xs">
               查询结果（{{ hits.length }} 条）——「返回树」恢复树模式。
             </p>
-            <button
-              v-for="hit in hits"
-              :key="hit.id"
-              type="button"
-              class="hover:bg-muted/60 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
-              :class="selected?.id === hit.id ? 'bg-muted' : ''"
-              @click="openDetail(hit)"
-            >
-              <TaskStatusBadge :status="hit.status" show-label class="w-[62px] shrink-0" />
-              <TaskPriorityIcon :priority="hit.priority" />
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-sm">{{ hit.title }}</span>
-                <span class="text-muted-foreground block truncate text-xs">
-                  {{ memberName(hit.assignee_actor_id) }}
-                </span>
-              </span>
-              <Badge
-                v-for="t in hit.tags.slice(0, 2)"
-                :key="t.id"
-                variant="outline"
-                class="hidden shrink-0 lg:inline-flex"
+            <TransitionGroup v-if="hits.length" tag="div" name="tree-row" class="relative flex flex-col">
+              <button
+                v-for="hit in hits"
+                :key="hit.id"
+                type="button"
+                class="hover:bg-muted/60 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
+                :class="[
+                  selected?.id === hit.id ? 'bg-muted' : '',
+                  flashIds.has(hit.id) ? 'task-row-flash' : '',
+                ]"
+                @click="openDetail(hit)"
               >
-                {{ t.name }}
-              </Badge>
-              <Badge v-if="hit.score !== undefined" variant="outline" class="shrink-0">
-                匹配 {{ Math.round(hit.score * 100) }}%
-              </Badge>
-            </button>
+                <TaskStatusBadge :status="hit.status" show-label class="w-[62px] shrink-0" />
+                <TaskPriorityIcon :priority="hit.priority" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm">{{ hit.title }}</span>
+                  <span class="text-muted-foreground block truncate text-xs">
+                    {{ memberName(hit.assignee_actor_id) }}
+                  </span>
+                </span>
+                <Badge
+                  v-for="t in hit.tags.slice(0, 2)"
+                  :key="t.id"
+                  variant="outline"
+                  class="hidden shrink-0 lg:inline-flex"
+                >
+                  {{ t.name }}
+                </Badge>
+                <Badge v-if="hit.score !== undefined" variant="outline" class="shrink-0">
+                  匹配 {{ Math.round(hit.score * 100) }}%
+                </Badge>
+              </button>
+            </TransitionGroup>
             <Empty v-if="!loading && !hits.length">
               <EmptyHeader>
                 <EmptyTitle>没有匹配的任务。</EmptyTitle>
@@ -421,15 +469,28 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
 
           <!-- 树模式 -->
           <template v-else>
-            <TaskTreeRow
-              v-for="row in rows"
-              :key="row.task.id"
-              :row="row"
-              :selected="selected?.id === row.task.id"
-              :assignee="membersById.get(row.task.assignee_actor_id ?? '') ?? null"
-              @select="openDetail(row.task)"
-              @toggle="toggle(row.task)"
-            />
+            <TransitionGroup v-if="rows.length" tag="div" name="tree-row" class="relative flex flex-col">
+              <template v-for="row in rows" :key="row.task.id">
+                <TaskTreeRow
+                  :row="row"
+                  :selected="selected?.id === row.task.id"
+                  :assignee="membersById.get(row.task.assignee_actor_id ?? '') ?? null"
+                  :flash="flashIds.has(row.task.id)"
+                  @select="openDetail(row.task)"
+                  @toggle="toggle(row.task)"
+                />
+                <!-- 展开容器的子层懒加载骨架 -->
+                <div
+                  v-if="expandingIds.has(row.task.id)"
+                  :key="`${row.task.id}:skeleton`"
+                  class="mb-1 flex flex-col gap-1 py-1"
+                  :style="{ paddingLeft: `${(row.depth + 1) * 18 + 6}px` }"
+                >
+                  <Skeleton class="h-7 w-1/2" />
+                  <Skeleton class="h-7 w-1/3" />
+                </div>
+              </template>
+            </TransitionGroup>
             <Empty v-if="!loading && !rows.length && !error">
               <EmptyHeader>
                 <EmptyTitle>没有任务。</EmptyTitle>
@@ -448,33 +509,57 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
         </div>
       </Card>
 
-      <!-- 右栏：详情面板 -->
+      <!-- 右栏：详情面板（切换任务淡入；加载时结构化骨架） -->
       <div class="min-h-[60vh]">
-        <TaskDetailPanel
-          v-if="selected"
-          :key="selected.id"
-          :task="selected"
-          :actors-by-id="membersById"
-          :all-tags="tagDict"
-          @changed="onChanged"
-          @stale="onStale"
-          @create-subtask="openCreate(selected)"
-        />
-        <Card v-else class="flex min-h-[60vh] flex-col">
-          <CardContent class="flex flex-1 items-center justify-center">
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle class="flex items-center gap-2">
-                  <ListTree class="size-4" />
-                  选择一个任务
-                </EmptyTitle>
-                <EmptyDescription>
-                  左侧选择任务后，在此查看详情、编辑字段、管理标签与认领租约。
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          </CardContent>
-        </Card>
+        <Transition name="detail" mode="out-in">
+          <Card v-if="detailLoading" key="skeleton" class="flex h-full flex-col">
+            <CardHeader class="gap-2">
+              <Skeleton class="h-5 w-2/3" />
+              <div class="flex gap-2">
+                <Skeleton class="h-7 w-28" />
+                <Skeleton class="h-7 w-24" />
+              </div>
+            </CardHeader>
+            <CardContent class="flex flex-col gap-4">
+              <div class="flex flex-col gap-1.5">
+                <Skeleton class="h-4 w-12" />
+                <Skeleton class="h-16 w-full" />
+              </div>
+              <Skeleton class="h-px w-full" />
+              <div class="flex gap-1.5">
+                <Skeleton class="h-5 w-16 rounded-full" />
+                <Skeleton class="h-5 w-14 rounded-full" />
+              </div>
+              <Skeleton class="h-24 w-full rounded-lg" />
+              <Skeleton class="h-4 w-2/5" />
+            </CardContent>
+          </Card>
+          <TaskDetailPanel
+            v-else-if="selected"
+            :key="selected.id"
+            :task="selected"
+            :actors-by-id="membersById"
+            :all-tags="tagDict"
+            @changed="onChanged"
+            @stale="onStale"
+            @create-subtask="openCreate(selected)"
+          />
+          <Card v-else key="empty" class="flex min-h-[60vh] flex-col">
+            <CardContent class="flex flex-1 items-center justify-center">
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle class="flex items-center gap-2">
+                    <ListTree class="size-4" />
+                    选择一个任务
+                  </EmptyTitle>
+                  <EmptyDescription>
+                    左侧选择任务后，在此查看详情、编辑字段、管理标签与认领租约。
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </CardContent>
+          </Card>
+        </Transition>
       </div>
     </div>
 
@@ -493,3 +578,49 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
     />
   </div>
 </template>
+
+<style scoped>
+/* 树行进出场/重排：展开、收起、过滤变化时平滑过渡。
+   leave 用 absolute 让留存行立即上移（配合 v-move 动画）。 */
+.tree-row-enter-active {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.tree-row-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.tree-row-leave-active {
+  position: absolute;
+  width: 100%;
+  transition: opacity 120ms ease;
+}
+.tree-row-leave-to {
+  opacity: 0;
+}
+.tree-row-move {
+  transition: transform 180ms ease;
+}
+
+/* 详情面板切换淡入 */
+.detail-enter-active,
+.detail-leave-active {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.detail-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.detail-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-row-enter-active,
+  .tree-row-leave-active,
+  .tree-row-move,
+  .detail-enter-active,
+  .detail-leave-active {
+    transition: none;
+  }
+}
+</style>

@@ -16,11 +16,16 @@ export interface TreeRow {
   expanded: boolean
 }
 
-const props = defineProps<{
-  row: TreeRow
-  selected: boolean
-  assignee: Actor | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    row: TreeRow
+    selected: boolean
+    assignee: Actor | null
+    /** SSE/模拟事件更新了该任务：短暂闪烁底色提示 */
+    flash?: boolean
+  }>(),
+  { flash: false },
+)
 
 defineEmits<{ select: []; toggle: [] }>()
 
@@ -34,7 +39,7 @@ const hiddenTagCount = () => Math.max(props.row.task.tags.length - 3, 0)
   <button
     type="button"
     class="flex w-full items-center gap-1.5 rounded-md px-1 py-1.5 text-left transition-colors hover:bg-muted/60"
-    :class="selected ? 'bg-muted' : ''"
+    :class="[selected ? 'bg-muted' : '', flash ? 'task-row-flash' : '']"
     :style="{ paddingLeft: `${row.depth * 18 + 6}px` }"
     @click="$emit('select')"
   >
@@ -84,3 +89,23 @@ const hiddenTagCount = () => Math.max(props.row.task.tags.length - 3, 0)
     <UserAvatar v-if="assignee" :actor="assignee" size="sm" />
   </button>
 </template>
+
+<style scoped>
+/* 事件更新闪烁：蓝底淡出，让「实时事件驱动」可感知 */
+@keyframes task-row-flash {
+  0% {
+    background-color: color-mix(in oklab, var(--primary) 14%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.task-row-flash {
+  animation: task-row-flash 1.1s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-row-flash {
+    animation: none;
+  }
+}
+</style>

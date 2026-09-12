@@ -5,7 +5,8 @@
 // children_count 同步）；claim 原子抢租约；release 清租约+清 assignee+
 // in_progress→open；attach/detach 幂等（已关联不 bump）；租约过期清扫
 // （assignee 清空、in_progress→open、revision+1、task.lease.expired）。
-// 错误以 `CODE: 文案` 形式的 Error 抛出（formatApiError 直接可读）。
+// 所有 API 注入 ~250ms 延迟，让骨架屏/busy 态在 mock 下真实可见。
+// 错误以 `CODE: 文案` 形式的 Error 抛出（async 函数内 throw → rejected Promise）。
 
 import { useSessionStore } from '@/stores/session'
 import type { TaskApi } from '@/api/taskSource'
@@ -29,6 +30,11 @@ import {
 } from './fixture'
 
 const clone = <T>(v: T): T => structuredClone(v)
+
+// 注入网络延迟：让骨架屏/busy 态在 mock 模式下真实可见（约等于本地 API 往返）。
+const MOCK_LATENCY_MS = 250
+const sleep = (ms: number = MOCK_LATENCY_MS): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
 
 function err(code: string, message: string): never {
   throw new Error(`${code}: ${message}`)
@@ -132,17 +138,25 @@ function applyFilters(items: Task[], params: TaskFilterParams): Task[] {
   return out
 }
 
-function listWorkspaceChildren(_workspaceId: string, params: TaskFilterParams = {}): Promise<Page<Task>> {
+async function listWorkspaceChildren(
+  _workspaceId: string,
+  params: TaskFilterParams = {},
+): Promise<Page<Task>> {
+  await sleep()
   const roots = [...tasks.values()].filter((t) => t.parent_id === null)
   const items = applyFilters(roots, params).slice(0, params.limit ?? 50)
-  return Promise.resolve({ items: items.map(clone), next_cursor: null })
+  return { items: items.map(clone), next_cursor: null }
 }
 
-function listTaskChildren(taskId: string, params: TaskFilterParams = {}): Promise<Page<Task>> {
+async function listTaskChildren(
+  taskId: string,
+  params: TaskFilterParams = {},
+): Promise<Page<Task>> {
+  await sleep()
   taskOrThrow(taskId)
   const kids = [...tasks.values()].filter((t) => t.parent_id === taskId)
   const items = applyFilters(kids, params).slice(0, params.limit ?? 50)
-  return Promise.resolve({ items: items.map(clone), next_cursor: null })
+  return { items: items.map(clone), next_cursor: null }
 }
 
 function fuzzyScore(q: string, title: string, description: string): number {
@@ -156,9 +170,13 @@ function fuzzyScore(q: string, title: string, description: string): number {
   return 0.85 * hit(title) + 0.15 * hit(description)
 }
 
-function searchTasks(_workspaceId: string, params: TaskSearchParams): Promise<Page<TaskSearchHit>> {
+async function searchTasks(
+  _workspaceId: string,
+  params: TaskSearchParams,
+): Promise<Page<TaskSearchHit>> {
+  await sleep()
   if (!params.regex && !params.fuzzy && !params.tag && !params.status && !params.assignee) {
-    return Promise.reject(new Error('VALIDATION_FAILED: 至少需要一个过滤条件（regex/fuzzy/tag/status/assignee）。'))
+    err('VALIDATION_FAILED', '至少需要一个过滤条件（regex/fuzzy/tag/status/assignee）。')
   }
   let candidates = [...tasks.values()]
   if (params.tag) {
@@ -173,7 +191,7 @@ function searchTasks(_workspaceId: string, params: TaskSearchParams): Promise<Pa
     try {
       re = new RegExp(params.regex)
     } catch {
-      return Promise.reject(new Error('VALIDATION_FAILED: regex 语法无效。'))
+      err('VALIDATION_FAILED', 'regex 语法无效。')
     }
     candidates = candidates.filter((t) => re.test(t.title) || re.test(t.description))
   }
@@ -186,11 +204,12 @@ function searchTasks(_workspaceId: string, params: TaskSearchParams): Promise<Pa
     items.sort((a, b) => (a.id < b.id ? 1 : -1))
   }
   items = items.slice(0, params.limit ?? 50)
-  return Promise.resolve({ items, next_cursor: null })
+  return { items, next_cursor: null }
 }
 
-function getTask(taskId: string): Promise<Task> {
-  return Promise.resolve(clone(taskOrThrow(taskId)))
+async function getTask(taskId: string): Promise<Task> {
+  await sleep()
+  return clone(taskOrThrow(taskId))
 }
 
 function createInContainer(parentId: string | null, payload: TaskCreatePayload): Task {
@@ -228,15 +247,18 @@ function createInContainer(parentId: string | null, payload: TaskCreatePayload):
   return t
 }
 
-function createRoot(_workspaceId: string, payload: TaskCreatePayload): Promise<Task> {
-  return Promise.resolve(clone(createInContainer(null, payload)))
+async function createRoot(_workspaceId: string, payload: TaskCreatePayload): Promise<Task> {
+  await sleep()
+  return clone(createInContainer(null, payload))
 }
 
-function createChild(taskId: string, payload: TaskCreatePayload): Promise<Task> {
-  return Promise.resolve(clone(createInContainer(taskId, payload)))
+async function createChild(taskId: string, payload: TaskCreatePayload): Promise<Task> {
+  await sleep()
+  return clone(createInContainer(taskId, payload))
 }
 
-function updateTask(taskId: string, payload: TaskUpdatePayload): Promise<Task> {
+async function updateTask(taskId: string, payload: TaskUpdatePayload): Promise<Task> {
+  await sleep()
   const t = taskOrThrow(taskId)
   checkRevision(t, payload.expected_revision)
   if (payload.title !== undefined) {
@@ -251,13 +273,14 @@ function updateTask(taskId: string, payload: TaskUpdatePayload): Promise<Task> {
   t.revision += 1
   t.updated_at = new Date().toISOString()
   emitEvent('task.updated', { task_id: t.id }, t.revision)
-  return Promise.resolve(clone(t))
+  return clone(t)
 }
 
-function claimTask(
+async function claimTask(
   taskId: string,
   payload: { expected_revision: number; lease_seconds?: number },
 ): Promise<{ task: Task; lease: Lease }> {
+  await sleep()
   const t = taskOrThrow(taskId)
   checkRevision(t, payload.expected_revision)
   if (leaseActive(t)) err('TASK_ALREADY_CLAIMED', '任务已被他人认领且租约未过期。')
@@ -272,18 +295,20 @@ function claimTask(
   t.revision += 1
   t.updated_at = new Date().toISOString()
   emitEvent('task.claimed', { task_id: t.id, lease_expires_at: lease.expires_at }, t.revision)
-  return Promise.resolve({ task: clone(t), lease: clone(lease) })
+  return { task: clone(t), lease: clone(lease) }
 }
 
-function renewLease(taskId: string, leaseSeconds?: number): Promise<Lease> {
+async function renewLease(taskId: string, leaseSeconds?: number): Promise<Lease> {
+  await sleep()
   const t = taskOrThrow(taskId)
   if (!leaseActive(t)) err('TASK_LEASE_EXPIRED', '租约已过期，需重新认领。')
   t.lease!.expires_at = new Date(Date.now() + (leaseSeconds ?? 300) * 1000).toISOString()
   t.lease!.renewed_at = new Date().toISOString()
-  return Promise.resolve(clone(t.lease!))
+  return clone(t.lease!)
 }
 
-function releaseLease(taskId: string): Promise<void> {
+async function releaseLease(taskId: string): Promise<void> {
+  await sleep()
   const t = taskOrThrow(taskId)
   if (t.lease) {
     if (t.lease.holder_actor_id !== selfActorId()) {
@@ -296,39 +321,41 @@ function releaseLease(taskId: string): Promise<void> {
     t.updated_at = new Date().toISOString()
     emitEvent('task.released', { task_id: t.id }, t.revision)
   }
-  return Promise.resolve()
 }
 
-function attachTaskTag(taskId: string, tagId: string, expectedRevision?: number): Promise<Task> {
+async function attachTaskTag(taskId: string, tagId: string, expectedRevision?: number): Promise<Task> {
+  await sleep()
   const t = taskOrThrow(taskId)
   const tag = tags.find((cand) => cand.id === tagId)
   if (!tag) err('NOT_FOUND', '标签不存在。')
-  if (t.tags.some((cand) => cand.id === tagId)) return Promise.resolve(clone(t)) // 幂等：不 bump
+  if (t.tags.some((cand) => cand.id === tagId)) return clone(t) // 幂等：不 bump
   if (expectedRevision !== undefined) checkRevision(t, expectedRevision)
   t.tags.push(clone(tag))
   t.revision += 1
   t.updated_at = new Date().toISOString()
   emitEvent('task.updated', { task_id: t.id, tag_change: 'attach', tag_id: tagId }, t.revision)
-  return Promise.resolve(clone(t))
+  return clone(t)
 }
 
-function detachTaskTag(taskId: string, tagId: string): Promise<void> {
+async function detachTaskTag(taskId: string, tagId: string): Promise<void> {
+  await sleep()
   const t = taskOrThrow(taskId)
   const before = t.tags.length
   t.tags = t.tags.filter((cand) => cand.id !== tagId)
-  if (t.tags.length === before) return Promise.resolve() // 幂等：不 bump
+  if (t.tags.length === before) return // 幂等：不 bump
   t.revision += 1
   t.updated_at = new Date().toISOString()
   emitEvent('task.updated', { task_id: t.id, tag_change: 'detach', tag_id: tagId }, t.revision)
-  return Promise.resolve()
 }
 
-function listTags(_workspaceId: string): Promise<Page<Tag>> {
-  return Promise.resolve({ items: clone(tags), next_cursor: null })
+async function listTags(_workspaceId: string): Promise<Page<Tag>> {
+  await sleep()
+  return { items: clone(tags), next_cursor: null }
 }
 
-function listMembers(_workspaceId: string): Promise<Page<Member>> {
-  return Promise.resolve({ items: clone(DEMO_MEMBERS), next_cursor: null })
+async function listMembers(_workspaceId: string): Promise<Page<Member>> {
+  await sleep()
+  return { items: clone(DEMO_MEMBERS), next_cursor: null }
 }
 
 export const mockTaskApi: TaskApi = {
