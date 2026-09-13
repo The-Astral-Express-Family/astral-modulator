@@ -13,10 +13,11 @@
 4. [protocol.md](protocol.md) — OpenAPI 之外的传输与语义约定（请求头、SSE、限流、兼容性）。
 5. [sync-semantics.md](sync-semantics.md) — Markdown 工作区的版本、同步与冲突语义。
 6. [security.md](security.md) — 身份、凭证、RBAC/Scope、审计和威胁模型。
-7. [deployment.md](deployment.md) — 服务端部署与数据库升级（CLI 分发在 astral-cli 仓库）。
-8. [roadmap.md](roadmap.md) — 里程碑视图（Spike/MVP/Sync/分发/GUI）与 MVP Definition of Done。
-9. [adr/](adr/) — 关键技术选择与备选方案。
-10. [看我看我.md](看我看我.md) — 人工维护的原始构想笔记（AI 协作者只读）。
+7. [registration.md](registration.md) — 账号注册与一次性邀请码设计（ADR-0008）。
+8. [deployment.md](deployment.md) — 服务端部署与数据库升级（CLI 分发在 astral-cli 仓库）。
+9. [roadmap.md](roadmap.md) — 里程碑视图（Spike/MVP/Sync/分发/GUI）与 MVP Definition of Done。
+10. [adr/](adr/) — 关键技术选择与备选方案。
+11. [看我看我.md](看我看我.md) — 人工维护的原始构想笔记（AI 协作者只读）。
 
 > CLI 的命令 UX、输出契约与退出码文档在 `astral-cli` 仓库（docs/ARCHITECTURE.md）；
 > 原本暂存于此的 cli-ux.md 草稿已随双仓库拆分移除。

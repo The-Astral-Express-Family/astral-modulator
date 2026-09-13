@@ -757,6 +757,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | A2 | access token 校验路径 | **每请求查库**（比对 sha256 hash）；MVP 单体延迟可接受；缓存接口后续再加 | ✅ 已实现 |
 | A3 | Web 审批页 API | `GET /api/v1/auth/device/authorizations?user_code=`（需 human session）+ `POST .../{id}/approve`、`POST .../{id}/deny` | ✅ 已实现 |
 | A4 | ASTRAL_TOKEN 格式 | Agent credential secret 为 `astral_<43字符base64url>` 随机串；服务端按 sha256 hash 查 credentials 表校验；请求头仍为 `Authorization: Bearer astral_...` | ✅ 已实现 |
+| A5 | human 注册形式（多账号进入通道） | **一次性邀请码注册**（2026-09-13 用户裁决）：workspace 绑定的一次性邀请码（human session + `workspace:manage_members` 签发；角色限 viewer/contributor/maintainer，不含 owner），持码者经 web/CLI 注册并同事务建号+入伙；链接 `/register?code=` 为核心分发形式，SMTP 邮件邀请为衍生期；bootstrap 保留为冷启动首账号路径；注册成功即建立 web 会话。设计 docs/registration.md + ADR-0008，实施分期 §11 第 16-19 项 | 已裁决，**待实施** |
 | T1 | task 删除/取消语义 | （未裁决，phase-3）MVP 暂不提供 DELETE，仅 cancelled 状态 | **open** |
 | S1 | snapshot.required 事件与 outbox 保留窗口 | **已裁决并实装**：保留窗口 24h（`event.RetentionWindow`，清扫器每小时清理）；游标超窗下发 `snapshot.required`（reason=cursor_expired）后断流；已纳入 event.json 契约 | ✅ 已实现 |
 
@@ -977,4 +978,23 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 14. 协议快照 v2.1 刷新（下次 CLI 消费契约变化时一并）：收拢 round 18 参数
     组件化与本轮 Task required/responses 组件对齐的形态漂移（均无语义变化，
     CLI 契约测试暂 pin 现有 v2 快照不受影响）
+16. 邀请注册 P1（server，A5，设计 docs/registration.md）：migration 00013
+    `workspace_invitations`（id 前缀 `inv`，码只存 sha256）；三端点
+    POST/GET `/workspaces/{id}/invitations`、POST `/invitations/{id}/revoke`
+    （human session + manage_members；agent credential 403）；register 扩展
+    `invite_code` 分支（无码保持 bootstrap-only），兑换事务=建号+条件更新
+    邀请+入 membership+audit（invite.redeem/auth.register）+outbox
+    （security.invite.created/revoked/redeemed）；错误码 `INVITE_INVALID`
+    （四种失效一码防探测）/`EMAIL_TAKEN`；注册成功即建会话（bootstrap
+    响应同步补 session）；邀请链接复用 round 28 的 WebBaseURL→PublicURL→Host
+    回退链；纯增量 protocol_version 不变；openapi + 单测 + 契约测试，实施时
+    契约变更同步登记 §9
+17. 邀请注册 P2（web）：`/register` 顶层独立路由（与 /login、round 27 后的
+    /device 同构；匿名专属守卫，?code= 预填）；注册成功按 from 跳转；workspace
+    侧邀请管理卡（签发/列表/复制链接/撤销，manage_members 可见）
+18. 邀请注册 P3（CLI）：`astral register <server> [--invite-code …]`
+    （缺省交互提示，--json）；注册只建号，登录仍走设备流（CLI 凭证存储与
+    web cookie 是不同通道）；快照消费并入第 14 项 v2.1 刷新
+19. 邀请注册 P4（衍生）：SMTP 邮件邀请（.env 增 SMTP_*，邮件含
+    `/register?code=` 链接）；邮箱验证策略随本项一并评估（MVP email 仅登录名）
 

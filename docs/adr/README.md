@@ -11,5 +11,6 @@
 - [0005-postgresql-outbox-before-message-bus.md](0005-postgresql-outbox-before-message-bus.md)
 - [0006-web-first-gui.md](0006-web-first-gui.md)
 - [0007-cli-distribution.md](0007-cli-distribution.md)
+- [0008-invite-registration.md](0008-invite-registration.md)
 
 状态建议：`Proposed -> Accepted -> Superseded/Deprecated`。

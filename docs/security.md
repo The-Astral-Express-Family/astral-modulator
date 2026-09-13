@@ -86,7 +86,10 @@ Agent 声称自己在工作但实际已离线。
 
 ### Human
 
-Human 可以使用 OAuth/OIDC。CLI 推荐 Device Authorization Grant，因为终端应用不需要内嵌 WebView 或接收密码。
+Human 账号经**一次性邀请码**注册产生（workspace 绑定，设计见
+[registration.md](registration.md) / ADR-0008）；首个账号由 bootstrap 创建。
+CLI 推荐 Device Authorization Grant 登录（终端应用不需要内嵌 WebView 或接收
+密码）；OAuth/OIDC federation 属未来能力（§18）。
 
 RFC 8628 定义的 Device Authorization Grant 适用于能够发起 HTTPS 请求并向用户展示授权 URI/代码的设备/客户端。
 
