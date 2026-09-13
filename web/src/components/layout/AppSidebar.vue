@@ -4,7 +4,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon } from '@lucide/vue'
+import { GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, UsersRoundIcon } from '@lucide/vue'
 import SessionBox from '@/components/layout/SessionBox.vue'
 import SidebarLink from '@/components/layout/SidebarLink.vue'
 import WorkspaceSwitcher from '@/components/layout/WorkspaceSwitcher.vue'
@@ -51,6 +51,15 @@ const workspaceId = computed(() =>
 
       <div class="flex flex-col gap-1">
         <SidebarLink label="总览" :icon="HomeIcon" to="/" />
+      </div>
+
+      <!-- 平台管理：仅平台管理员可见（展示性判断，服务端 RequireGlobal 强制为准；
+           页面本身对 403 也是 fail-closed）。 -->
+      <div v-if="session.isPlatformAdmin && !session.isDemo" class="flex flex-col gap-1">
+        <p class="px-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          平台管理
+        </p>
+        <SidebarLink label="用户管理" :icon="UsersRoundIcon" to="/admin/users" />
       </div>
     </nav>
 

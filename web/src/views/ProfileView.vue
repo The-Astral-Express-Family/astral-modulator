@@ -4,6 +4,7 @@
 import { computed, reactive } from 'vue'
 import { toast } from 'vue-sonner'
 import { updateMe } from '@/api/modules/auth'
+import type { PlatformRole } from '@/api/types'
 import ErrorAlert from '@/components/shared/ErrorAlert.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import UserAvatar from '@/components/shared/UserAvatar.vue'
@@ -19,6 +20,14 @@ import { useSessionStore } from '@/stores/session'
 const MAX_DISPLAY_NAME = 200
 const MAX_BIO = 500
 const MAX_AVATAR_URL = 500
+
+// 平台角色只读展示（round 33）；human 只会出现 admin/user 两种。
+const ROLE_LABELS: Record<PlatformRole, string> = {
+  admin: '管理员',
+  user: '普通用户',
+  agent: 'Agent',
+  service: 'Service',
+}
 
 const session = useSessionStore()
 const { busy, error, run } = useApiAction()
@@ -121,6 +130,12 @@ async function save(): Promise<void> {
               <FieldLabel>邮箱</FieldLabel>
               <p class="rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                 {{ session.email ?? '—' }}
+              </p>
+            </Field>
+            <Field>
+              <FieldLabel>平台角色</FieldLabel>
+              <p class="rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                {{ ROLE_LABELS[session.platformRole ?? 'user'] }}
               </p>
             </Field>
           </FieldGroup>

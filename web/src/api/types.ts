@@ -70,6 +70,21 @@ export interface Actor {
   avatar_url: string
 }
 
+/** 平台全局角色（round 33/34）：human ∈ admin/user；agent/service 固化 kind。
+ * 仅 Me/AdminUser 响应携带；成员列表里的 Actor 不带（成员角色是 workspace 轴）。 */
+export type PlatformRole = 'admin' | 'user' | 'agent' | 'service'
+
+/** /admin/* 用户条目（仅平台 admin 可见）。 */
+export interface AdminUser {
+  id: ID
+  kind: 'human' | 'agent' | 'service'
+  platform_role: PlatformRole
+  display_name: string
+  email?: string
+  disabled_at?: string
+  created_at: string
+}
+
 export interface Workspace {
   id: ID
   name: string

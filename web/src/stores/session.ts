@@ -9,7 +9,8 @@ import { computed, ref } from 'vue'
 import { formatApiError, setAuthTokenProvider } from '../api/client'
 import { getCapabilities, getWellKnown } from '../api/modules/core'
 import * as authApi from '../api/modules/auth'
-import type { Actor, Capabilities, WellKnown } from '../api/types'
+import type { MeResponse } from '../api/modules/auth'
+import type { Actor, Capabilities, PlatformRole, WellKnown } from '../api/types'
 import { TASKS_MOCK } from '../lib/mockMode'
 import { DEMO_ACTOR, DEMO_CAPABILITIES, DEMO_WELL_KNOWN } from '../mocks/fixture'
 
@@ -63,6 +64,9 @@ export const useSessionStore = defineStore('session', () => {
   const actor = ref<Actor | null>(null)
   // 登录邮箱（human 只读展示；Me.email，agent/service 会话为 null）。
   const email = ref<string | null>(null)
+  // 平台全局角色（round 33）：human ∈ admin/user，agent/service 固化 kind。
+  // 仅作展示/导航收敛；一切授权以服务端 RequireGlobal 为准。
+  const platformRole = ref<PlatformRole | null>(null)
   const wellKnown = ref<WellKnown | null>(null)
   const capabilities = ref<Capabilities | null>(null)
   const booted = ref(false)
@@ -70,6 +74,7 @@ export const useSessionStore = defineStore('session', () => {
   let bootPromise: Promise<void> | null = null
 
   const isLoggedIn = computed(() => actor.value !== null)
+  const isPlatformAdmin = computed(() => platformRole.value === 'admin')
 
   // mock 演示身份（VITE_TASKS_MOCK=1 且后端不可达/未登录时的兜底登录态）。
   // 真实 API 消费方（侧栏/总览的列表拉取）据此跳过请求，避免 401 触发全局登出。
@@ -85,8 +90,7 @@ export const useSessionStore = defineStore('session', () => {
   async function establishSession(): Promise<void> {
     await refreshAccess()
     const me = await authApi.getMe()
-    actor.value = me.actor
-    email.value = me.email ?? null
+    adoptMe(me)
   }
 
   /** 启动：well-known + 尝试 Cookie 续期恢复会话。并发安全：in-flight 复用同一 Promise。 */
@@ -129,24 +133,31 @@ export const useSessionStore = defineStore('session', () => {
   function applyDemoIdentity(): void {
     if (!wellKnown.value) wellKnown.value = DEMO_WELL_KNOWN
     actor.value = DEMO_ACTOR
+    platformRole.value = 'user'
     if (!capabilities.value) capabilities.value = DEMO_CAPABILITIES
+  }
+
+  /** login/register/establishSession 共用的 Me 吸收（含平台角色）。 */
+  function adoptMe(me: MeResponse): void {
+    actor.value = me.actor
+    email.value = me.email ?? null
+    platformRole.value = me.platform_role
   }
 
   // login/register 的响应本身就是 Me（含 actor/email），无需再 GET /auth/me：
   // 换 access token 一步即可（原 establishSession 的 3 请求收敛为 2）。
-  async function adoptMe(me: { actor: Actor; email?: string }): Promise<void> {
+  async function adoptMeAndRenew(me: MeResponse): Promise<void> {
     await refreshAccess()
-    actor.value = me.actor
-    email.value = me.email ?? null
+    adoptMe(me)
   }
 
   async function login(email: string, password: string): Promise<void> {
-    await adoptMe(await authApi.login(email, password))
+    await adoptMeAndRenew(await authApi.login(email, password))
   }
 
   /** 注册（A5）：invite_code 非空走邀请兑换，为空则是 bootstrap；成功即建立会话。 */
   async function register(input: authApi.RegisterInput): Promise<void> {
-    await adoptMe(await authApi.register(input))
+    await adoptMeAndRenew(await authApi.register(input))
   }
 
   async function logout(): Promise<void> {
@@ -156,6 +167,7 @@ export const useSessionStore = defineStore('session', () => {
       clearSession()
       actor.value = null
       email.value = null
+      platformRole.value = null
     }
   }
 
@@ -164,7 +176,8 @@ export const useSessionStore = defineStore('session', () => {
     clearSession()
     actor.value = null
     email.value = null
+    platformRole.value = null
   }
 
-  return { actor, email, wellKnown, capabilities, booted, bootError, isLoggedIn, isDemo, boot, login, register, logout, expireSession }
+  return { actor, email, platformRole, isPlatformAdmin, wellKnown, capabilities, booted, bootError, isLoggedIn, isDemo, boot, login, register, logout, expireSession }
 })

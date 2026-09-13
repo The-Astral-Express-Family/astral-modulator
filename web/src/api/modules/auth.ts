@@ -2,11 +2,13 @@
 // Web 会话模型：refresh token 存 HttpOnly Cookie，access token 存内存（见 stores/session）。
 
 import { apiFetch, apiPath } from '../client'
-import type { Actor, ID } from '../types'
+import type { Actor, ID, PlatformRole } from '../types'
 
 export interface MeResponse {
   actor: Actor
   email?: string
+  /** 平台全局角色（round 33）：human ∈ admin/user，agent/service 固化 kind。 */
+  platform_role: PlatformRole
   session?: { client_type: 'cli' | 'web'; expires_at?: string }
 }
 
