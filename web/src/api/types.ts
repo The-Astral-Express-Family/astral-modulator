@@ -21,6 +21,8 @@ export type ErrorCode =
   | 'TAG_PROPOSAL_EXPIRED'
   | 'TAG_ALREADY_EXISTS'
   | 'APPROVAL_EXPIRED'
+  | 'INVITE_INVALID'
+  | 'EMAIL_TAKEN'
   | 'REVISION_CONFLICT'
   | 'DOCUMENT_CONFLICT'
   | 'RATE_LIMITED'
@@ -102,6 +104,33 @@ export interface Approval {
 }
 
 export interface ApprovalPage extends Page<Approval> {}
+
+// ---- Invitations（一次性邀请码注册，A5 / docs/registration.md）----
+
+export type InvitationRole = 'viewer' | 'contributor' | 'maintainer'
+
+export type InvitationStatus = 'invited' | 'redeemed' | 'revoked'
+
+// 手工对齐 openapi Invitation schema（服务端 workspace/invitation.go invitationDTO）。
+export interface Invitation {
+  id: ID
+  workspace_id: ID
+  role: InvitationRole
+  status: InvitationStatus
+  created_by: ID
+  created_at: string
+  expires_at: string
+  redeemed_by?: ID | null
+  redeemed_at?: string | null
+}
+
+// 签发响应：Invitation 追加一次性 code 明文与拼好的注册链接（仅本次返回）。
+export interface InvitationCreated extends Invitation {
+  code: string
+  invite_url: string
+}
+
+export interface InvitationPage extends Page<Invitation> {}
 
 // ---- Tasks / Tags（手工对齐 openapi v2 Task/Tag/Lease schema）----
 // v2（D15）：集合端点（children/task-search）行内恒填充 tags 与 children_count；

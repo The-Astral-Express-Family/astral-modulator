@@ -2,7 +2,15 @@
 // approvals 相关（architecture §22，T-ws-6）。
 
 import { apiFetch, apiPath } from '../client'
-import type { Approval, ApprovalPage, Member, Page, Tag } from '../types'
+import type {
+  Approval,
+  ApprovalPage,
+  InvitationCreated,
+  InvitationPage,
+  Member,
+  Page,
+  Tag,
+} from '../types'
 
 export function listApprovals(
   workspaceId: string,
@@ -31,4 +39,32 @@ export function listTags(workspaceId: string): Promise<Page<Tag>> {
 
 export function listMembers(workspaceId: string): Promise<Page<Member>> {
   return apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members`)
+}
+
+// ---- Invitations（A5：签发/列表/撤销，授权=human session + manage_members）----
+
+export function createInvitation(
+  workspaceId: string,
+  input: { role: 'viewer' | 'contributor' | 'maintainer'; expires_in?: number },
+): Promise<InvitationCreated> {
+  return apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`, {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function listInvitations(
+  workspaceId: string,
+  params: { status?: string } = {},
+): Promise<InvitationPage> {
+  return apiFetch(
+    apiPath(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`, params),
+  )
+}
+
+/** 撤销邀请；对已关闭（redeemed/revoked）的撤销幂等 204。 */
+export function revokeInvitation(invitationId: string): Promise<void> {
+  return apiFetch(`/api/v1/invitations/${encodeURIComponent(invitationId)}/revoke`, {
+    method: 'POST',
+  })
 }

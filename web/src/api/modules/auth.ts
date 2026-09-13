@@ -14,6 +14,19 @@ export function login(email: string, password: string): Promise<MeResponse> {
   return apiFetch('/api/v1/auth/login', { method: 'POST', body: { email, password } })
 }
 
+export interface RegisterInput {
+  email: string
+  password: string
+  display_name?: string
+  invite_code?: string
+}
+
+/** 注册（A5）：invite_code 非空走邀请兑换；为空则是 bootstrap（仅服务器无 human 时开放）。
+ * 成功即建立 web 会话（服务端已 Set-Cookie），响应与 login 同形状（Me + session）。 */
+export function register(input: RegisterInput): Promise<MeResponse> {
+  return apiFetch('/api/v1/auth/register', { method: 'POST', body: input })
+}
+
 export interface TokenPair {
   access_token: string
   token_type: 'Bearer'

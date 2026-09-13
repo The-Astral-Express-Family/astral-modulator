@@ -25,6 +25,11 @@ export const router = createRouter({
       meta: { auth: 'required' },
     },
     {
+      path: '/register',
+      name: 'register',
+      component: () => import('../views/RegisterView.vue'),
+    },
+    {
       path: '/',
       component: MainLayout,
       children: [
@@ -88,8 +93,9 @@ router.beforeEach(async (to) => {
   if (to.meta.auth === 'required' && !session.isLoggedIn) {
     return loginLocation(to.fullPath)
   }
-  // 已登录访问 /login：直接送去 from 目标或总览（sanitize 已排除 /login 自身，无循环）。
-  if (to.name === 'login' && session.isLoggedIn) {
+  // 已登录访问 /login、/register：直接送去 from 目标或总览
+  // （两页都是匿名专属动作；sanitize 已排除 /login 自身，无循环）。
+  if ((to.name === 'login' || to.name === 'register') && session.isLoggedIn) {
     return sanitizeRedirect(to.query.from) ?? '/'
   }
 })

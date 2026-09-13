@@ -124,9 +124,23 @@ export const useSessionStore = defineStore('session', () => {
     if (!capabilities.value) capabilities.value = DEMO_CAPABILITIES
   }
 
+  // login/register 的响应本身就是 Me（含 actor/email），无需再 GET /auth/me：
+  // 换 access token 一步即可（原 establishSession 的 3 请求收敛为 2）。
+  async function adoptMe(me: { actor: Actor; email?: string }): Promise<void> {
+    const pair = await authApi.refreshWithCookie()
+    setAccessToken(pair)
+    scheduleRenewal()
+    actor.value = me.actor
+    email.value = me.email ?? null
+  }
+
   async function login(email: string, password: string): Promise<void> {
-    await authApi.login(email, password)
-    await establishSession()
+    await adoptMe(await authApi.login(email, password))
+  }
+
+  /** 注册（A5）：invite_code 非空走邀请兑换，为空则是 bootstrap；成功即建立会话。 */
+  async function register(input: authApi.RegisterInput): Promise<void> {
+    await adoptMe(await authApi.register(input))
   }
 
   async function logout(): Promise<void> {
@@ -146,5 +160,5 @@ export const useSessionStore = defineStore('session', () => {
     email.value = null
   }
 
-  return { actor, email, wellKnown, capabilities, booted, bootError, isLoggedIn, boot, login, logout, expireSession }
+  return { actor, email, wellKnown, capabilities, booted, bootError, isLoggedIn, boot, login, register, logout, expireSession }
 })

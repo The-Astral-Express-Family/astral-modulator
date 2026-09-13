@@ -753,6 +753,28 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   透传）→ 重新 show 确认持久化 → 恢复资料 → logout 204；匿名 discovery
   协议门与假 token 401 envelope（含 request_id）实测。
 
+### 第 30 轮（2026-09-13，Lidozs55）：邀请注册 P2（web）—— /register 页 + 邀请管理卡
+
+- **/register 顶层独立路由**：与 /login、/device 同构（无应用外壳，邮件/聊天
+  链接直达）；`?code=` 预填邀请码；匿名专属守卫与 /login 对称（已登录访问弹回
+  from 或总览）；页脚注明码的来源与一次性语义、无码时的 bootstrap 边界、CLI
+  用户走设备流。提交 → 注册即登录（服务端已建会话）→ 按 from/默认跳转。
+- **workspace 邀请管理卡**（InvitationsCard，挂工作区总览）：角色/有效期选择
+  签发（viewer/contributor/maintainer × 1/7/30 天）；签发结果面板一次性展示
+  明文码 + invite_url + 一键复制；列表（角色/状态/时间/兑换者）+ invited 行
+  撤销。可见性按能力收敛：listInvitations 403/404 即整卡隐藏（fail closed，
+  不在前端复制角色判断）。
+- **顺带关闭 round 24 遗留 ⑤ 的后半项**：login/register 会话建立从 3 请求
+  收敛为 2（响应本身即 Me，省去 GET /auth/me，新增 adoptMe；boot 路径不变）。
+- **契约同步**：web types.ts 的 ErrorCode union 补 INVITE_INVALID/EMAIL_TAKEN
+  （P1 漏项），新增 Invitation/InvitationCreated/InvitationPage 类型。
+- **验证**：vue-tsc + vite build 全绿；真机浏览器全闭环实测（临时 PG + dev
+  server）——带码注册 → 自动登录 → 跳总览且 workspace 列表已含目标工作区；
+  已登录访问 /register 被弹回；owner 视角邀请卡签发（明文码面板 + 复制按钮 +
+  toast）→ SSE 实时收到 security.invite.created → 撤销后状态翻转、撤销按钮
+  消失。reka-ui Button 的 Playwright 定位点击超时问题再现（round 24 已登记，
+  非 app bug），用 requestSubmit/DOM click 绕过。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -1025,7 +1047,7 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
     响应同步补 session）；邀请链接复用 round 28 的 WebBaseURL→PublicURL→Host
     回退链；纯增量 protocol_version 不变；openapi + 单测 + 契约测试，实施时
     契约变更同步登记 §9
-17. 邀请注册 P2（web）：`/register` 顶层独立路由（与 /login、round 27 后的
+17. 【✅ 第 30 轮完成】邀请注册 P2（web）：`/register` 顶层独立路由（与 /login、round 27 后的
     /device 同构；匿名专属守卫，?code= 预填）；注册成功按 from 跳转；workspace
     侧邀请管理卡（签发/列表/复制链接/撤销，manage_members 可见）
 18. 邀请注册 P3（CLI）：`astral register <server> [--invite-code …]`

@@ -7,6 +7,7 @@ import type { Workspace } from '@/api/types'
 import JsonBlock from '@/components/shared/JsonBlock.vue'
 import KeyValue from '@/components/shared/KeyValue.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import InvitationsCard from '@/components/dashboard/InvitationsCard.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -73,6 +74,9 @@ watch(workspaceId, () => {
       </div>
     </CardContent>
   </Card>
+
+  <!-- 邀请管理（A5）：无 manage_members 权限整卡自动隐藏（组件内 fail closed）。 -->
+  <InvitationsCard :workspace-id="workspaceId" />
 
   <Empty v-if="!workspace">
     <EmptyHeader>
