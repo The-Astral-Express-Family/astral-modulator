@@ -7,7 +7,8 @@ import MainLayout from '../components/layout/MainLayout.vue'
 // /device 是 Device Flow 的人类审批页 —— verification_uri 指向这里（architecture §8.2），
 // 属 CLI 登录闭环的必要组成，Phase 1 就要实装。
 //
-// 结构：/login 独立布局（无侧边栏），其余页面统一挂 '/' 下由 MainLayout 承载。
+// 结构：/login 与 /device 独立布局（无侧边栏）——/device 是 CLI 拉起浏览器的
+// 审批页，不应携带应用外壳；其余页面统一挂 '/' 下由 MainLayout 承载。
 // 鉴权策略用 meta.auth 声明，「未登录去哪」只由下方全局守卫决策，视图层不再各自跳转。
 export const router = createRouter({
   history: createWebHistory(),
@@ -18,6 +19,12 @@ export const router = createRouter({
       component: () => import('../views/LoginView.vue'),
     },
     {
+      path: '/device',
+      name: 'device-approve',
+      component: () => import('../views/DeviceApproveView.vue'),
+      meta: { auth: 'required' },
+    },
+    {
       path: '/',
       component: MainLayout,
       children: [
@@ -26,12 +33,6 @@ export const router = createRouter({
           name: 'dashboard',
           component: () => import('../views/DashboardView.vue'),
           meta: { auth: 'optional' },
-        },
-        {
-          path: 'device',
-          name: 'device-approve',
-          component: () => import('../views/DeviceApproveView.vue'),
-          meta: { auth: 'required' },
         },
         {
           path: 'profile',

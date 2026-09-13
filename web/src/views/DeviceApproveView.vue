@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Device Flow 人类审批页（architecture §8.2 / TODO.md A3）：
 // CLI 发起登录后 verification_uri 指向 /device?code=XXXX-XXXX。
+// 独立布局（不套 MainLayout，与 /login 同构）——CLI 拉起的浏览器窗口不携带应用外壳。
 // 需先登录 —— 由路由守卫统一拦截（未登录带 from 跳 /login，登录后原路返回）。
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -33,10 +34,13 @@ const { busy, error, run } = useApiAction()
 const { start, stop } = usePolling(pollOnce, 5_000, { skip: () => busy.value })
 
 // 轮询只应在 pending 状态运行：详情出现/状态变化时由 watch 控制 start/stop。
+// lookup 直接命中非 pending（expired/denied/exchanged）时同样进终态展示，
+// 与「先 pending 再轮询发现」共用 enterTerminal 单一写入点。
 watch(
   () => view.value?.status,
   (status) => {
     if (status === 'pending') start()
+    else if (status) enterTerminal(status)
     else stop()
   },
 )
@@ -100,26 +104,28 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex w-full max-w-lg flex-col gap-4">
-    <PageHeader title="设备授权" />
+  <div class="flex min-h-screen items-center justify-center px-4">
+    <div class="flex w-full max-w-lg flex-col gap-4">
+      <PageHeader title="设备授权" />
 
-    <DeviceCodeLookup v-model="manualCode" :busy="busy" @lookup="lookup" />
+      <DeviceCodeLookup v-model="manualCode" :busy="busy" @lookup="lookup" />
 
-    <ErrorAlert v-if="error" :message="error" />
+      <ErrorAlert v-if="error" :message="error" />
 
-    <DeviceAuthorizationCard
-      v-if="view"
-      :view="view"
-      :busy="busy"
-      @approve="decide(true)"
-      @deny="decide(false)"
-    />
+      <DeviceAuthorizationCard
+        v-if="view"
+        :view="view"
+        :busy="busy"
+        @approve="decide(true)"
+        @deny="decide(false)"
+      />
 
-    <Alert v-if="terminal">
-      <div class="flex items-center gap-2">
-        <StatusBadge :status="terminal.status" />
-        <AlertDescription>{{ terminal.message }}</AlertDescription>
-      </div>
-    </Alert>
+      <Alert v-if="terminal">
+        <div class="flex items-center gap-2">
+          <StatusBadge :status="terminal.status" />
+          <AlertDescription>{{ terminal.message }}</AlertDescription>
+        </div>
+      </Alert>
+    </div>
   </div>
 </template>

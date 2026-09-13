@@ -13,6 +13,7 @@ const STATUS_VARIANTS: Record<string, NonNullable<BadgeVariants['variant']>> = {
   requested: 'secondary',
   approved: 'default',
   executed: 'default',
+  exchanged: 'default',
   denied: 'destructive',
   rejected: 'destructive',
   expired: 'outline',
