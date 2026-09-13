@@ -5,7 +5,8 @@ package model
 
 import "time"
 
-// Actor 见 00001_init.sql / architecture §6.1；bio/avatar_url 见 00012_actor_profile.sql。
+// Actor 见 00001_init.sql / architecture §6.1；bio/avatar_url 见 00012_actor_profile.sql；
+// platform_role/disabled_at 见 00014_platform_role.sql。
 type Actor struct {
 	ID          string `gorm:"primaryKey;size:40"`
 	Kind        string `gorm:"size:16"` // human | agent | service
@@ -13,6 +14,11 @@ type Actor struct {
 	Bio         string `gorm:"size:500"`
 	// AvatarURL 是头像外链（http/https）；nil = 未设置，由 API 层序列化为空串。
 	AvatarURL *string `gorm:"size:500"`
+	// PlatformRole 是平台全局角色（admin/user/agent/service）；与 kind 的
+	// 一致性由 PG CHECK 约束钉死，创建点必须显式赋值（GORM 零值会插空串）。
+	PlatformRole string `gorm:"size:16"`
+	// DisabledAt 非 nil = 被平台管理员停用（round 34）；认证管线据此拒绝。
+	DisabledAt *time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	// Human 本地登录凭证在 human_auth 表（D6）；OIDC subject 字段后续迁移再加。

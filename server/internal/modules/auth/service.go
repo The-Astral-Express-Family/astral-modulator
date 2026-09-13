@@ -67,6 +67,9 @@ func (s *Service) dbOrError() (*gorm.DB, *httpx.APIError) {
 type Principal struct {
 	ActorID string
 	Kind    string // human | agent | service
+	// PlatformRole 是平台全局角色（admin/user/agent/service），认证时从
+	// actors.platform_role 解析；授权一律经 RequireGlobal 按最终 scope 计算。
+	PlatformRole string
 	// AuthKind: access_token | credential | session_cookie
 	AuthKind string
 	// SessionID 仅 human 会话时有值。
@@ -76,6 +79,10 @@ type Principal struct {
 }
 
 func (p *Principal) IsHuman() bool { return p.Kind == "human" }
+
+// IsPlatformAdmin 是展示/日志用的便捷判断；授权判定请走 RequireGlobal，
+// 与「按最终 scope 计算」的哲学一致。
+func (p *Principal) IsPlatformAdmin() bool { return p.PlatformRole == "admin" }
 
 // WorkspaceScopes 计算主体在某 workspace 的生效 scope 集合：
 //   - human：其成员角色的 scope bundle；
@@ -151,6 +158,29 @@ func RequireWorkspace(r *http.Request, svc *Service, workspaceID string, need ..
 	return apiErr
 }
 
+// GlobalScopesForPrincipal 返回主体的平台级 scope 集合。平台角色随 Principal
+// 在认证时解析（authActor），这里零查库。
+func GlobalScopesForPrincipal(p *Principal) map[string]bool {
+	out := map[string]bool{}
+	for _, sc := range GlobalScopesFor[p.PlatformRole] {
+		out[sc] = true
+	}
+	return out
+}
+
+// RequireGlobal 是平台级端点的授权前置（对齐 RequireWorkspaceScopes 的
+// 403 INSUFFICIENT_SCOPE 语义）。平台资源不因无权而隐藏存在性，故无 404 分支；
+// Principal 无全局 scope（如 user/agent/service）与缺具体 scope 同判。
+func RequireGlobal(r *http.Request, need ...string) *httpx.APIError {
+	scopes := GlobalScopesForPrincipal(PrincipalFrom(r.Context()))
+	for _, sc := range need {
+		if apiErr := HasScope(scopes, sc); apiErr != nil {
+			return apiErr
+		}
+	}
+	return nil
+}
+
 // ---- 注册 / 登录（human，web 侧；TODO.md D6/A5）----
 
 type RegisterInput struct {
@@ -212,7 +242,9 @@ func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, u
 	if apiErr != nil {
 		return nil, "", apiErr
 	}
-	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", DisplayName: in.DisplayName}
+	// 冷启动首个 human 即平台 admin（bootstrap 向导与 web 零号邀请同管线的
+	// 唯一 admin 授予点；后续提升走 admin 用户管理，round 34）。
+	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", PlatformRole: "admin", DisplayName: in.DisplayName}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(actor).Error; err != nil {
 			return err
@@ -253,7 +285,7 @@ func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, 
 		return nil, "", apiErr
 	}
 
-	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", DisplayName: in.DisplayName}
+	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", PlatformRole: "user", DisplayName: in.DisplayName}
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(actor).Error; err != nil {
 			return err
@@ -527,9 +559,12 @@ func ToActorDTO(a model.Actor) ActorDTO {
 
 // MeResponse 是 /auth/me、/auth/login、/auth/register 共用的响应体。
 type MeResponse struct {
-	Actor   ActorDTO     `json:"actor"`
-	Email   string       `json:"email,omitempty"` // human 本地登录邮箱；agent/service 省略
-	Session *SessionInfo `json:"session,omitempty"`
+	Actor ActorDTO `json:"actor"`
+	Email string   `json:"email,omitempty"` // human 本地登录邮箱；agent/service 省略
+	// PlatformRole 是认证主体的平台角色（admin/user/agent/service，round 33）。
+	// 与 ActorDTO 分离：member/agent 列表里的 actor 形状不携带平台角色。
+	PlatformRole string       `json:"platform_role"`
+	Session      *SessionInfo `json:"session,omitempty"`
 }
 
 type SessionInfo struct {
@@ -575,6 +610,20 @@ func (s *Service) liveSession(ctx context.Context, hashColumn, hash, notFoundMsg
 	return &sess, nil
 }
 
+// authActor 是 session 类认证管线的 actor 装载：access/cookie 两个入口只凭
+// session.actor_id 关联，这里统一补一次主键查询取 kind 与 platform_role。
+func (s *Service) authActor(ctx context.Context, actorID string) (*model.Actor, *httpx.APIError) {
+	var actor model.Actor
+	err := s.DB.WithContext(ctx).First(&actor, "id = ?", actorID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "actor missing"}
+	}
+	if err != nil {
+		return nil, httpx.Internal("auth lookup failed")
+	}
+	return &actor, nil
+}
+
 func (s *Service) authenticateAccessToken(ctx context.Context, token string) (*Principal, *httpx.APIError) {
 	sess, apiErr := s.liveSession(ctx, "access_token_hash", HashToken(token), "invalid access token")
 	if apiErr != nil {
@@ -583,7 +632,11 @@ func (s *Service) authenticateAccessToken(ctx context.Context, token string) (*P
 	if time.Now().After(sess.AccessExpiresAt) {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "access token expired"}
 	}
-	return &Principal{ActorID: sess.ActorID, Kind: "human", AuthKind: "access_token", SessionID: sess.ID}, nil
+	actor, apiErr := s.authActor(ctx, sess.ActorID)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	return &Principal{ActorID: actor.ID, Kind: actor.Kind, PlatformRole: actor.PlatformRole, AuthKind: "access_token", SessionID: sess.ID}, nil
 }
 
 func (s *Service) authenticateCredential(ctx context.Context, secret string) (*Principal, *httpx.APIError) {
@@ -614,7 +667,7 @@ func (s *Service) authenticateCredential(ctx context.Context, secret string) (*P
 			_ = s.DB.WithContext(bgCtx).Model(&model.Credential{}).Where("id = ?", cred.ID).Update("last_used_at", time.Now()).Error
 		}()
 	}
-	return &Principal{ActorID: cred.ActorID, Kind: actor.Kind, AuthKind: "credential", Credential: &cred}, nil
+	return &Principal{ActorID: cred.ActorID, Kind: actor.Kind, PlatformRole: actor.PlatformRole, AuthKind: "credential", Credential: &cred}, nil
 }
 
 // authenticateCookieSession 允许浏览器凭 HttpOnly refresh Cookie 访问（主要给 SSE ——
@@ -628,5 +681,9 @@ func (s *Service) authenticateCookieSession(ctx context.Context, refresh string)
 	if time.Now().After(sess.ExpiresAt) {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "session expired"}
 	}
-	return &Principal{ActorID: sess.ActorID, Kind: "human", AuthKind: "session_cookie", SessionID: sess.ID}, nil
+	actor, apiErr := s.authActor(ctx, sess.ActorID)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	return &Principal{ActorID: actor.ID, Kind: actor.Kind, PlatformRole: actor.PlatformRole, AuthKind: "session_cookie", SessionID: sess.ID}, nil
 }

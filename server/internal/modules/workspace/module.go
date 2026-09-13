@@ -493,7 +493,8 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	if in.Kind == "service" {
 		prefix = ids.Service
 	}
-	actor := model.Actor{ID: ids.New(prefix), Kind: in.Kind, DisplayName: in.DisplayName}
+	// 平台角色固化 kind（00014 CHECK 同款规则）；创建点必须显式赋值。
+	actor := model.Actor{ID: ids.New(prefix), Kind: in.Kind, PlatformRole: in.Kind, DisplayName: in.DisplayName}
 	// agent actor 创建即落 workspace（D9：membership 行是归属的唯一事实，
 	// 人/agent 通用；credential 绑定只是 scope 载体）。不发领域事件
 	// （无对应事件类型，待契约补充）；审计随事务落库。
@@ -541,13 +542,14 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// agent:manage 授权：绑定 workspace 的 credential 校验该 workspace 权限；
-	// 全局 credential 仅 human 可发（MVP 简化，TODO(phase-2): 服务器级 scope）。
+	// 全局 credential 是平台级能力，仅持 platform:credentials:manage 的
+	// 平台 admin 可发（round 33 收口，取代 MVP 期的任意 human 放行）。
 	if in.Workspace != "" {
 		if _, apiErr := m.requireWorkspace(r, in.Workspace, auth.ScopeAgentManage); apiErr != nil {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}
-	} else if apiErr := auth.RequireHuman(r, "human session required for unbound credentials"); apiErr != nil {
+	} else if apiErr := auth.RequireGlobal(r, auth.ScopePlatformCredsManage); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -614,7 +616,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}
-	} else if apiErr := auth.RequireHuman(r, "human session required for unbound credentials"); apiErr != nil {
+	} else if apiErr := auth.RequireGlobal(r, auth.ScopePlatformCredsManage); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}

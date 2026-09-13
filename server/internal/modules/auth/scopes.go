@@ -33,6 +33,12 @@ const (
 	ScopeAgentManage       = "agent:manage"
 	ScopeIntegrationUse    = "integration:use"
 	ScopeIntegrationManage = "integration:manage"
+
+	// 平台全局 scope（round 33）：与 workspace scope 分轴，只随平台角色
+	// 授予，见 GlobalScopesFor。
+	ScopePlatformUsersRead      = "platform:users:read"
+	ScopePlatformUsersManage    = "platform:users:manage"
+	ScopePlatformCredsManage    = "platform:credentials:manage"
 )
 
 // AllScopes 调试用全集；不得用于默认授权。
@@ -46,6 +52,16 @@ var AllScopes = []string{
 	ScopePresenceWrite,
 	ScopeAuditRead,
 	ScopeAgentManage, ScopeIntegrationUse, ScopeIntegrationManage,
+}
+
+// GlobalScopesFor 是平台角色 → 全局 scope bundle（与 RoleToScopes 同哲学：
+// 授权只认最终 scope 集合）。human ∈ {admin,user}；agent/service 固化 kind，
+// 永无平台特权——agent credential 的能力仍只由 credential scopes 决定。
+var GlobalScopesFor = map[string][]string{
+	"admin":   {ScopePlatformUsersRead, ScopePlatformUsersManage, ScopePlatformCredsManage},
+	"user":    {},
+	"agent":   {},
+	"service": {},
 }
 
 // Role 是 scope bundle。角色定义变更需评估已有 credential 的语义。

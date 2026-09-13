@@ -145,10 +145,10 @@ func (m *Module) updateMe(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteOK(w, r, http.StatusOK, m.meBody(r.Context(), *actor))
 }
 
-// meBody 组装 Me 响应：actor DTO + human 登录邮箱。邮箱查询失败不致命
-// （省略字段），身份本身已由中间件担保。
+// meBody 组装 Me 响应：actor DTO + human 登录邮箱 + 平台角色。邮箱查询失败
+// 不致命（省略字段），身份本身已由中间件担保。
 func (m *Module) meBody(ctx context.Context, actor model.Actor) MeResponse {
-	resp := MeResponse{Actor: ToActorDTO(actor)}
+	resp := MeResponse{Actor: ToActorDTO(actor), PlatformRole: actor.PlatformRole}
 	if email, err := m.Svc.HumanEmail(ctx, actor.ID); err == nil {
 		resp.Email = email
 	} else {
