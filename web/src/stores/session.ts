@@ -71,6 +71,10 @@ export const useSessionStore = defineStore('session', () => {
 
   const isLoggedIn = computed(() => actor.value !== null)
 
+  // mock 演示身份（VITE_TASKS_MOCK=1 且后端不可达/未登录时的兜底登录态）。
+  // 真实 API 消费方（侧栏/总览的列表拉取）据此跳过请求，避免 401 触发全局登出。
+  const isDemo = computed(() => TASKS_MOCK && actor.value?.id === DEMO_ACTOR.id)
+
   /** boot 与 login 共用的会话建立序列：Cookie 换 token 对 → 静默续期 → 拉身份。 */
   async function establishSession(): Promise<void> {
     const pair = await authApi.refreshWithCookie()
@@ -160,5 +164,5 @@ export const useSessionStore = defineStore('session', () => {
     email.value = null
   }
 
-  return { actor, email, wellKnown, capabilities, booted, bootError, isLoggedIn, boot, login, register, logout, expireSession }
+  return { actor, email, wellKnown, capabilities, booted, bootError, isLoggedIn, isDemo, boot, login, register, logout, expireSession }
 })

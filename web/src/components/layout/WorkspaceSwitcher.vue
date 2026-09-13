@@ -1,0 +1,87 @@
+<!-- workspace 切换器：列出当前账号可见的 workspace，当前值跟随路由
+     （深链/页面间切换都正确高亮）；切换即跳该 workspace 概览。
+     深链命中列表外 workspace 时补一次详情取名。加载失败静默——
+     侧栏导航不阻塞，错误由页面自身呈现。 -->
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { FolderOpenIcon } from '@lucide/vue'
+import { getWorkspace, listWorkspaces } from '@/api/modules/core'
+import type { Workspace } from '@/api/types'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select'
+
+const route = useRoute()
+const router = useRouter()
+
+const workspaces = ref<Workspace[]>([])
+const loaded = ref(false)
+// 深链直达列表外的 workspace（分页截断/刚被拉进协作）时补拉的名字。
+const extra = ref<Workspace | null>(null)
+
+const currentId = computed(() =>
+  typeof route.params.workspaceId === 'string' ? route.params.workspaceId : '',
+)
+
+async function load(): Promise<void> {
+  try {
+    workspaces.value = (await listWorkspaces({ limit: 200 })).items
+  } catch {
+    workspaces.value = []
+  }
+  loaded.value = true
+}
+
+onMounted(() => {
+  void load()
+})
+
+watch(
+  [currentId, loaded] as const,
+  async ([id, isLoaded]) => {
+    if (!isLoaded || !id) return
+    if (workspaces.value.some((w) => w.id === id)) return
+    if (extra.value?.id === id) return
+    try {
+      extra.value = await getWorkspace(id)
+    } catch {
+      extra.value = null
+    }
+  },
+  { immediate: true },
+)
+
+const current = computed<Workspace | null>(() => {
+  if (!currentId.value) return null
+  return (
+    workspaces.value.find((w) => w.id === currentId.value) ??
+    (extra.value?.id === currentId.value ? extra.value : null)
+  )
+})
+
+function onSelect(value: unknown): void {
+  const id = String(value)
+  if (!id || id === currentId.value) return
+  void router.push(`/workspaces/${id}`)
+}
+</script>
+
+<template>
+  <Select :model-value="currentId || undefined" @update:model-value="onSelect">
+    <SelectTrigger class="w-full" aria-label="切换工作区">
+      <FolderOpenIcon class="size-4 shrink-0 text-muted-foreground" />
+      <span class="min-w-0 flex-1 truncate text-left">
+        {{ current?.name ?? '选择工作区' }}
+      </span>
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem v-for="w in workspaces" :key="w.id" :value="w.id">
+        {{ w.name }}
+      </SelectItem>
+    </SelectContent>
+  </Select>
+</template>

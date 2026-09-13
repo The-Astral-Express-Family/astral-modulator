@@ -17,8 +17,9 @@ const { error: wsError, run } = useApiAction()
 const workspaces = ref<Workspace[]>([])
 
 // 路由守卫已保证 boot 完成后再挂载；未登录时本页匿名可看（下方登录引导卡片）。
+// mock 演示身份同样跳过真实 API（401 会触发全局登出弹走）。
 onMounted(async () => {
-  if (!session.isLoggedIn) return
+  if (!session.isLoggedIn || session.isDemo) return
   await run(async () => {
     workspaces.value = (await listWorkspaces()).items
   })
