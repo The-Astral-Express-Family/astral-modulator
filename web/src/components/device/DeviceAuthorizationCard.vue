@@ -46,10 +46,10 @@ function onConfirmDeny(): void {
 <template>
   <Card>
     <CardHeader>
-      <CardTitle>授权详情</CardTitle>
+      <CardTitle>CLI 请求登录</CardTitle>
       <CardDescription>
-        请核对代码与 CLI 终端显示完全一致。批准后 CLI 将获得访问本服务器的凭证；
-        如有疑问请拒绝。
+        一个 CLI 客户端正在请求登录此账号。请核对代码与终端显示完全一致后批准；
+        如非你本人操作，请拒绝。
       </CardDescription>
     </CardHeader>
     <CardContent class="flex flex-col gap-4">

@@ -24,6 +24,9 @@ const route = useRoute()
 
 const view = ref<DeviceAuthorizationView | null>(null)
 const manualCode = ref('')
+// code 来自 URL（verification_uri_complete 直达）时隐藏手动输码框——
+// 页面只保留「确认请求 → 批准/拒绝」一步，对齐 VS Code 设备码登录体验。
+const fromQueryCode = ref(false)
 // 终态结果（批准/拒绝/过期/失效）：持久展示，直到下一次查询。
 const terminal = ref<{ status: DeviceAuthorizationView['status']; message: string } | null>(null)
 
@@ -99,7 +102,10 @@ async function decide(approve: boolean): Promise<void> {
 
 onMounted(() => {
   const code = userCodeFromQuery()
-  if (code) void lookup(code)
+  if (code) {
+    fromQueryCode.value = true
+    void lookup(code)
+  }
 })
 </script>
 
@@ -108,7 +114,7 @@ onMounted(() => {
     <div class="flex w-full max-w-lg flex-col gap-4">
       <PageHeader title="设备授权" />
 
-      <DeviceCodeLookup v-model="manualCode" :busy="busy" @lookup="lookup" />
+      <DeviceCodeLookup v-if="!fromQueryCode" v-model="manualCode" :busy="busy" @lookup="lookup" />
 
       <ErrorAlert v-if="error" :message="error" />
 
