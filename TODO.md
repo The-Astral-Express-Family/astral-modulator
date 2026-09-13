@@ -725,6 +725,34 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   全绿；浏览器实测带码直达（无输码框 → 批准 → 终态 → CLI 兑换 200）与
   手动入口双路径；curl 确认 `verification_uri_complete=http://localhost:5173/device?code=…`。
 
+### 第 29 轮 B 线（2026-09-13，modenicheng）：CLI 同步轮 —— actor profile 消费 + 协议快照 v2.1 刷新
+
+> 与第 29 轮 A 线（Lidozs55，邀请注册 P1，§9 同日多行）并行推进；轮号撞车按
+> 「第 10 轮（modenicheng）」先例以分线标注区分。A 线 openapi 增量 CLI 尚未
+> 消费，快照刷新（→ 7c46a7a+）随 P3 `astral register` 一并。
+
+- **profile 命令族（astral-cli round 29）**：`astral profile show`（GET
+  /auth/me，人读展示 display_name/email/bio/avatar，--json 透传 Me envelope）；
+  `astral profile set --display-name/--bio/--avatar-url`（PATCH /auth/me 部分
+  更新，只序列化出现的字段；bio/avatar 空串=清除，空 display_name 本地即拒）。
+  Bearer 走 ApiSession（ASTRAL_TOKEN 优先）——agent 凭证可自管资料，human
+  会话同路径。server 解析 positional > --server > repo 绑定 > ASTRAL_SERVER。
+- **whoami 增强**：Me envelope 的 email（human 只读）进人读输出与 --json。
+- **快照 v2.1（§11 第 14 项关闭）**：0330768 → 48ab5f2，收入 PATCH /auth/me +
+  Actor/Me 资料字段、device flow 绝对 URL（round 27/28）、SSE 404/403 契约
+  （round 22 语义收敛）、round 18 参数组件化形态漂移；protocol_version 仍为
+  2，CLI 契约测试全绿。
+- **顺带修复（astral-cli）**：`resolveServerUrl` 空串 positional 遮蔽显式
+  `--server`（`whoami --server X` 此前静默丢旗标必失败）；sessionGet/
+  sessionPost 与 whoami discovery 切到可注入 commandHttp seam（生产等价）；
+  单测 fixture 临时目录加 PID 区分（ctest 每用例独立进程共用同一目录的潜伏
+  串扰）。
+- **验证**：CLI 单测/契约 102/102（连跑两轮防 flake）；本地真机全链路：
+  API 登录 bootstrap human → 凭证文件注入临时 ASTRAL_HOME → profile
+  show/set（bio/avatar/display_name 部分更新保持、空串清除、--json envelope
+  透传）→ 重新 show 确认持久化 → 恢复资料 → logout 204；匿名 discovery
+  协议门与假 token 401 envelope（含 request_id）实测。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -981,9 +1009,11 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 15. fuzzy-only task-search 的 0 分行展示策略：服务端无 score 阈值 → UI 出现
     大量「匹配 0%」行（第 25 轮忠实呈现现语义）；裁决「服务端加阈值」或
     「前端过滤/弱化零分行」
-14. 协议快照 v2.1 刷新（下次 CLI 消费契约变化时一并）：收拢 round 18 参数
-    组件化与本轮 Task required/responses 组件对齐的形态漂移（均无语义变化，
-    CLI 契约测试暂 pin 现有 v2 快照不受影响）
+14. 【✅ 第 29 轮 B 线完成】协议快照 v2.1 刷新（随第 29 轮 B 线 CLI 消费 actor
+    profile 契约一并）：收拢 round 18 参数组件化与本轮 Task required/responses
+    组件对齐的形态漂移（均无语义变化）；快照 0330768 → 48ab5f2，CLI 契约测试
+    全绿。第 29 轮 A 线（invite P1）openapi 增量 CLI 尚未消费，随下次 CLI
+    契约消费（P3 `astral register`）再刷新快照
 16. 【✅ 第 29 轮完成】邀请注册 P1（server，A5，设计 docs/registration.md）：migration 00013
     `workspace_invitations`（id 前缀 `inv`，码只存 sha256）；三端点
     POST/GET `/workspaces/{id}/invitations`、POST `/invitations/{id}/revoke`
