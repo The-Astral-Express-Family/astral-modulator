@@ -143,6 +143,11 @@ Role 是预定义 scope bundle：
 
 服务端授权检查以最终 scope/policy 为准；不要把客户端角色字符串当权限判断。
 
+平台全局轴另有 `actors.platform_role`（admin/user/agent/service，round 33/34）：
+admin 持 `platform:*` 全局 scope（用户管理、服务器级 credential 签发收口），
+详情见 [architecture.md §10.1](architecture.md#101-平台角色层round-3334)。
+`/admin/*` 仅 admin 可达；停用账号在三条认证管线即时拒绝。
+
 ## 6. Human Approval Policy
 
 可配置高风险动作：

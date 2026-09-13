@@ -867,6 +867,63 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - **验证**：`go build/vet/test` 全绿（含 tests 包契约三门）；web
   `vue-tsc` + `vite build` 全绿。无契约面变化（无新端点/事件/错误码），
   CLI 快照 v2.1 不受影响。
+### 第 33 轮（2026-09-13，modenicheng）：平台角色基建 + 全局凭证收口
+
+> 背景与取舍见 D16：workspace 层本就是「role = scope bundle」制（round 2 起），
+> 缺的是平台全局轴。三选一裁决为「固定平台角色 + 全局 scope 词表」——零权限表，
+> 与 workspace 轴同构；psql 式 GRANT/REVOKE 无需求方，裸硬判与 scope 哲学割裂。
+
+- **migration 00014**：`actors.platform_role`（human ∈ admin/user；agent/service
+  固化 kind，PG CHECK 钉死 kind↔role 一致性；sqlite 测试走 AutoMigrate 无此约束，
+  由建号点显式赋值保证）+ 存量部署回填（最早 human 提升为 admin，防「升级后无
+  admin」死局）+ `disabled_at` 预留（round 34 启用）。
+- **全局 scope 词表**（scopes.go）：`platform:users:read` / `platform:users:manage`
+  / `platform:credentials:manage`；`GlobalScopesFor` 与 `RoleToScopes` 并排，
+  admin 持全组，user/agent/service 为空。
+- **Principal 携带平台角色**：三条认证管线（access token / credential / cookie）
+  统一经 `authActor` 补 actors 主键查询；`RequireGlobal`（403 INSUFFICIENT_SCOPE，
+  对齐 workspace 轴语义，无 404 分支）+ `GlobalScopesForPrincipal`。
+- **首任 admin**：`registerBootstrap`（bootstrap 向导与 web 零号邀请同管线）
+  创建的首个 human 直接 `platform_role='admin'`；邀请注册恒为 user。
+- **全局凭证收口**（安全修复）：签发/吊销不绑定 workspace 的服务器级
+  `astral_` credential 从「任意已注册 human」收口为 `platform:credentials:manage`
+  （原代码注释自标 TODO(phase-2)，本轮闭合）；workspace 内联的 `requireHuman` 助手随之删除（32B 线收拢的 `auth.RequireHuman` 仍服务 device/邀请等 human 闸）。
+- **/auth/me 增 `platform_role`**（Me 响应级，不进 ActorDTO——成员列表里的
+  actor 形状不带平台角色）；纯增量，CLI 兼容。
+- **验证**：go test 全绿（新增 auth `platform_role_test.go`：首 human admin /
+  邀请 user / credential 主体固化 kind / RequireGlobal 五角色矩阵；
+  workspace `platform_role_test.go`：全局凭证 user 403 / admin 201+204 /
+  绑定路径不受影响的 404 非成员语义）；dev 库真机 curl 矩阵 15/16（唯一非
+  PASS 是测试预期写错：非成员 404 WORKSPACE_NOT_FOUND 正是防探测设计语义）。
+
+### 第 34 轮（2026-09-13，modenicheng）：admin 用户管理（server + web）
+
+- **server**（`internal/modules/admin`，router 受保护组挂载）：
+  `GET /admin/users`（human 全量列表，UserDTO 含邮箱/角色/停用态）；
+  `POST /admin/users/{id}/disable|enable`（条件更新防重复 409；disable 同事务
+  audit + `RevokeActorSessions` 即时作废在途会话并触发 SSE 断流，撤销失败仅
+  记日志——准入闸门是 DisabledAt 检查，非会话撤销）；`POST .../role`
+  （admin/user 互转，返回 AdminUser）。防自锁：禁止自停用/自改角色；
+  last-admin 竞态 MVP 接受。仅 human 可管理（agent 归属随 workspace，D9）。
+  auth.Service 增 `RevokeActorSessions`；authActor/Login/credential 三处
+  DisabledAt 闸门（停用即时生效，不依赖撤销）。
+- **web**：MeResponse/session store 增 `platform_role`（isPlatformAdmin 导出）；
+  侧栏「平台管理 → 用户管理」段（`v-if isPlatformAdmin` 展示性判断，服务端
+  强制为准）；`/admin/users` 页（表格：徽章角色/邮箱/停用态 + 角色下拉 +
+  停用/恢复按钮；自身行收起操作；**数据加载即能力证明**——list 403 →
+  「无权访问」态，对齐 InvitationsCard 的 fail-closed 取向）；ProfileView
+  增平台角色只读展示。
+- **协议**：openapi 增 `/admin/*` 三路径 + `Me.platform_role`（required）+
+  `AdminUser` schema，契约门（TestRoutesMatchOpenapi）通过。
+- **验证**：go test 全绿（admin 模块矩阵：list 200/403、disable→access token
+  即时 401、enable 后可登录、自停用/agent 目标/未知用户 400/404、升降级
+  往返 + 非法值/自改 400）；内置浏览器 E2E——admin 登录侧栏出现平台管理段 →
+  用户管理页双行渲染（self 行「当前账号」无操作）→ 停用 round30-member
+  （徽章变已停用、按钮变恢复、toast 到达）→ 恢复 → 角色 admin↔user 往返 →
+  Profile 显示「管理员」→ 登出换 round30-member：侧栏无平台管理段、深链
+  /admin/users 呈现「无权访问平台管理功能」fail-closed 态。vue-tsc + build 绿。
+  dev server 已重建重启（同 .env，migration 00014 已在 dev 库生效，probe 经
+  存量回填成为 admin）。
 
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
@@ -888,6 +945,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | D11 | tag 与 task 的关联 | `PUT/DELETE /tasks/{id}/tags/{tag_id}`；关联是任务修改：条件 revision bump + `task.updated` 事件；Task DTO 的 `tags` 仅 get/attach/detach/update 响应填充 | tags 故事在 round 5 只做了「建/删」，attach 链路缺失导致 task_tags 表、search?tag= 过滤、Task.tags 字段全部空转。revision bump 使 tag 变更纳入既有乐观并发与事件流，不新造事件类型 |
 | D14 | 全局「根 TODO」的归属 | **默认工作区约定**：`default/<user>/todo`——普通 workspace + membership 权限隔离；不引入「个人工作区」类型；按需显式创建（不做首次使用自动开荒）；`<user>` = 登录用户名（非 usr_id、非可变 display_name） | 任务必须归属协作边界（授权/事件/审计的锚点）；全局任务映射为「个人默认容器」模型零改动。服务端命名空间强制（`default/<user>/*` 仅 `<user>` 可建）列为后续收紧项，触发条件：出现抢注/滥用 |
 | D15 | 任务树读取模型（v2 破坏性重构） | **容器化**：凡容器（workspace/task），子任务集合统一为 `GET/POST /workspaces/{id}/children` 与 `GET/POST /tasks/{id}/children`（同参数 status/tag/assignee/limit/cursor，同响应，行内批量填充 tags + children_count）；**移除** `GET/POST /workspaces/{id}/tasks`（同路径改语义=隐性漂移，禁止）；平面查询归 `GET /workspaces/{id}/task-search`（原 search 路径废除；结构化与内容过滤平权，≥1 条件守卫保留，补 assignee）；TaskCreate 移除 parent_id；嵌套树端点**永不建**（将来真需要属纯增量，不破坏 v2） | 「默认=根层、参数=子层、flat=逃生门」让一个集合背三种语义，不优雅；客户端递归只换容器 id。开发期零兼容负担，protocol_version 1→2、快照 v2、CLI/Web 锁步适配；v2 落地前排队中的 CLI tags/msg 暂缓以免白干 |
+| D16 | 平台全局角色模型（admin/user/agent 三角色，round 33/34） | **固定平台角色 + 全局 scope 词表**：`actors.platform_role`（human ∈ admin/user；agent/service 固化 kind，CHECK 钉死）；`GlobalScopesFor` 代码内 bundle 与 workspace 轴 `RoleToScopes` 同构，授权一律 `RequireGlobal` 按最终 scope 判定（403 INSUFFICIENT_SCOPE，无 404 分支）。**不建权限表**（psql 式 GRANT/REVOKE 无第三方自定义角色需求，且与 workspace 层两套体系并存）；**不做裸 `role=="admin"` 硬判**（与 scope 哲学割裂，加第二特权角色要逐点改）。首 human 即 admin（bootstrap 同管线）；停用=disabled_at 准入闸门 + 会话撤销加速 | 平台层此前零角色：任意 human 可签发服务器级 credential（代码自标 TODO phase-2）是真缺口。复刻 workspace 轴既有模式成本最低——加新特权=加 scope 常量授予 admin，零 schema 变更；opaque token 每请求查库使角色/停用变更即时生效（对比 JWT claim 需等 access TTL） |
 
 ## 2. 待裁决契约
 
@@ -1047,6 +1105,9 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-13 | 第 29 轮：新增错误码 `INVITE_INVALID`（400，四种失效统一防探测）、`EMAIL_TAKEN`（409） | 补充 | CLI/Web |
 | 2026-09-13 | 第 29 轮：新增事件类型 `security.invite.created/revoked/redeemed`（types.go→outbox 叶子包、event.json、web sse.ts 三方同步；纯增量，protocol_version 不变）。事件类型目录与 EmitTx 写侧移至 `server/internal/outbox`（auth 需在兑换事务内发事件，而 event/sse.go 反向依赖 auth，成环；读侧 hub/SSE/dispatcher 留在 modules/event） | 补充+内部 | CLI/Web |
 | 2026-09-13 | 第 29 轮：修复唯一约束冲突在非英文 locale PostgreSQL 上漏判（错误文案随服务器 locale 本地化，`store.IsUniqueViolation` 按 message 匹配失效 → EMAIL_TAKEN/WORKSPACE_NAME_TAKEN 等变 500）：`store.Open` 开 `TranslateError`，判断补 `gorm.ErrDuplicatedKey`（sqlite 单测路径保留 message 兜底）。E2E 真机 PG（中文 locale）验证 | 修复 | Web/CLI（错误码语义恢复契约） |
+| 2026-09-13 | 第 33 轮：Me 响应（/auth/me、login、register 共用）增 required 字段 `platform_role`（enum admin/user/agent/service，D16）；actor 形状（ActorDTO/成员列表）不带该字段；migration 00014 `actors.platform_role` + `disabled_at`（纯增量，protocol_version 不变） | 补充 | Web/CLI（CLI 纯增量兼容，`astral me` 后续可选消费） |
+| 2026-09-13 | 第 33 轮：行为收口——签发/吊销不绑定 workspace 的服务器级 credential 由「任意已注册 human」改为 `platform:credentials:manage`（admin 专属，403 INSUFFICIENT_SCOPE）；绑定 workspace 的路径不变（agent:manage） | 行为（破坏性收紧） | CLI（此前凭 human token 可发的用法被拒） |
+| 2026-09-13 | 第 34 轮：新增端点 `GET /admin/users`、`POST /admin/users/{id}/disable|enable`、`POST /admin/users/{id}/role`（body `{platform_role: admin\|user}`，返回 AdminUser）；新 schema `AdminUser`（含 email/disabled_at）；新增 scope 词表 `platform:users:read`/`platform:users:manage`/`platform:credentials:manage`（admin 角色专属，D16）；停用后该 actor 全部会话/凭证 401 `TOKEN_REVOKED`（account disabled） | 补充 | Web（CLI 不消费 /admin/*） |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -1148,4 +1209,12 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
     web cookie 是不同通道）；快照消费并入第 14 项 v2.1 刷新
 19. 邀请注册 P4（衍生）：SMTP 邮件邀请（.env 增 SMTP_*，邮件含
     `/register?code=` 链接）；邮箱验证策略随本项一并评估（MVP email 仅登录名）
+20. 【✅ 第 33 轮完成】平台角色基建（D16）：actors.platform_role + 全局 scope
+    词表 + RequireGlobal + 首 human=admin + 全局凭证收口（migration 00014）
+21. 【✅ 第 34 轮完成】admin 用户管理：/admin/* server 端点 + web 用户管理页
+    （列表/停用恢复/角色变更，fail-closed）+ 停用即时失效闸门
+22. 平台角色后续可选项（D16 延伸，触发再做）：注册策略开关（开放 vs 仅邀请，
+    server_meta + admin 切换）；全工作区可见（platform:workspaces:read，运维
+    排查用）；平台级 agent 账号（动 D9 语义）；web 全局 403 统一出口（现仍走
+    各 surface fail-closed）；CLI `astral me` 消费 platform_role
 

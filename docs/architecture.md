@@ -436,6 +436,30 @@ owner
 
 服务端授权只能依据最终计算后的 scope/policy，不能信任客户端传入 role 字符串。
 
+## 10.1 平台角色层（round 33/34）
+
+上述 Role/Scope 是 workspace 轴；平台全局轴由 `actors.platform_role` 表达：
+
+```text
+admin   — 平台管理员（GlobalScopesFor → platform:users:read|manage、platform:credentials:manage）
+user    — 普通 human（无平台 scope；workspace 内能力仍按成员角色计算）
+agent   — 固化 actors.kind='agent'（永无平台 scope；能力只由 credential scopes 决定）
+service — 固化 actors.kind='service'
+```
+
+裁决：
+
+- 不建权限表（roles/permissions/role_permissions）。固定角色 + 代码内
+  `GlobalScopesFor` bundle 与 workspace 轴的 `RoleToScopes` 同构；加新特权 =
+  加 scope 常量并授予 admin，无 schema 变更。
+- 冷启动首个 human（bootstrap 向导与 web 零号邀请同管线）即 admin；后续
+  变更走 `/admin/users/{id}/role`，禁止自改/自停用（防自锁）。
+- 授权入口 `auth.RequireGlobal`（403 INSUFFICIENT_SCOPE，无 404 分支——平台
+  资源不因无权而隐藏）；Principal 在认证管线装载 platform_role，零额外查库。
+- 停用账号 `actors.disabled_at` 是准入闸门（authActor/Login/credential 三处
+  拒绝），会话撤销只是加速踢出；角色/停用变更即时生效（opaque token 每请求
+  查库，无 TTL 滞后）。
+
 ## 11. Workspace 与 `astral init` 服务端语义
 
 CLI 本地只保存：
