@@ -8,7 +8,6 @@ package workspace
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 // ApprovalTTL 决定窗口：过期由读路径惰性置 expired（无清扫器）。
@@ -87,14 +87,10 @@ func (m *Module) createApproval(w http.ResponseWriter, r *http.Request) {
 
 	// 目标必须是本 workspace 的非 owner 成员。
 	var member model.WorkspaceMember
-	err := m.DB.WithContext(r.Context()).First(&member,
-		"workspace_id = ? AND actor_id = ?", wsID, in.TargetActorID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		httpx.WriteError(w, r, httpx.NotFound("target actor is not a member of this workspace"))
-		return
-	}
-	if err != nil {
-		httpx.RespondError(w, r, err)
+	if apiErr := store.First(m.DB.WithContext(r.Context()), &member,
+		httpx.NotFound("target actor is not a member of this workspace"),
+		"workspace_id = ? AND actor_id = ?", wsID, in.TargetActorID); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	if member.Role == "owner" {
@@ -121,7 +117,7 @@ func (m *Module) createApproval(w http.ResponseWriter, r *http.Request) {
 		Status: "requested", RequestedBy: p.ActorID,
 		ExpiresAt: time.Now().Add(ApprovalTTL),
 	}
-	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
@@ -172,13 +168,9 @@ func (m *Module) decideApproval(decision string) http.HandlerFunc {
 		p := auth.PrincipalFrom(r.Context())
 
 		var row model.Approval
-		err := m.DB.WithContext(r.Context()).First(&row, "id = ?", approvalID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.WriteError(w, r, httpx.NotFound("approval not found"))
-			return
-		}
-		if err != nil {
-			httpx.RespondError(w, r, err)
+		if apiErr := store.First(m.DB.WithContext(r.Context()), &row,
+			httpx.NotFound("approval not found"), "id = ?", approvalID); apiErr != nil {
+			httpx.WriteError(w, r, apiErr)
 			return
 		}
 		if _, apiErr := m.requireWorkspace(r, row.WorkspaceID, auth.ScopeWorkspaceManageMember); apiErr != nil {
@@ -191,7 +183,7 @@ func (m *Module) decideApproval(decision string) http.HandlerFunc {
 		}
 
 		now := time.Now()
-		err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 			res := tx.Model(&model.Approval{}).
 				Where("id = ? AND status = 'requested' AND expires_at > ?", row.ID, now).
 				Updates(map[string]any{

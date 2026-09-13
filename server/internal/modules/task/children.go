@@ -9,7 +9,6 @@ package task
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 // ---- GET <container>/children ----
@@ -137,12 +137,9 @@ func (m *Module) createChild(w http.ResponseWriter, r *http.Request) {
 // createTask 共用同一实现与文案）。
 func (m *Module) validateParent(ctx context.Context, wsID, parentID string) error {
 	var parent model.Task
-	err := m.DB.WithContext(ctx).First(&parent, "id = ?", parentID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return httpx.Invalid("parent must exist in the same workspace")
-	}
-	if err != nil {
-		return err
+	if apiErr := store.First(m.DB.WithContext(ctx), &parent,
+		httpx.Invalid("parent must exist in the same workspace"), "id = ?", parentID); apiErr != nil {
+		return apiErr
 	}
 	if parent.WorkspaceID != wsID {
 		return httpx.Invalid("parent must exist in the same workspace")
@@ -222,12 +219,10 @@ func (m *Module) resolveTagNames(ctx context.Context, wsID string, names []strin
 		}
 		seen[norm] = struct{}{}
 		var row model.Tag
-		err := m.DB.WithContext(ctx).First(&row, "workspace_id = ? AND normalized_name = ?", wsID, norm).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, httpx.NotFound("tag '" + name + "' does not exist in this workspace")
-		}
-		if err != nil {
-			return nil, err
+		if apiErr := store.First(m.DB.WithContext(ctx), &row,
+			httpx.NotFound("tag '"+name+"' does not exist in this workspace"),
+			"workspace_id = ? AND normalized_name = ?", wsID, norm); apiErr != nil {
+			return nil, apiErr
 		}
 		idsOut = append(idsOut, row.ID)
 	}

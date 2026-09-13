@@ -43,12 +43,10 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 		return nil, nil, apiErr
 	}
 	var tagRow model.Tag
-	err := m.DB.WithContext(ctx).First(&tagRow, "id = ? AND workspace_id = ?", tagID, t.WorkspaceID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, httpx.NotFound("tag not found in this workspace")
-	}
-	if err != nil {
-		return nil, nil, err
+	if apiErr := store.First(m.DB.WithContext(ctx), &tagRow,
+		httpx.NotFound("tag not found in this workspace"),
+		"id = ? AND workspace_id = ?", tagID, t.WorkspaceID); apiErr != nil {
+		return nil, nil, apiErr
 	}
 	if expectedRevision != nil && *expectedRevision != t.Revision {
 		return nil, nil, revisionConflict(t.Revision)
@@ -65,7 +63,7 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 	}
 
 	var fresh model.Task
-	err = m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := bumpRevisionTx(tx, taskID, t.Revision, map[string]any{"updated_by": p.ActorID}); err != nil {
 			return err
 		}

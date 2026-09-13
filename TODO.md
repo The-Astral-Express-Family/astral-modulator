@@ -634,16 +634,19 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
     `wireName()` 单点转换），嵌套三元 outcome 改 switch。
 - **验证**：server `go build/vet/test` 12 包全绿；web `vue-tsc`+`vite build`
   全绿；astral-cli 92/92。
-- **已识别未落地（下轮候选，按价值排序）**：
+- **已识别未落地（下轮候选，按价值排序；状态见各条）**：
   1. CLI `event_cmd` attempt 组装链（约 8 层 lambda 间接、认证策略与 api.cpp
      重复、`&store/&session` 引用捕获靠作用域约定兜底）收编进
      `ApiSession::sendStreaming`——本轮 listen 循环已动，此项涉及认证接线
-     形态，单独成提交；
-  2. server「First→NotFound/500」三行样板约 15 处（机械替换面大，收益中）；
-  3. server approval 状态机动作表（当前仅 promote_owner 一项，加第二动作前做）；
-  4. server `bootstrap.Run` 230 行主流程按段抽取（远端活跃开发中，避免踩线）；
-  5. web TaskTreeView 五处手写 try/catch 接入 useApiAction；session.login
-     三连请求（login 响应含 Me 却丢弃再 getMe）可省一次往返。
+     形态，单独成提交（**仍 open**）；
+  2. ~~server「First→NotFound/500」三行样板~~（✅ 第 31 轮：`store.First[T]`
+     单一出口，14 站点收敛，-54 行净删）；
+  3. server approval 状态机动作表（当前仅 promote_owner 一项，加第二动作前做，
+     **仍 open**）；
+  4. server `bootstrap.Run` 230 行主流程按段抽取（远端活跃开发中，避免踩线，
+     **仍 open**）；
+  5. web TaskTreeView 五处手写 try/catch 接入 useApiAction（✅ 复审后不采纳，
+     第 31 轮记录理由）；session.login 三连请求（✅ 第 30 轮：adoptMe 两请求）。
 
 ### 第 25 轮（2026-09-13）：任务树视图 UI 重设计（双栏，round13 分支移植）
 
@@ -774,6 +777,26 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   toast）→ SSE 实时收到 security.invite.created → 撤销后状态翻转、撤销按钮
   消失。reka-ui Button 的 Playwright 定位点击超时问题再现（round 24 已登记，
   非 app bug），用 requestSubmit/DOM click 绕过。
+
+### 第 31 轮（2026-09-13，Lidozs55）：server 样板收敛 —— store.First 单一出口
+
+- **新增 `store.First[T]`**：按 query 查一行的单一出口——命中 nil / 查无返回
+  调用方给定的资源语义错误（404 专用码、400、401 皆可）/ 其余 DB 故障统一
+  INTERNAL_ERROR（原始错误由 gorm logger 记录，不进公网 envelope）。收拢
+  round 24 遗留 ② 的「First→ErrRecordNotFound→404→else 500」三行样板。
+- **14 站点收敛**（净删 54 行）：workspace（requireWorkspace/addMember/
+  createCredential/revokeCredential/approval 两处/invitation）、task
+  （LoadForWorkspace/validateParent/tagByName/tag_attach）、tag（target/
+  loadProposal）、message（actor/task/thread 三处目标查询）。
+- **不收敛并说明理由**：task lease 读路径与 DAG 环回溯（查无是正常分支，
+  显式 switch 更直白）；auth 全模块（401/pending 语义各异，liveSession 已
+  是收敛点）；event/sse.go（游标缺口判断）。500 文案统一为 "lookup failed"
+  （原为 "xxx lookup failed" 三种漂移写法；错误契约在 code 不在 message）。
+- **web TaskTreeView 接入 useApiAction 复审后不采纳**：五处错误路径均带
+  自定义恢复逻辑（集合增删/mode 切换/loading 旗标），套组合式需 4-5 个实例
+  且 busy 全弃用，比现状更绕——与「避免冗杂实现」原则相悖，维持共享 error
+  ref + formatApiError 的平直写法。
+- **验证**：`go build/vet/test` 全绿（12 包 + 契约三门）。
 
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 

@@ -4,7 +4,6 @@ package message
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/task"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 type Module struct {
@@ -89,13 +89,9 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		//   - workspace 成员（human）；或
 		//   - agent/service：持有效 credential 且绑定本 workspace（未绑定 = 全局）。
 		var actor model.Actor
-		err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", in.Target.ID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.WriteError(w, r, httpx.NotFound("target actor not found"))
-			return
-		}
-		if err != nil {
-			httpx.RespondError(w, r, err)
+		if apiErr := store.First(m.DB.WithContext(r.Context()), &actor,
+			httpx.NotFound("target actor not found"), "id = ?", in.Target.ID); apiErr != nil {
+			httpx.WriteError(w, r, apiErr)
 			return
 		}
 		reachable, err := m.reachableInWorkspace(r.Context(), wsID, in.Target.ID)
@@ -111,13 +107,10 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		in.Target.ID = wsID
 	case "task":
 		var t model.Task
-		if err := m.DB.WithContext(r.Context()).First(&t, "id = ?", in.Target.ID).Error; err != nil {
-			// 与 thread/父任务查询同规矩：查无此行 404，DB 故障如实 500。
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				httpx.WriteError(w, r, httpx.NotFound("target task not found in workspace"))
-				return
-			}
-			httpx.RespondError(w, r, err)
+		// 与 thread/父任务查询同规矩：查无此行 404，DB 故障如实 500。
+		if apiErr := store.First(m.DB.WithContext(r.Context()), &t,
+			httpx.NotFound("target task not found in workspace"), "id = ?", in.Target.ID); apiErr != nil {
+			httpx.WriteError(w, r, apiErr)
 			return
 		}
 		if t.WorkspaceID != wsID {
@@ -131,13 +124,9 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 	var thread *string
 	if in.ThreadID != nil && *in.ThreadID != "" {
 		var parent model.Message
-		err := m.DB.WithContext(r.Context()).First(&parent, "id = ?", *in.ThreadID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.WriteError(w, r, httpx.NotFound("thread_id not found"))
-			return
-		}
-		if err != nil {
-			httpx.RespondError(w, r, err)
+		if apiErr := store.First(m.DB.WithContext(r.Context()), &parent,
+			httpx.NotFound("thread_id not found"), "id = ?", *in.ThreadID); apiErr != nil {
+			httpx.WriteError(w, r, apiErr)
 			return
 		}
 		// 与 actor/task 目标同规矩：thread parent 必须属于本 workspace，

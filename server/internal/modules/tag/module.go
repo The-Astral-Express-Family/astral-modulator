@@ -5,7 +5,6 @@ package tag
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -120,13 +119,10 @@ func (m *Module) propose(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var target model.Tag
-		err := m.DB.WithContext(r.Context()).First(&target, "id = ? AND workspace_id = ?", *in.TargetTagID, wsID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.WriteError(w, r, httpx.NotFound("target tag not found"))
-			return
-		}
-		if err != nil {
-			httpx.RespondError(w, r, err)
+		if apiErr := store.First(m.DB.WithContext(r.Context()), &target,
+			httpx.NotFound("target tag not found"),
+			"id = ? AND workspace_id = ?", *in.TargetTagID, wsID); apiErr != nil {
+			httpx.WriteError(w, r, apiErr)
 			return
 		}
 	}
@@ -249,12 +245,8 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 // loadProposalTx 事务内加载 proposal 行。
 func loadProposalTx(tx *gorm.DB, proposalID string) (model.TagProposal, error) {
 	var proposal model.TagProposal
-	e := tx.First(&proposal, "id = ?", proposalID).Error
-	if errors.Is(e, gorm.ErrRecordNotFound) {
-		return proposal, httpx.NotFound("proposal not found")
-	}
-	if e != nil {
-		return proposal, e
+	if apiErr := store.First(tx, &proposal, httpx.NotFound("proposal not found"), "id = ?", proposalID); apiErr != nil {
+		return proposal, apiErr
 	}
 	return proposal, nil
 }

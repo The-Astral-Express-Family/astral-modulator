@@ -163,12 +163,10 @@ func toTaskDTO(t model.Task, lease *model.TaskLease, tags []tag.TagDTO, childCou
 // task 的加载与 404 语义全仓只有这一处实现。
 func (m *Module) LoadForWorkspace(ctx context.Context, p *auth.Principal, taskID, need string) (*model.Task, *httpx.APIError) {
 	var t model.Task
-	err := m.DB.WithContext(ctx).First(&t, "id = ?", taskID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"}
-	}
-	if err != nil {
-		return nil, httpx.Internal("task lookup failed")
+	if apiErr := store.First(m.DB.WithContext(ctx), &t,
+		&httpx.APIError{Status: 404, Code: httpx.CodeTaskNotFound, Message: "task not found"},
+		"id = ?", taskID); apiErr != nil {
+		return nil, apiErr
 	}
 	if _, apiErr := m.Auth.RequireWorkspaceScopes(ctx, p, t.WorkspaceID, need); apiErr != nil {
 		return nil, apiErr

@@ -19,6 +19,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 // invitationRoles 是邀请可授角色白名单：永不含 owner（晋升必须走
@@ -188,13 +189,9 @@ func (m *Module) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 	p := auth.PrincipalFrom(r.Context())
 	invitationID := chi.URLParam(r, "invitation_id")
 	var inv model.Invitation
-	err := m.DB.WithContext(r.Context()).First(&inv, "id = ?", invitationID).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			httpx.WriteError(w, r, httpx.NotFound("invitation not found"))
-		} else {
-			httpx.RespondError(w, r, err)
-		}
+	if apiErr := store.First(m.DB.WithContext(r.Context()), &inv,
+		httpx.NotFound("invitation not found"), "id = ?", invitationID); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	if _, apiErr := m.requireWorkspace(r, inv.WorkspaceID, auth.ScopeWorkspaceManageMember); apiErr != nil {
@@ -213,7 +210,7 @@ func (m *Module) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: inv.WorkspaceID, ActorID: p.ActorID,
 			Action: "invite.revoke", Outcome: "allowed",

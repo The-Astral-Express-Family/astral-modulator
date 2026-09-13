@@ -3,7 +3,6 @@
 package workspace
 
 import (
-	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -81,12 +80,10 @@ type memberDTO struct {
 func (m *Module) requireWorkspace(r *http.Request, workspaceID string, need ...string) (*model.Workspace, *httpx.APIError) {
 	p := auth.PrincipalFrom(r.Context())
 	var ws model.Workspace
-	err := m.DB.WithContext(r.Context()).First(&ws, "id = ?", workspaceID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, &httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"}
-	}
-	if err != nil {
-		return nil, httpx.Internal("workspace lookup failed")
+	if apiErr := store.First(m.DB.WithContext(r.Context()), &ws,
+		&httpx.APIError{Status: 404, Code: httpx.CodeWorkspaceNotFound, Message: "workspace not found"},
+		"id = ?", workspaceID); apiErr != nil {
+		return nil, apiErr
 	}
 	if _, apiErr := m.Auth.RequireWorkspaceScopes(r.Context(), p, workspaceID, need...); apiErr != nil {
 		return nil, apiErr
@@ -303,17 +300,13 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var actor model.Actor
-	err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", in.ActorID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		httpx.WriteError(w, r, httpx.NotFound("actor not found"))
-		return
-	}
-	if err != nil {
-		httpx.RespondError(w, r, err)
+	if apiErr := store.First(m.DB.WithContext(r.Context()), &actor,
+		httpx.NotFound("actor not found"), "id = ?", in.ActorID); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	mem := model.WorkspaceMember{WorkspaceID: ws.ID, ActorID: in.ActorID, Role: in.Role}
-	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&mem).Error; err != nil {
 			return err
 		}
@@ -530,13 +523,9 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 	p := auth.PrincipalFrom(r.Context())
 	agentID := chi.URLParam(r, "agent_id")
 	var actor model.Actor
-	err := m.DB.WithContext(r.Context()).First(&actor, "id = ?", agentID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		httpx.WriteError(w, r, httpx.NotFound("agent not found"))
-		return
-	}
-	if err != nil {
-		httpx.RespondError(w, r, err)
+	if apiErr := store.First(m.DB.WithContext(r.Context()), &actor,
+		httpx.NotFound("agent not found"), "id = ?", agentID); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	if actor.Kind != "agent" && actor.Kind != "service" {
@@ -611,13 +600,9 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 	p := auth.PrincipalFrom(r.Context())
 	credentialID := chi.URLParam(r, "credential_id")
 	var cred model.Credential
-	err := m.DB.WithContext(r.Context()).First(&cred, "id = ?", credentialID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		httpx.WriteError(w, r, httpx.NotFound("credential not found"))
-		return
-	}
-	if err != nil {
-		httpx.RespondError(w, r, err)
+	if apiErr := store.First(m.DB.WithContext(r.Context()), &cred,
+		httpx.NotFound("credential not found"), "id = ?", credentialID); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	wsScope := ""
@@ -637,7 +622,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: wsScope, ActorID: p.ActorID,
 			Action: "credential.revoke", Outcome: "allowed",
