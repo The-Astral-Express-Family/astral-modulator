@@ -903,6 +903,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-13 | 第 29 轮：`POST /auth/register` 扩展 `invite_code` 分支（兑换=建号+条件更新抢邀请+入伙+audit invite.redeem/auth.register+outbox 同事务；email 撞车 409 且邀请不消耗）；operationId `registerBootstrap`→`register`；**两分支注册成功即建会话**（Set-Cookie + 响应=Me+session，与 login 同形状） | 行为 | CLI/Web |
 | 2026-09-13 | 第 29 轮：新增错误码 `INVITE_INVALID`（400，四种失效统一防探测）、`EMAIL_TAKEN`（409） | 补充 | CLI/Web |
 | 2026-09-13 | 第 29 轮：新增事件类型 `security.invite.created/revoked/redeemed`（types.go→outbox 叶子包、event.json、web sse.ts 三方同步；纯增量，protocol_version 不变）。事件类型目录与 EmitTx 写侧移至 `server/internal/outbox`（auth 需在兑换事务内发事件，而 event/sse.go 反向依赖 auth，成环；读侧 hub/SSE/dispatcher 留在 modules/event） | 补充+内部 | CLI/Web |
+| 2026-09-13 | 第 29 轮：修复唯一约束冲突在非英文 locale PostgreSQL 上漏判（错误文案随服务器 locale 本地化，`store.IsUniqueViolation` 按 message 匹配失效 → EMAIL_TAKEN/WORKSPACE_NAME_TAKEN 等变 500）：`store.Open` 开 `TranslateError`，判断补 `gorm.ErrDuplicatedKey`（sqlite 单测路径保留 message 兜底）。E2E 真机 PG（中文 locale）验证 | 修复 | Web/CLI（错误码语义恢复契约） |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 

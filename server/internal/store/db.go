@@ -25,6 +25,10 @@ import (
 func Open(ctx context.Context, dsn string, autoMigrate bool, log *slog.Logger) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
+		// 唯一约束等驱动错误翻译为 gorm.ErrDuplicatedKey：
+		// PG 错误文案随服务器 locale 本地化（如中文「重复键违反唯一约束」），
+		// 按 message 字符串判断在非英文部署下必然漏判。
+		TranslateError: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
@@ -79,6 +83,11 @@ func Ping(ctx context.Context, db *gorm.DB) error {
 func IsUniqueViolation(err error) bool {
 	if err == nil {
 		return false
+	}
+	// 生产 PG 走 TranslateError（见 Open）；sqlite（单测）不经翻译，
+	// 保留 message 兜底。
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "UNIQUE constraint") || strings.Contains(msg, "duplicate key")
