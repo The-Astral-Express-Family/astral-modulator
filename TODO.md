@@ -757,7 +757,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | A2 | access token 校验路径 | **每请求查库**（比对 sha256 hash）；MVP 单体延迟可接受；缓存接口后续再加 | ✅ 已实现 |
 | A3 | Web 审批页 API | `GET /api/v1/auth/device/authorizations?user_code=`（需 human session）+ `POST .../{id}/approve`、`POST .../{id}/deny` | ✅ 已实现 |
 | A4 | ASTRAL_TOKEN 格式 | Agent credential secret 为 `astral_<43字符base64url>` 随机串；服务端按 sha256 hash 查 credentials 表校验；请求头仍为 `Authorization: Bearer astral_...` | ✅ 已实现 |
-| A5 | human 注册形式（多账号进入通道） | **一次性邀请码注册**（2026-09-13 用户裁决）：workspace 绑定的一次性邀请码（human session + `workspace:manage_members` 签发；角色限 viewer/contributor/maintainer，不含 owner），持码者经 web/CLI 注册并同事务建号+入伙；链接 `/register?code=` 为核心分发形式，SMTP 邮件邀请为衍生期；bootstrap 保留为冷启动首账号路径；注册成功即建立 web 会话。设计 docs/registration.md + ADR-0008，实施分期 §11 第 16-19 项 | 已裁决，**待实施** |
+| A5 | human 注册形式（多账号进入通道） | **一次性邀请码注册**（2026-09-13 用户裁决）：workspace 绑定的一次性邀请码（human session + `workspace:manage_members` 签发；角色限 viewer/contributor/maintainer，不含 owner），持码者经 web/CLI 注册并同事务建号+入伙；链接 `/register?code=` 为核心分发形式，SMTP 邮件邀请为衍生期；bootstrap 保留为冷启动首账号路径；注册成功即建立 web 会话。设计 docs/registration.md + ADR-0008，实施分期 §11 第 16-19 项 | ✅ P1 server 已实现（第 29 轮）；P2-P4 待做 |
 | T1 | task 删除/取消语义 | （未裁决，phase-3）MVP 暂不提供 DELETE，仅 cancelled 状态 | **open** |
 | S1 | snapshot.required 事件与 outbox 保留窗口 | **已裁决并实装**：保留窗口 24h（`event.RetentionWindow`，清扫器每小时清理）；游标超窗下发 `snapshot.required`（reason=cursor_expired）后断流；已纳入 event.json 契约 | ✅ 已实现 |
 
@@ -898,6 +898,11 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-12 | 第 10 轮（modenicheng）：actors 表增 `bio`/`avatar_url`（00012，头像仅 http(s) 外链，服务端不抓取）；新增端点 `PATCH /auth/me`（部分更新语义：display_name/bio/avatar_url）；`Me` 响应增 `email`（human 只读）；Actor schema 增 `bio`/`avatar_url`。同时修复 /auth/register、/auth/login、/auth/me 直接序列化 model.Actor 导致字段名 PascalCase 与契约 snake_case 漂移的潜伏 bug（auth 模块引入 actorDTO） | 补充+修复 | CLI/Web |
 | 2026-09-13 | 整合轮（merge origin/main）：两侧并行开发的 DTO 双轨合一——第 10 轮引入的私有 `actorDTO` 并入 round 20 的全仓单一来源 `ActorDTO`（增补 bio/avatar_url，构造器仍为 `ToActorDTO`），workspace 模块复用点不变、openapi Actor schema（bio/avatar_url 必填）覆盖两端点；`newActorDTO` 删除 | 内部（重构） | 无（wire 不变，与 Actor schema 契约一致） |
 | 2026-09-13 | 第 28 轮：新增 env `ASTRAL_WEB_BASE_URL`——device flow `verification_uri[_complete]` 的 web 控制台基址（回退 PublicURL → 请求 Host）；两链接由相对路径改为绝对 URL（对齐 openapi `format: uri`） | 补充 | CLI（直接打开 verification_uri_complete）/Web |
+| 2026-09-13 | 第 29 轮：**邀请注册 P1 落地（A5）**——migration `00013_workspace_invitations`（码只存 sha256，CHECK 限 viewer/contributor/maintainer）；新增 ID 前缀 `inv` | 补充 | CLI/Web |
+| 2026-09-13 | 第 29 轮：新增端点 POST/GET `/workspaces/{id}/invitations`、POST `/invitations/{id}/revoke`（幂等 204）；授权=human session + `workspace:manage_members`（agent credential 403）；签发响应含 `code` 明文（仅一次）与 `invite_url`（`{WebBaseURL}/register?code=`，基址回退链与 device 链接同源 `auth.ResolveWebBaseURL`） | 补充 | CLI/Web |
+| 2026-09-13 | 第 29 轮：`POST /auth/register` 扩展 `invite_code` 分支（兑换=建号+条件更新抢邀请+入伙+audit invite.redeem/auth.register+outbox 同事务；email 撞车 409 且邀请不消耗）；operationId `registerBootstrap`→`register`；**两分支注册成功即建会话**（Set-Cookie + 响应=Me+session，与 login 同形状） | 行为 | CLI/Web |
+| 2026-09-13 | 第 29 轮：新增错误码 `INVITE_INVALID`（400，四种失效统一防探测）、`EMAIL_TAKEN`（409） | 补充 | CLI/Web |
+| 2026-09-13 | 第 29 轮：新增事件类型 `security.invite.created/revoked/redeemed`（types.go→outbox 叶子包、event.json、web sse.ts 三方同步；纯增量，protocol_version 不变）。事件类型目录与 EmitTx 写侧移至 `server/internal/outbox`（auth 需在兑换事务内发事件，而 event/sse.go 反向依赖 auth，成环；读侧 hub/SSE/dispatcher 留在 modules/event） | 补充+内部 | CLI/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -978,7 +983,7 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 14. 协议快照 v2.1 刷新（下次 CLI 消费契约变化时一并）：收拢 round 18 参数
     组件化与本轮 Task required/responses 组件对齐的形态漂移（均无语义变化，
     CLI 契约测试暂 pin 现有 v2 快照不受影响）
-16. 邀请注册 P1（server，A5，设计 docs/registration.md）：migration 00013
+16. 【✅ 第 29 轮完成】邀请注册 P1（server，A5，设计 docs/registration.md）：migration 00013
     `workspace_invitations`（id 前缀 `inv`，码只存 sha256）；三端点
     POST/GET `/workspaces/{id}/invitations`、POST `/invitations/{id}/revoke`
     （human session + manage_members；agent credential 403）；register 扩展
