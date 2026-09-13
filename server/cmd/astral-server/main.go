@@ -18,6 +18,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/app"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/admin"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/document"
@@ -64,6 +65,7 @@ func run() error {
 		Memory:      &memory.Module{},
 		Document:    &document.Module{},
 		Audit:       &audit.Module{},
+		Admin:       &admin.Module{},
 		Events:      &event.SSEHandler{Hub: hub}, // DB/Auth 在有库分支补挂（重放/授权需要）
 	}
 
@@ -98,6 +100,7 @@ func run() error {
 		mods.Message = msgMod
 		mods.Presence = presMod
 		mods.Tag = tagMod
+		mods.Admin = &admin.Module{DB: gormDB, Auth: authSvc, Log: log}
 
 		// SSE 重放需要读 outbox；订阅授权需要 auth service。
 		mods.Events.DB = gormDB
@@ -123,6 +126,7 @@ func run() error {
 		mods.Task = taskMod
 		mods.Message = &message.Module{Auth: authSvc, Tasks: taskMod}
 		mods.Presence = &presence.Module{Auth: authSvc}
+		mods.Admin = &admin.Module{Auth: authSvc, Log: log}
 		mods.Events.Auth = authSvc // 订阅授权 fail closed：无库模式下查询失败 → 404/503
 	}
 

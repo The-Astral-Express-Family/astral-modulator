@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/admin"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/document"
@@ -45,6 +46,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		Message:     &message.Module{DB: db, Auth: svc},
 		Presence:    &presence.Module{DB: db, Auth: svc},
 		Audit:       &audit.Module{},
+		Admin:       &admin.Module{DB: db, Auth: svc, Log: log},
 		Events:      &event.SSEHandler{Hub: hub, DB: db, Auth: svc},
 	}
 	mods.Message.Tasks = mods.Task

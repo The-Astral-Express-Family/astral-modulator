@@ -49,6 +49,7 @@ tags:
   - name: events
   - name: agents
   - name: approvals
+  - name: admin
 
 security:
   - bearerAuth: []
@@ -1093,6 +1094,85 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/AuditEntry" }
 
+  /admin/users:
+    get:
+      tags: [admin]
+      summary: 平台用户列表（human；platform:users:read）
+      operationId: listAdminUsers
+      responses:
+        "200":
+          description: 用户列表（平台用户量小，暂不分页）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminUser" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /admin/users/{actor_id}/disable:
+    post:
+      tags: [admin]
+      summary: 停用账号（platform:users:manage；在途会话立即失效；禁止自停用）
+      operationId: disableAdminUser
+      parameters:
+        - { name: actor_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 已停用 }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /admin/users/{actor_id}/enable:
+    post:
+      tags: [admin]
+      summary: 恢复账号（platform:users:manage）
+      operationId: enableAdminUser
+      parameters:
+        - { name: actor_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 已恢复 }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /admin/users/{actor_id}/role:
+    post:
+      tags: [admin]
+      summary: 变更平台角色（platform:users:manage；仅 human 的 admin/user 互转；禁止自改）
+      operationId: changeAdminUserRole
+      parameters:
+        - { name: actor_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform_role]
+              properties:
+                platform_role:
+                  type: string
+                  enum: [admin, user]
+      responses:
+        "200":
+          description: 已变更（返回 AdminUser）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUser" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1295,18 +1375,43 @@ components:
 
     Me:
       type: object
-      required: [actor]
+      required: [actor, platform_role]
       properties:
         actor: { $ref: "#/components/schemas/Actor" }
         email:
           type: string
           format: email
           description: human 本地登录邮箱（只读）；agent/service 省略
+        platform_role:
+          type: string
+          enum: [admin, user, agent, service]
+          description: 认证主体的平台全局角色（round 33）；授权按服务端 scope 计算，客户端仅作展示
         session:
           type: object
           properties:
             client_type: { type: string, enum: [cli, web] }
             expires_at: { type: string, format: date-time }
+
+    AdminUser:
+      type: object
+      description: 平台视角的用户条目（/admin/*，仅 admin 可见；含邮箱与停用态）
+      required: [id, kind, platform_role, display_name, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        kind: { type: string, enum: [human, agent, service] }
+        platform_role:
+          type: string
+          enum: [admin, user, agent, service]
+        display_name: { type: string }
+        email:
+          type: string
+          format: email
+          description: human_auth 中的登录邮箱；缺失时省略
+        disabled_at:
+          type: string
+          format: date-time
+          description: 非 null = 已停用
+        created_at: { type: string, format: date-time }
 
     Actor:
       type: object

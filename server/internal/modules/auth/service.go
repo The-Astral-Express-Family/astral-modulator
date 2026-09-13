@@ -366,6 +366,11 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (re
 	if e := s.DB.WithContext(ctx).First(&actorRow, "id = ?", ha.ActorID).Error; e != nil {
 		return "", nil, e
 	}
+	// 停用账号禁止登录（admin 用户管理，round 34）；文案不区分口令对错
+	// 之外的状态细节。
+	if actorRow.DisabledAt != nil {
+		return "", nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "account disabled"}
+	}
 	refresh, _, _, e := s.createSession(ctx, actorRow.ID, "web", ip, ua)
 	if e != nil {
 		return "", nil, e
@@ -537,6 +542,22 @@ func (s *Service) notifyRevoked(actorID string) {
 	}
 }
 
+// RevokeActorSessions 撤销主体的全部未撤销会话（平台停用账号用，round 34）。
+// 与 revokeFamily 同语义但不限 family；真正的准入闸门是 authActor/Login 的
+// DisabledAt 检查，这里只是把在途 access/refresh 立即作废并触发断流。
+func (s *Service) RevokeActorSessions(ctx context.Context, actorID string) (int64, error) {
+	res := s.DB.WithContext(ctx).Model(&model.Session{}).
+		Where("actor_id = ? AND revoked_at IS NULL", actorID).
+		Update("revoked_at", time.Now())
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected > 0 {
+		s.notifyRevoked(actorID)
+	}
+	return res.RowsAffected, nil
+}
+
 // ActorDTO 是 actor 的公网形状（openapi Actor schema：id/kind/display_name/
 // bio/avatar_url），全仓单一来源：workspace 模块的 member/agent 响应复用本
 // 类型，不手写平行 DTO。直接序列化 model.Actor 会漏出大写字段名（E2E round 20
@@ -612,6 +633,7 @@ func (s *Service) liveSession(ctx context.Context, hashColumn, hash, notFoundMsg
 
 // authActor 是 session 类认证管线的 actor 装载：access/cookie 两个入口只凭
 // session.actor_id 关联，这里统一补一次主键查询取 kind 与 platform_role。
+// 停用账号（admin 用户管理，round 34）在此统一拒绝：生效即时，不依赖会话撤销。
 func (s *Service) authActor(ctx context.Context, actorID string) (*model.Actor, *httpx.APIError) {
 	var actor model.Actor
 	err := s.DB.WithContext(ctx).First(&actor, "id = ?", actorID).Error
@@ -620,6 +642,9 @@ func (s *Service) authActor(ctx context.Context, actorID string) (*model.Actor, 
 	}
 	if err != nil {
 		return nil, httpx.Internal("auth lookup failed")
+	}
+	if actor.DisabledAt != nil {
+		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "account disabled"}
 	}
 	return &actor, nil
 }
@@ -657,6 +682,9 @@ func (s *Service) authenticateCredential(ctx context.Context, secret string) (*P
 	var actor model.Actor
 	if err := s.DB.WithContext(ctx).First(&actor, "id = ?", cred.ActorID).Error; err != nil {
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "credential actor missing"}
+	}
+	if actor.DisabledAt != nil {
+		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "account disabled"}
 	}
 	// last_used 异步更新，失败不影响请求；按分钟节流，避免每请求一条
 	// UPDATE（高频 agent 场景下是纯写放大）。

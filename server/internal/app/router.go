@@ -14,6 +14,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/admin"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/document"
@@ -61,6 +62,7 @@ type Modules struct {
 	Message   *message.Module
 	Presence  *presence.Module
 	Audit     *audit.Module
+	Admin     *admin.Module
 	Events    *event.SSEHandler
 }
 
@@ -123,6 +125,7 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 			mods.Message.RegisterRoutes(priv)
 			mods.Presence.RegisterRoutes(priv)
 			mods.Audit.RegisterRoutes(priv)
+			mods.Admin.RegisterRoutes(priv)
 			mods.Events.RegisterRoutes(priv)
 		})
 	})
