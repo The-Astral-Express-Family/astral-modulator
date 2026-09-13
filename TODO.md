@@ -688,6 +688,25 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 - **验证**：vue-tsc/build 全绿；浏览器页内轮询实证（展开骨架 max=2、详情骨架
   max=10、闪烁类命中）+ 定时截图自审（事件后子行无丢失/透明卡死）。
 
+
+### 第 27 轮（2026-09-13）：设备审批页独立布局 + Device Flow 全链路真机验收
+
+- **/device 独立化**：路由从 MainLayout children 提升为顶层（与 /login 同构）——
+  CLI 拉起的浏览器窗口不再携带应用外壳；视图补全屏居中容器。守卫链路不变：
+  未登录 `/device?code=X` → `/login?from=...` → 登录后原路返回自动查询。
+- **终态展示补齐**：lookup 直接命中非 pending（expired/denied/exchanged）也走
+  enterTerminal 终态 Alert（原先只显示卡片徽章，与「轮询发现」路径不一致）；
+  StatusBadge 补 exchanged variant。
+- **全链路真机验收**（收口 §11 第 3 项遗留）：curl 模拟 CLI + 内置浏览器走真实
+  审批 UI，9 项全过——create → pending 400 → 未登录重定向 /login 回跳 → 卡片
+  自动查询 → 批准终态 Alert → exchange 200（ata_/atr_）→ 重放 401 → /auth/me
+  Bearer 200 → 拒绝路径 exchange 401 + denied 终态展示。
+- **验收中发现的运行态问题**（留观，不在本轮代码内）：本地 8080 常驻
+  astral-server.exe 是旧编译产物（register 响应仍泄漏大写字段，round 20 已修），
+  已重启为当前源码，dev 库 bootstrap human 由验收账号占用；`verification_uri`
+  在 ASTRAL_PUBLIC_URL 未配置时返回相对路径 `/device`，CLI 需自行拼 base
+  （well-known 已有 Host 兜底，device create 尚无）——候选后续小轮。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -912,7 +931,7 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 1. 【✅ 第 9 轮完成】D11 tag attach/detach + D9 T-ws-7 + D10 session 上限 + 凭证/会话撤销断流
 2. 【✅ 第 10 轮完成】CI 修复（goose embed 目录、迁移 StatementBegin/End）+ 双仓库卫生轮
 3. 【✅ 第 11 轮完成】CLI login/init 实装（按 D12/D13 预审施工，双仓库端到端闭环；
-   端到端联调依赖真实服务器 + 浏览器审批，留待部署环境手动验收）
+   端到端联调已于第 27 轮在本地真机完成人工验收）
 4. 【✅ 第 13 轮完成】Web 任务树视图（第 17 轮已重构为逐容器懒加载）
 5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图 + device 审批页联调收尾
 6. 【✅ 第 16/19 轮完成】CLI todo v2 适配 + tags/msg 命令族（原第 7/8 条合并）
