@@ -95,7 +95,9 @@ router.beforeEach(async (to) => {
   }
   // 已登录访问 /login、/register：直接送去 from 目标或总览
   // （两页都是匿名专属动作；sanitize 已排除 /login 自身，无循环）。
-  if ((to.name === 'login' || to.name === 'register') && session.isLoggedIn) {
+  // mock 演示身份不算真实登录态，否则 VITE_TASKS_MOCK=1 的开发模式下
+  // 匿名注册/登录入口会被误弹走。
+  if ((to.name === 'login' || to.name === 'register') && session.isLoggedIn && !session.isDemo) {
     return sanitizeRedirect(to.query.from) ?? '/'
   }
 })
