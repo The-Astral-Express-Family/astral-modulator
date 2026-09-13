@@ -8,6 +8,11 @@
 -- +goose Up
 ALTER TABLE actors ADD COLUMN platform_role TEXT NOT NULL DEFAULT 'user';
 UPDATE actors SET platform_role = kind WHERE kind <> 'human';
+-- 存量部署：最早注册的 human 即 bootstrap 管理员（invite P1 之前它是唯一
+-- 建号通道），随迁移一并授予 admin，避免升级后出现「无 admin」死局。
+UPDATE actors SET platform_role = 'admin'
+WHERE kind = 'human'
+  AND id = (SELECT id FROM actors WHERE kind = 'human' ORDER BY created_at ASC LIMIT 1);
 ALTER TABLE actors ADD CONSTRAINT actors_platform_role_kind_check CHECK (
     (kind = 'human' AND platform_role IN ('admin','user'))
     OR (kind IN ('agent','service') AND platform_role = kind)
