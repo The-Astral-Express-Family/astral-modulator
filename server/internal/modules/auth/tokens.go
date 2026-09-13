@@ -51,19 +51,24 @@ func HashEqual(token, hash string) bool {
 // 供 user_code 与 tag confirm_code 共用（后者的生成器在 tag 包）。
 const humanCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
-// NewRandomCode 生成 n 位去混淆字符的随机码。
-// 单一授权点：新增需要"人类比对码"的场景时复用，不要再抄字母表。
-func NewRandomCode(n int) (string, error) {
+// randomFromAlphabet 是随机码生成的单一实现：n 字符取样自 alphabet。
+// 新增随机码场景在此复用并声明自己的字母表，不再抄循环（invite 字母表恰
+// 32 字符故 byte%len 无偏；user_code 的 31 字符表有 ±1/256 微偏，为既有
+// 接受设计——其定位见 docs/architecture.md §「user_code 随机强度」）。
+func randomFromAlphabet(alphabet string, n int) (string, error) {
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
-		return "", err
+		return "", fmt.Errorf("generate random code: %w", err)
 	}
 	out := make([]byte, n)
 	for i, b := range buf {
-		out[i] = humanCodeAlphabet[int(b)%len(humanCodeAlphabet)]
+		out[i] = alphabet[int(b)%len(alphabet)]
 	}
 	return string(out), nil
 }
+
+// NewRandomCode 生成 n 位去混淆字符的随机码（人短时手输场景）。
+func NewRandomCode(n int) (string, error) { return randomFromAlphabet(humanCodeAlphabet, n) }
 
 // NewUserCode 生成 XXXX-XXXX 形式的人类比对码（security.md：强度要求低于
 // device secret，但需限流防枚举——限流在 HTTP 层做，TODO(phase-6)）。
@@ -92,18 +97,11 @@ const inviteCodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 // 与 user_code（人短时手输）不同：邀请码要在邮箱/聊天里存活数天，防御对象
 // 是离线爆破，因此熵高两个量级（docs/registration.md §2.2）。
 func NewInviteCode() (string, error) {
-	buf := make([]byte, 20)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate invite code: %w", err)
+	body, err := randomFromAlphabet(inviteCodeAlphabet, 20)
+	if err != nil {
+		return "", err
 	}
-	var b strings.Builder
-	for i, c := range buf {
-		if i > 0 && i%5 == 0 {
-			b.WriteByte('-')
-		}
-		b.WriteByte(inviteCodeAlphabet[int(c)%len(inviteCodeAlphabet)])
-	}
-	return b.String(), nil
+	return strings.Join([]string{body[:5], body[5:10], body[10:15], body[15:]}, "-"), nil
 }
 
 // NormalizeInviteCode 是兑换时的码归一化（比对前唯一入口）：去分隔符、大写。

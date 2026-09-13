@@ -43,18 +43,14 @@ type approvalDTO struct {
 }
 
 func toApprovalDTO(a model.Approval) approvalDTO {
-	dto := approvalDTO{
+	return approvalDTO{
 		ID: a.ID, WorkspaceID: a.WorkspaceID, Action: a.Action,
 		TargetActorID: a.TargetActorID, Status: a.Status, RequestedBy: a.RequestedBy,
 		DecidedBy: a.DecidedBy,
+		DecidedAt: httpx.TimeString(a.DecidedAt),
 		ExpiresAt: a.ExpiresAt.UTC().Format(time.RFC3339),
 		CreatedAt: a.CreatedAt.UTC().Format(time.RFC3339),
 	}
-	if a.DecidedAt != nil {
-		t := a.DecidedAt.UTC().Format(time.RFC3339)
-		dto.DecidedAt = &t
-	}
-	return dto
 }
 
 func (m *Module) registerApprovalRoutes(r chi.Router) {

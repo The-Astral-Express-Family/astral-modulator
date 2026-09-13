@@ -25,7 +25,7 @@
 
 ## 2. 模型
 
-### 2.1 Invitation 实体（migration `00013_invitations`）
+### 2.1 Invitation 实体（migration `00013_workspace_invitations`）
 
 | 字段 | 说明 |
 |------|------|

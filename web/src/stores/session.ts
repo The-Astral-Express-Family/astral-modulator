@@ -75,11 +75,15 @@ export const useSessionStore = defineStore('session', () => {
   // 真实 API 消费方（侧栏/总览的列表拉取）据此跳过请求，避免 401 触发全局登出。
   const isDemo = computed(() => TASKS_MOCK && actor.value?.id === DEMO_ACTOR.id)
 
-  /** boot 与 login 共用的会话建立序列：Cookie 换 token 对 → 静默续期 → 拉身份。 */
-  async function establishSession(): Promise<void> {
-    const pair = await authApi.refreshWithCookie()
-    setAccessToken(pair)
+  /** Cookie 换 token 对 + 续期排程；establishSession / adoptMe 的共用前缀。 */
+  async function refreshAccess(): Promise<void> {
+    setAccessToken(await authApi.refreshWithCookie())
     scheduleRenewal()
+  }
+
+  /** boot 与 login 共用的会话建立序列：续期 → 拉身份。 */
+  async function establishSession(): Promise<void> {
+    await refreshAccess()
     const me = await authApi.getMe()
     actor.value = me.actor
     email.value = me.email ?? null
@@ -131,9 +135,7 @@ export const useSessionStore = defineStore('session', () => {
   // login/register 的响应本身就是 Me（含 actor/email），无需再 GET /auth/me：
   // 换 access token 一步即可（原 establishSession 的 3 请求收敛为 2）。
   async function adoptMe(me: { actor: Actor; email?: string }): Promise<void> {
-    const pair = await authApi.refreshWithCookie()
-    setAccessToken(pair)
-    scheduleRenewal()
+    await refreshAccess()
     actor.value = me.actor
     email.value = me.email ?? null
   }

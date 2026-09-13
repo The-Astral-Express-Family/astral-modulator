@@ -53,30 +53,21 @@ type invitationCreatedDTO struct {
 }
 
 func toInvitationDTO(inv model.Invitation) invitationDTO {
-	dto := invitationDTO{
+	return invitationDTO{
 		ID: inv.ID, WorkspaceID: inv.WorkspaceID, Role: inv.Role,
 		Status: inv.Status, CreatedBy: inv.CreatedBy,
 		CreatedAt:  inv.CreatedAt.UTC().Format(time.RFC3339),
 		ExpiresAt:  inv.ExpiresAt.UTC().Format(time.RFC3339),
 		RedeemedBy: inv.RedeemedBy,
+		RedeemedAt: httpx.TimeString(inv.RedeemedAt),
 	}
-	if inv.RedeemedAt != nil {
-		t := inv.RedeemedAt.UTC().Format(time.RFC3339)
-		dto.RedeemedAt = &t
-	}
-	return dto
 }
 
-// requireInviteAdmin 是三个管理端点的共同前置：human session + manage_members。
-func requireInviteAdmin(r *http.Request) *httpx.APIError {
-	if p := auth.PrincipalFrom(r.Context()); p == nil || !p.IsHuman() {
-		return httpx.Forbidden("human session required")
-	}
-	return nil
-}
+// 邀请管理三端点先过 auth.RequireHuman（human session 闸，agent credential
+// 一律 403——程序不能替人决定谁能进来），再各自走 requireWorkspace。
 
 func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
-	if apiErr := requireInviteAdmin(r); apiErr != nil {
+	if apiErr := auth.RequireHuman(r, "human session required"); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -150,7 +141,7 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) listInvitations(w http.ResponseWriter, r *http.Request) {
-	if apiErr := requireInviteAdmin(r); apiErr != nil {
+	if apiErr := auth.RequireHuman(r, "human session required"); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -182,7 +173,7 @@ func (m *Module) listInvitations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) revokeInvitation(w http.ResponseWriter, r *http.Request) {
-	if apiErr := requireInviteAdmin(r); apiErr != nil {
+	if apiErr := auth.RequireHuman(r, "human session required"); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -198,19 +189,19 @@ func (m *Module) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
-	// 对已关闭（redeemed/revoked）的撤销幂等 204；条件更新兜住并发双撤。
-	res := m.DB.WithContext(r.Context()).Model(&model.Invitation{}).
-		Where("id = ? AND status = 'invited'", inv.ID).
-		Update("status", "revoked")
-	if res.Error != nil {
-		httpx.RespondError(w, r, res.Error)
-		return
-	}
-	if res.RowsAffected == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
+	// 状态转移与审计/事件同一事务（与 invite.create 同规矩）：并发双撤只有
+	// 一方抢到 invited→revoked，输家与已关闭（redeemed/revoked）的重复撤销
+	// 都幂等 204，不落审计/事件。
 	err := m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Invitation{}).
+			Where("id = ? AND status = 'invited'", inv.ID).
+			Update("status", "revoked")
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: inv.WorkspaceID, ActorID: p.ActorID,
 			Action: "invite.revoke", Outcome: "allowed",

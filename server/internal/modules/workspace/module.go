@@ -547,7 +547,7 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}
-	} else if apiErr := requireHuman(r); apiErr != nil {
+	} else if apiErr := auth.RequireHuman(r, "human session required for unbound credentials"); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -614,7 +614,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, apiErr)
 			return
 		}
-	} else if apiErr := requireHuman(r); apiErr != nil {
+	} else if apiErr := auth.RequireHuman(r, "human session required for unbound credentials"); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
@@ -645,14 +645,6 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- helpers ----
-
-func requireHuman(r *http.Request) *httpx.APIError {
-	p := auth.PrincipalFrom(r.Context())
-	if p == nil || !p.IsHuman() {
-		return httpx.Forbidden("human session required for unbound credentials")
-	}
-	return nil
-}
 
 func validRole(role string) bool {
 	switch role {

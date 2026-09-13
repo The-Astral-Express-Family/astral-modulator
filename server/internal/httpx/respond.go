@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 )
 
 // Page 是 cursor 分页 envelope（docs/protocol.md §3）。
@@ -23,6 +24,16 @@ func NewPage[T any](items []T, nextCursor string) Page[T] {
 		p.NextCursor = nextCursor
 	}
 	return p
+}
+
+// TimeString 是 DTO 可选时间字段的单一转换点：*time.Time → RFC3339 字符串
+// 指针，nil 进 nil 出（消除 `if t != nil { s := ...; p = &s }` 手工样板）。
+func TimeString(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
 }
 
 // NotImplemented 是脚手架阶段的占位响应：HTTP 501 + NOT_IMPLEMENTED envelope。

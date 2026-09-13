@@ -829,6 +829,45 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   redeemed/revoked 状态流转 → 已登录访问 /register 弹走 → 演示身份下
   /register 正常渲染、总览/侧栏不再触发 401 弹走。
 
+### 第 32 轮 B 线（2026-09-13，Lidozs55）：卫生轮 —— 死代码清除、重复实现收拢、文档校准
+
+> 与第 32 轮（modenicheng，侧栏上下文升级）撞号：按「第 29 轮」先例以分线
+> 标注区分；两会话改动不相交（本线 server 为主 + session store 小抽，
+> 对方线 web 侧栏/守卫），session.ts 的 isDemo 与 refreshAccess 抽取已
+> 在变基中合并，合并后 vue-tsc 复验通过。
+
+- **删除 `event.EmitTx` 死副本**：round 29 把写侧拆到 `internal/outbox` 时，
+  旧实现未从 `event/outbox.go` 摘除；全仓调用点均已走 `outbox.EmitTx`，
+  event 包只余读侧（dispatcher/envelopeFromRow），随未用 import 一并删除。
+- **revokeInvitation 事务收口**：条件更新原在 audit/outbox 事务之外，两段
+  之间中断会留下「已撤销但无审计/事件」窗口；并入同一事务（与 invite.create
+  同规矩），幂等 204 与「仅赢家落审计/事件」语义不变。
+- **`randomFromAlphabet` 单点**：`NewInviteCode` 自抄了随机取样循环，违背
+  `NewRandomCode` 注释声明的「单一授权点」；两码共用循环、各持字母表。
+  同时修正注释的文档指向（user_code 强度定位在 architecture.md，原写
+  security.md 属失引——顺带全仓核对了本次新增注释的每处引用）。
+- **`httpx.TimeString`**：`*time.Time → RFC3339 *string` 单一转换点，收拢
+  invitation/approval/device 三处手工样板；副作用：credential `expires_at`
+  响应从本地时区偏移统一为 UTC（仍 RFC3339 date-time，其余端点本就是 UTC，
+  无 schema 变化）。
+- **`auth.RequireHuman(r, why)`**：四处 human session 闸（device find/decide
+  内联两处、邀请三端点、全局 credential 签发/吊销）收拢为单一实现，403
+  文案由调用点保留原语义；注册两分支的口令策略闸同抽 `hashPasswordOrInvalid`。
+- **scopes.go 意图注记**：agent 与 contributor 的 scope bundle 一致是 D9 的
+  刻意设计（agent 是 contributor 能力的凭证化载体，实际权限再经 credential
+  scopes 收窄），就地注释防止后续被当漂移「修复」或误同步修改。
+- **web session store**：establishSession/adoptMe 的 Cookie 续期前缀抽
+  `refreshAccess`（boot/login/register 三入口同一会话建立序列）。
+- **文档**：registration.md 迁移名 `00013_invitations` →
+  `00013_workspace_invitations`（与 §9 第 29 轮登记一致）。
+- **查过不动的**：git 索引恒为 LF（`git ls-files --eol` 证实），工作区 CRLF
+  系 autocrlf 所致，gofmt -l 的部分报警是工作区行尾假警，renormalize/加
+  .gitattributes 属 churn 不做；task `get` 租约 switch 与 Login 认证错误
+  分支维持显式写法（分支语义各异，收拢反而绕）。
+- **验证**：`go build/vet/test` 全绿（含 tests 包契约三门）；web
+  `vue-tsc` + `vite build` 全绿。无契约面变化（无新端点/事件/错误码），
+  CLI 快照 v2.1 不受影响。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，

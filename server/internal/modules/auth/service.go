@@ -189,6 +189,16 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, ip, ua string)
 	return s.registerBootstrap(ctx, in, ip, ua)
 }
 
+// hashPasswordOrInvalid 是注册两分支共用的口令策略闸：策略失败统一
+// 400 VALIDATION_FAILED（err.Error 即人类可读原因）。
+func hashPasswordOrInvalid(password string) (string, *httpx.APIError) {
+	hash, err := HashPassword(password)
+	if err != nil {
+		return "", &httpx.APIError{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed, Message: err.Error()}
+	}
+	return hash, nil
+}
+
 // registerBootstrap 是冷启动的「零号邀请」（A5）：仅当服务器还没有任何 human。
 func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
 	var humans int64
@@ -198,12 +208,12 @@ func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, u
 	if humans > 0 {
 		return nil, "", &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "registration closed: initial human already exists"}
 	}
-	hash, err := HashPassword(in.Password)
-	if err != nil {
-		return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: err.Error()}
+	hash, apiErr := hashPasswordOrInvalid(in.Password)
+	if apiErr != nil {
+		return nil, "", apiErr
 	}
 	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", DisplayName: in.DisplayName}
-	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(actor).Error; err != nil {
 			return err
 		}
@@ -238,9 +248,9 @@ func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, 
 	if inv.Status != "invited" || time.Now().After(inv.ExpiresAt) {
 		return nil, "", errInviteInvalid
 	}
-	hash, err := HashPassword(in.Password)
-	if err != nil {
-		return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: err.Error()}
+	hash, apiErr := hashPasswordOrInvalid(in.Password)
+	if apiErr != nil {
+		return nil, "", apiErr
 	}
 
 	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", DisplayName: in.DisplayName}

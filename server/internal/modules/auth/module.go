@@ -208,9 +208,8 @@ func (m *Module) exchangeDeviceToken(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) findForApproval(w http.ResponseWriter, r *http.Request) {
 	// A3：审批页查询。必须 human（agent credential 不能审批人类登录）。
-	p := PrincipalFrom(r.Context())
-	if !p.IsHuman() {
-		httpx.WriteError(w, r, httpx.Forbidden("human session required"))
+	if apiErr := RequireHuman(r, "human session required"); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	view, err := m.Svc.FindByUserCode(r.Context(), r.URL.Query().Get("user_code"))
@@ -230,11 +229,11 @@ func (m *Module) deny(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) decide(w http.ResponseWriter, r *http.Request, fn func(context.Context, string, string) error) {
-	p := PrincipalFrom(r.Context())
-	if !p.IsHuman() {
-		httpx.WriteError(w, r, httpx.Forbidden("human session required"))
+	if apiErr := RequireHuman(r, "human session required"); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
 		return
 	}
+	p := PrincipalFrom(r.Context())
 	if err := fn(r.Context(), chi.URLParam(r, "id"), p.ActorID); err != nil {
 		httpx.RespondError(w, r, err)
 		return
@@ -243,6 +242,16 @@ func (m *Module) decide(w http.ResponseWriter, r *http.Request, fn func(context.
 }
 
 // ---- helpers ----
+
+// RequireHuman 是「必须 human session」的统一闸（agent credential 一律 403）：
+// device 审批、邀请管理、全局 credential 签发/吊销同用——程序不能替人决定。
+// why 是面向该端点的 403 文案。
+func RequireHuman(r *http.Request, why string) *httpx.APIError {
+	if p := PrincipalFrom(r.Context()); p == nil || !p.IsHuman() {
+		return httpx.Forbidden(why)
+	}
+	return nil
+}
 
 func setSessionCookie(w http.ResponseWriter, r *http.Request, refresh string, maxAge int) {
 	if refresh == "" {

@@ -260,12 +260,8 @@ func (s *Service) IssueCredential(ctx context.Context, in CreateCredentialInput)
 	if err := s.DB.WithContext(ctx).Create(cred).Error; err != nil {
 		return nil, err
 	}
-	var exp *string
-	if in.ExpiresAt != nil {
-		f := in.ExpiresAt.Format(time.RFC3339)
-		exp = &f
-	}
-	return &IssuedCredential{CredentialID: cred.ID, Secret: secret, Scopes: in.Scopes, ExpiresAt: exp}, nil
+	return &IssuedCredential{CredentialID: cred.ID, Secret: secret, Scopes: in.Scopes,
+		ExpiresAt: httpx.TimeString(in.ExpiresAt)}, nil
 }
 
 // RevokeCredential 立即吊销。

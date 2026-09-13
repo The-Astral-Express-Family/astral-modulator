@@ -52,7 +52,9 @@ var AllScopes = []string{
 var RoleToScopes = map[string][]string{
 	"viewer":      {ScopeWorkspaceRead, ScopeTaskRead, ScopeTagRead, ScopeDocumentRead, ScopeMemoryRead, ScopeMessageRead},
 	"contributor": {ScopeWorkspaceRead, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite},
-	"agent":       {ScopeWorkspaceRead, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite},
-	"maintainer":  {ScopeWorkspaceRead, ScopeWorkspaceWrite, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTaskOverride, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite, ScopeAuditRead, ScopeAgentManage},
-	"owner":       AllScopes, // 含 workspace:manage_members 等
+	// agent 与 contributor 的 bundle 刻意一致（D9：agent 是 contributor 能力
+	// 的凭证化载体，实际权限再经 credential scopes 收窄）；分化时在此拆，勿默认同步。
+	"agent":      {ScopeWorkspaceRead, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite},
+	"maintainer": {ScopeWorkspaceRead, ScopeWorkspaceWrite, ScopeTaskRead, ScopeTaskWrite, ScopeTaskClaim, ScopeTaskOverride, ScopeTagRead, ScopeTagWrite, ScopeDocumentRead, ScopeDocumentWrite, ScopeMemoryRead, ScopeMemoryWrite, ScopeMessageRead, ScopeMessageSend, ScopePresenceWrite, ScopeAuditRead, ScopeAgentManage},
+	"owner":      AllScopes, // 含 workspace:manage_members 等
 }
