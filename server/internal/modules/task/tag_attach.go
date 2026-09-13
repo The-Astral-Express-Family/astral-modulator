@@ -16,8 +16,8 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
@@ -87,7 +87,7 @@ func (m *Module) AttachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeTaskUpdated, t.WorkspaceID, p.ActorID, fresh.Revision,
+		return outbox.EmitTx(tx, outbox.TypeTaskUpdated, t.WorkspaceID, p.ActorID, fresh.Revision,
 			map[string]any{"task_id": taskID, "tag_change": "attach", "tag_id": tagID})
 	})
 	if errors.Is(err, errAlreadyLinked) {
@@ -133,7 +133,7 @@ func (m *Module) DetachTag(ctx context.Context, p *auth.Principal, taskID, tagID
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeTaskUpdated, t.WorkspaceID, p.ActorID, t.Revision+1,
+		return outbox.EmitTx(tx, outbox.TypeTaskUpdated, t.WorkspaceID, p.ActorID, t.Revision+1,
 			map[string]any{"task_id": taskID, "tag_change": "detach", "tag_id": tagID})
 	})
 }

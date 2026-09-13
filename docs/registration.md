@@ -3,8 +3,8 @@
 > 裁决来源：2026-09-13 用户裁决——注册形式采用**一次性邀请码注册**，web 与 CLI
 > 均可注册；链接注册 / 邮件邀请链接为衍生分发形式。决策记录见
 > [ADR-0008](adr/0008-invite-registration.md)，TODO.md §2 A5。
-> 本文描述目标设计；已实现契约的唯一事实来源仍是 api/openapi.yaml，
-> 实施轮落地时以本目录与 openapi 为准同步。
+> P1（server）已于第 29 轮落地（2026-09-13）；本文与实现的出入已就地校准，
+> 已实现契约的唯一事实来源是 api/openapi.yaml。
 
 ## 1. 目标与非目标
 
@@ -29,7 +29,7 @@
 
 | 字段 | 说明 |
 |------|------|
-| `id` | `inv_<uuidv7>`（新 ID 前缀 `inv`，实施时登记 protocol.md §3 与契约变更登记） |
+| `id` | `inv_<uuidv7>`（新 ID 前缀 `inv`，登记于 openapi Id schema 说明与 TODO.md §9） |
 | `workspace_id` | 绑定的 workspace（邀请即「加入该 workspace」的凭证） |
 | `role` | `viewer` / `contributor` / `maintainer`（**不含 owner**，见 §6.3） |
 | `code_hash` | 邀请码的 sha256（唯一索引）；**明文码不落库** |
@@ -60,7 +60,7 @@
 
 | 端点 | 授权 | 语义 |
 |------|------|------|
-| `POST /workspaces/{id}/invitations` | human session + `workspace:manage_members` | 签发。body `{role, expires_in?}` → 201 `{id, code, workspace_id, role, created_at, expires_at}`，`code` 仅本次返回 |
+| `POST /workspaces/{id}/invitations` | human session + `workspace:manage_members` | 签发。body `{role, expires_in?}`（秒，缺省 7d 上限 30d）→ 201 `{id, code, invite_url, workspace_id, role, status, created_at, expires_at}`，`code` 明文与拼好的 `invite_url` 仅本次返回 |
 | `GET /workspaces/{id}/invitations?status=` | human session + `workspace:manage_members` | 列表（`{items,next_cursor}` 分页信封），**不含 code**（库里只有 hash） |
 | `POST /invitations/{id}/revoke` | human session + `workspace:manage_members` | `invited`→`revoked`；对已关闭（redeemed/revoked）的撤销**幂等 204**；不存在 404 |
 | `POST /auth/register`（扩展） | 匿名（凭邀请码） | body 增 `invite_code`：兑换 + 建号 + 入伙一个事务；**注册成功即建立 web 会话**（响应 = 现有 `MeResponse` + `session`，与 login 同形状） |
@@ -90,7 +90,7 @@
    b. UPDATE workspace_invitations
       SET status='redeemed', redeemed_by=<actor>
       WHERE id=? AND status='invited'          ← 条件更新，抢不到即并发已用
-   c. INSERT workspace_members(workspace, actor, role)（已是成员则跳过，不报错）
+   c. INSERT workspace_members(workspace, actor, role)（账号为本事务新建，不存在既有成员行）
    d. audit：invite.redeem + auth.register 两条（同事务三件套惯例）
    e. outbox：security.invite.redeemed 事件
 5. 建会话（access+refresh，与 login 同管线），setSessionCookie
@@ -108,9 +108,9 @@ email 撞车：唯一约束在 `a` 步先挡，邀请不消耗。
   外壳，方便从邮件/聊天链接直达）；
 - 从 `?code=` 预填邀请码（也支持手动输入）；
 - 提交 → 注册 + 自动登录 → 按 `from` 参数或默认跳转；
-- 页面注明「注册即加入 <workspace 名>」——码在手上时先调
-  `GET /auth/invitations/preview?code=`（P1 可选端点）或注册响应内带回显，
-  实施轮择一，避免盲输码。
+- 「避免盲输码」裁决为**不设 preview 端点**：preview 是一次免 bcrypt、免建号的
+  轻量探测 oracle，对防爆破只有坏处；签发响应已带 `invite_url`（含 workspace
+  语境的链接由分发者转达），注册成功后的会话可自行拉 workspace 列表回显。
 
 ### 5.2 CLI 注册
 

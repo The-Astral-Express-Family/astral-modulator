@@ -10,14 +10,14 @@ import (
 )
 
 // TestEventTypesSync 保证事件类型目录三处不漂移：
-//  1. server/internal/modules/event/types.go（服务端实现）；
+//  1. server/internal/outbox/types.go（服务端实现，含事务内写侧）；
 //  2. api/schemas/event.json（契约，CLI 快照的源）；
 //  3. web/src/api/sse.ts（Web 订阅清单）。
 //
 // 任一侧新增/删除事件而其他侧未同步，CI 在此失败。
 func TestEventTypesSync(t *testing.T) {
 	// 服务端常量（types.go 中 Type* = "..." 形式）。
-	typesGo, err := os.ReadFile(filepath.Join("..", "..", "..", "server", "internal", "modules", "event", "types.go"))
+	typesGo, err := os.ReadFile(filepath.Join("..", "..", "..", "server", "internal", "outbox", "types.go"))
 	if err != nil {
 		t.Fatal(err)
 	}

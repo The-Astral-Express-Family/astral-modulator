@@ -17,7 +17,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
@@ -25,6 +25,10 @@ type Module struct {
 	DB *gorm.DB
 	// Auth 提供 scope 解析与 credential 签发/吊销。
 	Auth *auth.Service
+	// WebBaseURL/PublicURL 供邀请注册链接拼装（回退链同 device flow，
+	// 见 auth.ResolveWebBaseURL）；可留空（兜底请求 Host）。
+	WebBaseURL string
+	PublicURL  string
 }
 
 // RegisterRoutes 全部端点已实装（原 501 桩移除）。
@@ -42,6 +46,9 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/workspaces/{workspace_id}/agents", m.createAgent)
 	r.Post("/agents/{agent_id}/credentials", m.createCredential)
 	r.Delete("/agents/{agent_id}/credentials/{credential_id}", m.revokeCredential)
+	r.Post("/workspaces/{workspace_id}/invitations", m.createInvitation)
+	r.Get("/workspaces/{workspace_id}/invitations", m.listInvitations)
+	r.Post("/invitations/{invitation_id}/revoke", m.revokeInvitation)
 	m.registerApprovalRoutes(r)
 }
 
@@ -318,7 +325,7 @@ func (m *Module) addMember(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
+		return outbox.EmitTx(tx, outbox.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
 			"actor_id": in.ActorID, "role": in.Role, "change": "added",
 		})
 	})
@@ -371,7 +378,7 @@ func (m *Module) updateMember(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
+		return outbox.EmitTx(tx, outbox.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
 			"actor_id": actorID, "role": in.Role, "change": "updated",
 		})
 	})
@@ -405,7 +412,7 @@ func (m *Module) removeMember(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
+		return outbox.EmitTx(tx, outbox.TypeWorkspaceMemberChanged, ws.ID, p.ActorID, 0, map[string]any{
 			"actor_id": actorID, "change": "removed",
 		})
 	})
@@ -587,7 +594,7 @@ func (m *Module) createCredential(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if in.Workspace != "" {
-			return event.EmitTx(tx, event.TypeSecurityCredentialCreated, in.Workspace, p.ActorID, 0, map[string]any{
+			return outbox.EmitTx(tx, outbox.TypeSecurityCredentialCreated, in.Workspace, p.ActorID, 0, map[string]any{
 				"credential_id": issued.CredentialID, "actor_id": agentID,
 			})
 		}
@@ -639,7 +646,7 @@ func (m *Module) revokeCredential(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if wsScope != "" {
-			return event.EmitTx(tx, event.TypeSecurityCredentialRevoked, wsScope, p.ActorID, 0, map[string]any{
+			return outbox.EmitTx(tx, outbox.TypeSecurityCredentialRevoked, wsScope, p.ActorID, 0, map[string]any{
 				"credential_id": credentialID, "actor_id": cred.ActorID,
 			})
 		}

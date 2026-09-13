@@ -32,7 +32,7 @@ func strPtr(v string) *string { return &v }
 func TestUpdateProfile(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	actor, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe", DisplayName: "Hime"})
+	actor, _, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe", DisplayName: "Hime"}, "ip", "ua")
 
 	updated, err := s.UpdateProfile(ctx, actor.ID, UpdateProfileInput{
 		DisplayName: strPtr("  Hime Chen  "),
@@ -107,7 +107,7 @@ func TestUpdateProfile(t *testing.T) {
 func TestHumanEmail(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	actor, _ := s.Register(ctx, RegisterInput{Email: "Human@Example.com", Password: "hunter2safe"})
+	actor, _, _ := s.Register(ctx, RegisterInput{Email: "Human@Example.com", Password: "hunter2safe"}, "ip", "ua")
 	if email, err := s.HumanEmail(ctx, actor.ID); err != nil || email != "human@example.com" {
 		t.Fatalf("email = %q err = %v", email, err)
 	}
@@ -124,7 +124,7 @@ func TestHumanEmail(t *testing.T) {
 func TestMeEndpointsSerialization(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe", DisplayName: "Hime"})
+	s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe", DisplayName: "Hime"}, "ip", "ua")
 	refresh, actor, err := s.Login(ctx, "human@example.com", "hunter2safe", "ip", "ua")
 	if err != nil {
 		t.Fatal(err)

@@ -53,6 +53,14 @@ const (
 	// CodeApprovalExpired：approval 已过期或已裁决（409）。
 	CodeApprovalExpired = "APPROVAL_EXPIRED"
 
+	// CodeInviteInvalid：邀请码不存在/已兑换/已撤销/已过期统一此码同文案
+	// （400，防探测——持有者对码的失效原因无合法需求，docs/registration.md §3）。
+	CodeInviteInvalid = "INVITE_INVALID"
+
+	// CodeEmailTaken：email 已被注册（409）。仅在邀请码验证通过后才会暴露
+	// （要求持有效码才可探测，泄露面可接受，docs/registration.md §3）。
+	CodeEmailTaken = "EMAIL_TAKEN"
+
 	// CodeNotImplemented 仅用于脚手架阶段的未实现端点（HTTP 501）。
 	// 它不属于稳定公网错误码集合；各 Phase 完成后对应端点必须移除此响应。
 	// CLI/GUI 不得依赖此 code 做正式逻辑。

@@ -86,7 +86,7 @@ func run() error {
 		authSvc = auth.NewService(gormDB, log)
 		// security.md：凭证/会话撤销后主动断开该 actor 的 SSE 流。
 		authSvc.OnRevoke = func(actorID string) { hub.DisconnectActor(actorID) }
-		wsMod := &workspace.Module{DB: gormDB, Auth: authSvc}
+		wsMod := &workspace.Module{DB: gormDB, Auth: authSvc, PublicURL: cfg.PublicURL, WebBaseURL: cfg.WebBaseURL}
 		taskMod := &task.Module{DB: gormDB, Auth: authSvc, Log: log}
 		msgMod := &message.Module{DB: gormDB, Auth: authSvc, Tasks: taskMod}
 		presMod := &presence.Module{DB: gormDB, Auth: authSvc}

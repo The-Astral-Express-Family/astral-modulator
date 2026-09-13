@@ -15,6 +15,9 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
 // Service 承载全部认证/授权业务（device flow、session、credential、scope）。
@@ -148,41 +151,57 @@ func RequireWorkspace(r *http.Request, svc *Service, workspaceID string, need ..
 	return apiErr
 }
 
-// ---- 注册 / 登录（human，web 侧；TODO.md D6）----
+// ---- 注册 / 登录（human，web 侧；TODO.md D6/A5）----
 
 type RegisterInput struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
+	// InviteCode 非空走邀请兑换分支（docs/registration.md §4）；为空保持
+	// bootstrap-only 守卫（服务器已有 human 即 403）。
+	InviteCode string `json:"invite_code,omitempty"`
 }
 
-// Register 仅在服务器还没有任何 human 时开放（bootstrap）。
-// 后续 human 的加入方式（邀请/审批）未定稿，见 TODO.md。
-func (s *Service) Register(ctx context.Context, in RegisterInput) (*model.Actor, error) {
+// errInviteInvalid 是邀请码失效的统一错误：不存在/已兑换/已撤销/已过期
+// 同码同文案，不给区分（防探测，docs/registration.md §3）。
+var errInviteInvalid = &httpx.APIError{
+	Status:  http.StatusBadRequest,
+	Code:    httpx.CodeInviteInvalid,
+	Message: "invite code is invalid or expired",
+}
+
+// Register 注册 human 账号并建立 web 会话，返回 actor 与 refresh token
+// （refresh 进 HttpOnly Cookie，由 HTTP 层写入，与 login 同管线）。
+func (s *Service) Register(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
 	if _, dbErr := s.dbOrError(); dbErr != nil {
-		return nil, dbErr
+		return nil, "", dbErr
 	}
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	if in.Email == "" || !strings.Contains(in.Email, "@") {
-		return nil, httpx.Invalid("invalid email")
+		return nil, "", httpx.Invalid("invalid email")
 	}
 	if strings.TrimSpace(in.DisplayName) == "" {
 		in.DisplayName = strings.SplitN(in.Email, "@", 2)[0]
 	}
+	if in.InviteCode != "" {
+		return s.registerWithInvite(ctx, in, ip, ua)
+	}
+	return s.registerBootstrap(ctx, in, ip, ua)
+}
 
+// registerBootstrap 是冷启动的「零号邀请」（A5）：仅当服务器还没有任何 human。
+func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
 	var humans int64
 	if err := s.DB.WithContext(ctx).Model(&model.Actor{}).Where("kind = ?", "human").Count(&humans).Error; err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if humans > 0 {
-		return nil, &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "registration closed: initial human already exists"}
+		return nil, "", &httpx.APIError{Status: 403, Code: httpx.CodeInsufficientScope, Message: "registration closed: initial human already exists"}
 	}
-
 	hash, err := HashPassword(in.Password)
 	if err != nil {
-		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: err.Error()}
+		return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: err.Error()}
 	}
-
 	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", DisplayName: in.DisplayName}
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(actor).Error; err != nil {
@@ -191,10 +210,95 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*model.Actor,
 		return tx.Create(&model.HumanAuth{ActorID: actor.ID, Email: in.Email, PasswordHash: hash}).Error
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	refresh, _, _, err := s.createSession(ctx, actor.ID, "web", ip, ua)
+	if err != nil {
+		return nil, "", err
 	}
 	s.Log.Info("bootstrap human registered", "actor_id", actor.ID)
-	return actor, nil
+	return actor, refresh, nil
+}
+
+// registerWithInvite 是邀请兑换注册（docs/registration.md §4）：
+// 建号 + 条件更新邀请 + 入伙 + 审计/事件同事务。邀请码校验先于口令策略
+// （失效码一律 errInviteInvalid，不泄露具体原因）；email 撞车由唯一索引
+// 兜底（此时邀请不消耗，可换邮箱重试）。
+func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
+	var inv model.Invitation
+	err := s.DB.WithContext(ctx).
+		Where("code_hash = ?", HashToken(NormalizeInviteCode(in.InviteCode))).
+		First(&inv).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, "", errInviteInvalid
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if inv.Status != "invited" || time.Now().After(inv.ExpiresAt) {
+		return nil, "", errInviteInvalid
+	}
+	hash, err := HashPassword(in.Password)
+	if err != nil {
+		return nil, "", &httpx.APIError{Status: 400, Code: httpx.CodeValidationFailed, Message: err.Error()}
+	}
+
+	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", DisplayName: in.DisplayName}
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(actor).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.HumanAuth{ActorID: actor.ID, Email: in.Email, PasswordHash: hash}).Error; err != nil {
+			return err
+		}
+		// 条件更新抢状态（tag confirm 验证过的模式）：并发同码只有一个
+		// 事务成功，输家整体回滚（actor 不残留）。
+		res := tx.Model(&model.Invitation{}).
+			Where("id = ? AND status = 'invited'", inv.ID).
+			Updates(map[string]any{"status": "redeemed", "redeemed_by": actor.ID, "redeemed_at": time.Now()})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errInviteInvalid
+		}
+		if err := tx.Create(&model.WorkspaceMember{WorkspaceID: inv.WorkspaceID, ActorID: actor.ID, Role: inv.Role}).Error; err != nil {
+			return err
+		}
+		if err := audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: inv.WorkspaceID, ActorID: actor.ID,
+			Action: "invite.redeem", Outcome: "allowed",
+			TargetType: "invitation", TargetID: inv.ID,
+			Details: map[string]any{"role": inv.Role},
+		}); err != nil {
+			return err
+		}
+		if err := audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: inv.WorkspaceID, ActorID: actor.ID,
+			Action: "auth.register", Outcome: "allowed",
+			TargetType: "actor", TargetID: actor.ID,
+		}); err != nil {
+			return err
+		}
+		return outbox.EmitTx(tx, outbox.TypeSecurityInviteRedeemed, inv.WorkspaceID, actor.ID, 0, map[string]any{
+			"invitation_id": inv.ID, "role": inv.Role,
+		})
+	})
+	if err != nil {
+		if errors.Is(err, errInviteInvalid) {
+			return nil, "", errInviteInvalid
+		}
+		if store.IsUniqueViolation(err) {
+			return nil, "", httpx.Conflict(httpx.CodeEmailTaken, "email already registered")
+		}
+		return nil, "", err
+	}
+	refresh, _, _, err := s.createSession(ctx, actor.ID, "web", ip, ua)
+	if err != nil {
+		return nil, "", err
+	}
+	s.Log.Info("human registered via invite", "actor_id", actor.ID, "workspace_id", inv.WorkspaceID)
+	return actor, refresh, nil
 }
 
 // Login 校验本地口令并创建 web session，返回 refresh token（进 HttpOnly Cookie）。

@@ -20,7 +20,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 )
 
 // ApprovalTTL 决定窗口：过期由读路径惰性置 expired（无清扫器）。
@@ -236,7 +236,7 @@ func (m *Module) decideApproval(decision string) http.HandlerFunc {
 			}); err != nil {
 				return err
 			}
-			return event.EmitTx(tx, event.TypeWorkspaceMemberChanged, row.WorkspaceID, p.ActorID, 0, map[string]any{
+			return outbox.EmitTx(tx, outbox.TypeWorkspaceMemberChanged, row.WorkspaceID, p.ActorID, 0, map[string]any{
 				"actor_id": row.TargetActorID, "role": "owner", "change": "promoted",
 				"approval_id": row.ID,
 			})

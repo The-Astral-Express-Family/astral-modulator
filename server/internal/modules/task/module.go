@@ -19,8 +19,8 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
@@ -98,7 +98,7 @@ func (m *Module) sweepOnce(ctx context.Context) {
 			if err := tx.Model(&model.Task{}).Where("id = ?", t.ID).Updates(updates).Error; err != nil {
 				return err
 			}
-			return event.EmitTx(tx, event.TypeTaskLeaseExpired, t.WorkspaceID, lease.HolderActorID, t.Revision+1,
+			return outbox.EmitTx(tx, outbox.TypeTaskLeaseExpired, t.WorkspaceID, lease.HolderActorID, t.Revision+1,
 				map[string]any{"task_id": t.ID, "previous_holder": lease.HolderActorID})
 		})
 		if err != nil {
@@ -333,7 +333,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeTaskUpdated, t.WorkspaceID, p.ActorID, fresh.Revision,
+		return outbox.EmitTx(tx, outbox.TypeTaskUpdated, t.WorkspaceID, p.ActorID, fresh.Revision,
 			map[string]any{"task_id": t.ID})
 	})
 	if err != nil {
@@ -424,7 +424,7 @@ func (m *Module) Claim(ctx context.Context, p *auth.Principal, taskID string, ex
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeTaskClaimed, current.WorkspaceID, p.ActorID, current.Revision+1,
+		return outbox.EmitTx(tx, outbox.TypeTaskClaimed, current.WorkspaceID, p.ActorID, current.Revision+1,
 			map[string]any{"task_id": taskID, "lease_expires_at": claimedLease.ExpiresAt.UTC().Format(time.RFC3339)})
 	})
 	if err != nil {
@@ -548,7 +548,7 @@ func (m *Module) release(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeTaskReleased, t.WorkspaceID, p.ActorID, t.Revision+1,
+		return outbox.EmitTx(tx, outbox.TypeTaskReleased, t.WorkspaceID, p.ActorID, t.Revision+1,
 			map[string]any{"task_id": taskID})
 	})
 	if err != nil {

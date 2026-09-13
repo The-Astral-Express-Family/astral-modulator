@@ -285,3 +285,21 @@ type Approval struct {
 }
 
 func (Approval) TableName() string { return "approvals" }
+
+// Invitation 见 00013_workspace_invitations.sql / docs/registration.md。
+// 一次性邀请码：库中只存归一化码的 sha256；expired 不落库（读路径按
+// status='invited' 且 now > expires_at 派生）；redemption 走条件更新抢状态。
+type Invitation struct {
+	ID          string `gorm:"primaryKey;size:40"`
+	WorkspaceID string `gorm:"index:idx_invitations_ws_status;size:40"`
+	Role        string `gorm:"size:32"`
+	CodeHash    string `gorm:"uniqueIndex;size:128"`
+	CreatedBy   string `gorm:"size:40"`
+	Status      string `gorm:"index:idx_invitations_ws_status;size:16"`
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	RedeemedBy  *string `gorm:"size:40"`
+	RedeemedAt  *time.Time
+}
+
+func (Invitation) TableName() string { return "workspace_invitations" }

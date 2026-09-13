@@ -83,9 +83,9 @@ paths:
   /auth/register:
     post:
       tags: [auth]
-      summary: Bootstrap 注册首个 Human（仅当服务器无 human 时开放；D6）
+      summary: 注册 Human（A5）：带 invite_code 走邀请兑换；不带则为 bootstrap（仅当服务器无 human）
       security: []
-      operationId: registerBootstrap
+      operationId: register
       requestBody:
         required: true
         content:
@@ -97,13 +97,22 @@ paths:
                 email: { type: string, format: email }
                 password: { type: string, minLength: 8, maxLength: 72, description: 需含字母与数字 }
                 display_name: { type: string }
+                invite_code:
+                  type: string
+                  description: >
+                    一次性邀请码（XXXXX-XXXXX-XXXXX-XXXXX，比对前归一化：去分隔符+大写）。
+                    兑换即建号 + 入伙 + 建立 web 会话（docs/registration.md §4）。
       responses:
         "201":
-          description: 已创建（返回 actor）
+          description: "已注册（Set-Cookie: astral_session；响应 = Me + session，与 login 同形状）"
+          headers:
+            Set-Cookie: { schema: { type: string }, description: "HttpOnly, SameSite=Lax, Secure(HTTPS)" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Me" }
-        "403": { $ref: "#/components/responses/Error" }   # 已有 human，注册关闭
+        "400": { $ref: "#/components/responses/Error" }   # INVITE_INVALID（四种失效统一防探测）或 VALIDATION_FAILED
+        "403": { $ref: "#/components/responses/Error" }   # bootstrap 分支：已有 human，注册关闭
+        "409": { $ref: "#/components/responses/Error" }   # EMAIL_TAKEN（此时邀请不消耗）
 
   /auth/login:
     post:
@@ -950,6 +959,57 @@ paths:
         "404": { $ref: "#/components/responses/Error" }   # 非成员：WORKSPACE_NOT_FOUND（不泄露存在性）
         "403": { $ref: "#/components/responses/Error" }   # 成员但缺 workspace:read scope
 
+  /workspaces/{workspace_id}/invitations:
+    parameters:
+      - { $ref: "#/components/parameters/WorkspaceId" }
+    post:
+      tags: [workspaces]
+      summary: 签发一次性邀请码（A5；需 human session + workspace:manage_members，agent credential 403）
+      operationId: createInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvitationCreate" }
+      responses:
+        "201":
+          description: 已签发；code 明文仅本次返回，invite_url 为拼好的注册链接
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationCreated" }
+        "400": { $ref: "#/components/responses/Error" }   # VALIDATION_FAILED（role/expires_in）
+        "403": { $ref: "#/components/responses/Error" }   # agent credential / INSUFFICIENT_SCOPE
+        "404": { $ref: "#/components/responses/Error" }   # 非成员不可见（WORKSPACE_NOT_FOUND）
+    get:
+      tags: [workspaces]
+      summary: 邀请列表（授权同签发；不含 code——库中只有 hash）
+      operationId: listInvitations
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [invited, redeemed, revoked] }
+      responses:
+        "200":
+          description: 邀请分页列表
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationPage" }
+        "400": { $ref: "#/components/responses/Error" }   # status 过滤值非法
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /invitations/{invitation_id}/revoke:
+    post:
+      tags: [workspaces]
+      summary: 撤销邀请（invited→revoked；对已关闭邀请幂等 204；授权同签发）
+      operationId: revokeInvitation
+      parameters:
+        - { name: invitation_id, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
+      responses:
+        "204": { description: 已撤销（或邀请本已关闭，幂等） }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /workspaces/{workspace_id}/agents:
     parameters:
       - { $ref: "#/components/parameters/WorkspaceId" }
@@ -1114,7 +1174,7 @@ components:
     Id:
       type: string
       pattern: "^[a-z]{2,3}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-      description: 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/prs/msg/evt/cred/ses/dev/req/aud/apv。
+      description: 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/prs/msg/evt/cred/ses/dev/req/aud/apv/inv。
       examples: ["ws_0192ab34-56cd-7ef8-9a01-234567890abc"]
 
     IdOrNull:
@@ -1147,6 +1207,8 @@ components:
         - TASK_LEASE_EXPIRED
         - TAG_PROPOSAL_EXPIRED
         - APPROVAL_EXPIRED        # approval 过期或已裁决（409）
+        - INVITE_INVALID          # 邀请码不存在/已兑换/已撤销/已过期统一此码（防探测，400）
+        - EMAIL_TAKEN             # email 已被注册（409，仅邀请码验证通过后可达）
         - TAG_ALREADY_EXISTS
         - REVISION_CONFLICT
         - DOCUMENT_CONFLICT
@@ -1298,6 +1360,61 @@ components:
       properties:
         actor_id: { $ref: "#/components/schemas/Id" }
         role: { $ref: "#/components/schemas/Role" }
+
+    InvitationRole:
+      type: string
+      enum: [viewer, contributor, maintainer]
+      description: 邀请可授角色（永不含 owner——晋升必须走 approval，D8）
+
+    InvitationCreate:
+      type: object
+      required: [role]
+      properties:
+        role: { $ref: "#/components/schemas/InvitationRole" }
+        expires_in:
+          type: integer
+          minimum: 1
+          maximum: 2592000
+          default: 604800
+          description: 有效期（秒）；缺省 7 天，上限 30 天
+
+    Invitation:
+      type: object
+      required: [id, workspace_id, role, status, created_by, created_at, expires_at]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        workspace_id: { $ref: "#/components/schemas/Id" }
+        role: { $ref: "#/components/schemas/InvitationRole" }
+        status:
+          type: string
+          enum: [invited, redeemed, revoked]
+          description: expired 为派生态（invited 且 now > expires_at），不落库
+        created_by: { $ref: "#/components/schemas/Id" }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        redeemed_by: { $ref: "#/components/schemas/IdOrNull" }
+        redeemed_at: { $ref: "#/components/schemas/DateTimeOrNull" }
+
+    InvitationCreated:
+      allOf:
+        - $ref: "#/components/schemas/Invitation"
+        - type: object
+          required: [code, invite_url]
+          properties:
+            code:
+              type: string
+              description: 邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次
+            invite_url:
+              type: string
+              format: uri
+              description: "{WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host"
+
+    InvitationPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
 
     TaskStatus:
       type: string

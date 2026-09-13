@@ -83,3 +83,31 @@ func NewUserCode() (string, error) {
 func IsCredentialToken(bearer string) bool {
 	return strings.HasPrefix(bearer, CredentialPrefix)
 }
+
+// inviteCodeAlphabet 是 Crockford base32（去 I/L/O/U）。恰好 32 字符，
+// byte%32 无取样偏差；20 字符 = 100 bit 熵。
+const inviteCodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+// NewInviteCode 生成一次性邀请码，分组展示形 XXXXX-XXXXX-XXXXX-XXXXX。
+// 与 user_code（人短时手输）不同：邀请码要在邮箱/聊天里存活数天，防御对象
+// 是离线爆破，因此熵高两个量级（docs/registration.md §2.2）。
+func NewInviteCode() (string, error) {
+	buf := make([]byte, 20)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate invite code: %w", err)
+	}
+	var b strings.Builder
+	for i, c := range buf {
+		if i > 0 && i%5 == 0 {
+			b.WriteByte('-')
+		}
+		b.WriteByte(inviteCodeAlphabet[int(c)%len(inviteCodeAlphabet)])
+	}
+	return b.String(), nil
+}
+
+// NormalizeInviteCode 是兑换时的码归一化（比对前唯一入口）：去分隔符、大写。
+// 库中 code_hash 一律基于归一化形式计算。
+func NormalizeInviteCode(code string) string {
+	return strings.ToUpper(strings.ReplaceAll(code, "-", ""))
+}

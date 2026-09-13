@@ -298,7 +298,7 @@ func createFirstHuman(ctx context.Context, ui *UI, db *gorm.DB, log *slog.Logger
 			fmt.Fprintf(ui.Out, "  ✗ %v\n", vErr)
 			continue
 		}
-		actor, rErr := svc.Register(ctx, auth.RegisterInput{Email: email, Password: pw, DisplayName: display})
+		actor, _, rErr := svc.Register(ctx, auth.RegisterInput{Email: email, Password: pw, DisplayName: display}, "", "astral-bootstrap")
 		if rErr == nil {
 			fmt.Fprintf(ui.Out, "  ✓ 管理员已创建：%s（actor_id=%s）\n", email, actor.ID)
 			return email, nil

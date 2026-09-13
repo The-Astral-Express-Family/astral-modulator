@@ -16,8 +16,8 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/task"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 )
 
 type Module struct {
@@ -159,7 +159,7 @@ func (m *Module) send(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeMessageCreated, wsID, p.ActorID, 0, map[string]any{
+		return outbox.EmitTx(tx, outbox.TypeMessageCreated, wsID, p.ActorID, 0, map[string]any{
 			"message_id": row.ID, "target_type": row.TargetType, "target_id": row.TargetID,
 		})
 	})

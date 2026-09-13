@@ -15,6 +15,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 )
 
 // SSEHandler 提供工作区事件流端点（docs/protocol.md §5）：
@@ -108,7 +109,7 @@ func (h *SSEHandler) stream(w http.ResponseWriter, r *http.Request) {
 			// 超窗：下发控制事件并断流，客户端重新拉快照。
 			writeEvent(w, flusher, Envelope{
 				ID:            "evt_snapshot_required",
-				Type:          TypeSnapshotRequired,
+				Type:          outbox.TypeSnapshotRequired,
 				WorkspaceID:   workspaceID,
 				OccurredAt:    time.Now().UTC().Format(time.RFC3339),
 				SchemaVersion: 1,

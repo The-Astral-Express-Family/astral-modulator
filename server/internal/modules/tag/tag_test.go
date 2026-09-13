@@ -12,6 +12,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
 
@@ -208,7 +209,7 @@ func TestEventsEmittedViaOutbox(t *testing.T) {
 
 	select {
 	case env := <-events:
-		if env.Type != event.TypeTagCreated {
+		if env.Type != outbox.TypeTagCreated {
 			t.Fatalf("unexpected event: %s", env.Type)
 		}
 	case <-time.After(2 * time.Second):

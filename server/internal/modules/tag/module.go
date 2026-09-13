@@ -18,7 +18,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
@@ -237,7 +237,7 @@ func (m *Module) Confirm(ctx context.Context, p *auth.Principal, proposalID, con
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, evType, proposal.WorkspaceID, p.ActorID, 0,
+		return outbox.EmitTx(tx, evType, proposal.WorkspaceID, p.ActorID, 0,
 			map[string]any{"tag_id": tag.ID, "name": normalized, "action": proposal.Action})
 	})
 	if err != nil {
@@ -321,7 +321,7 @@ func applyTagCreate(tx *gorm.DB, actorID string, proposal *model.TagProposal, na
 		}
 		return tag, "", err
 	}
-	return tag, event.TypeTagCreated, nil
+	return tag, outbox.TypeTagCreated, nil
 }
 
 func applyTagRename(tx *gorm.DB, proposal *model.TagProposal, name, normalized string) (model.Tag, string, error) {
@@ -337,7 +337,7 @@ func applyTagRename(tx *gorm.DB, proposal *model.TagProposal, name, normalized s
 	if res.RowsAffected == 0 {
 		return model.Tag{}, "", httpx.NotFound("target tag not found")
 	}
-	return model.Tag{ID: *proposal.TargetTagID, Name: name}, event.TypeTagRenamed, nil
+	return model.Tag{ID: *proposal.TargetTagID, Name: name}, outbox.TypeTagRenamed, nil
 }
 
 func applyTagDelete(tx *gorm.DB, proposal *model.TagProposal, name string) (model.Tag, string, error) {
@@ -348,7 +348,7 @@ func applyTagDelete(tx *gorm.DB, proposal *model.TagProposal, name string) (mode
 	if res.RowsAffected == 0 {
 		return model.Tag{}, "", httpx.NotFound("target tag not found")
 	}
-	return model.Tag{ID: *proposal.TargetTagID, Name: name}, event.TypeTagDeleted, nil
+	return model.Tag{ID: *proposal.TargetTagID, Name: name}, outbox.TypeTagDeleted, nil
 }
 
 // confirm：两步确认第二步的 HTTP 面（CLI 固定拼写 --confirm）。

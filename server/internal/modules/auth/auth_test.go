@@ -22,7 +22,7 @@ func TestRegisterBootstrapOnly(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
 
-	actor, err := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe", DisplayName: "Hime"})
+	actor, _, err := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe", DisplayName: "Hime"}, "ip", "ua")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -30,11 +30,11 @@ func TestRegisterBootstrapOnly(t *testing.T) {
 		t.Fatalf("unexpected actor: %+v", actor)
 	}
 	// 第二次注册必须被拒（bootstrap-only）。
-	if _, err := s.Register(ctx, RegisterInput{Email: "other@example.com", Password: "hunter2safe"}); err == nil {
+	if _, _, err := s.Register(ctx, RegisterInput{Email: "other@example.com", Password: "hunter2safe"}, "ip", "ua"); err == nil {
 		t.Fatal("second register should fail")
 	}
 	// 弱口令拒绝。
-	if _, err := s.Register(ctx, RegisterInput{Email: "x@y.com", Password: "short"}); err == nil {
+	if _, _, err := s.Register(ctx, RegisterInput{Email: "x@y.com", Password: "short"}, "ip", "ua"); err == nil {
 		t.Fatal("weak password should fail")
 	}
 }
@@ -42,7 +42,7 @@ func TestRegisterBootstrapOnly(t *testing.T) {
 func TestLoginAndSessionRefreshRotation(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	actor, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"})
+	actor, _, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"}, "ip", "ua")
 
 	// 错误口令 → 401 形状。
 	if _, _, err := s.Login(ctx, "human@example.com", "wrong-pass1", "ip", "ua"); err == nil {
@@ -84,7 +84,7 @@ func TestLoginAndSessionRefreshRotation(t *testing.T) {
 func TestDeviceFlow(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	actor, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"})
+	actor, _, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"}, "ip", "ua")
 
 	created, err := s.CreateDeviceAuthorization(ctx, "cli", "https://astral.example.com")
 	if err != nil {
@@ -152,7 +152,7 @@ func TestDeviceBaseURL(t *testing.T) {
 func TestCredentialLifecycle(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	actor, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"})
+	actor, _, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"}, "ip", "ua")
 	agent := &model.Actor{ID: "agt_test1", Kind: "agent", DisplayName: "Coder"}
 	if err := s.DB.Create(agent).Error; err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestCredentialLifecycle(t *testing.T) {
 func TestHumanCookieSession(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	actor, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"})
+	actor, _, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"}, "ip", "ua")
 	refresh, _, err := s.Login(ctx, "human@example.com", "hunter2safe", "ip", "ua")
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestUserCodeShape(t *testing.T) {
 func TestSessionExpiry(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	actor, _ := s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"})
+	s.Register(ctx, RegisterInput{Email: "human@example.com", Password: "hunter2safe"}, "ip", "ua")
 	agent := &model.Actor{ID: "agt_x1", Kind: "agent", DisplayName: "A"}
 	s.DB.Create(agent)
 
@@ -241,7 +241,10 @@ func TestSessionExpiry(t *testing.T) {
 	refresh, _, _ := s.Login(ctx, "human@example.com", "hunter2safe", "ip", "ua")
 	pair, _ := s.Refresh(ctx, refresh, "ip", "ua")
 	var sess model.Session
-	s.DB.Where("actor_id = ?", actor.ID).First(&sess)
+	// register 也会建会话（A5）；按 access hash 精确定位刚轮换出的这条。
+	if err := s.DB.Where("access_token_hash = ?", HashToken(pair.AccessToken)).First(&sess).Error; err != nil {
+		t.Fatal(err)
+	}
 	past := time.Now().Add(-time.Minute)
 	s.DB.Model(&model.Session{}).Where("id = ?", sess.ID).Update("access_expires_at", past)
 	if _, apiErr := s.ResolvePrincipal(ctx, pair.AccessToken, ""); apiErr == nil || apiErr.Code != httpx.CodeTokenExpired {
@@ -266,7 +269,8 @@ func TestRefreshHonorsAbsoluteSessionLife(t *testing.T) {
 			t.Fatalf("refresh near life end: %v", err)
 		}
 		var sess model.Session
-		if err := s.DB.Where("actor_id = ?", actor.ID).Order("created_at DESC").First(&sess).Error; err != nil {
+		// register 与 login 各有一条会话；取 id 最大（最晚创建）即刚轮换的这条。
+		if err := s.DB.Where("actor_id = ?", actor.ID).Order("id DESC").First(&sess).Error; err != nil {
 			t.Fatal(err)
 		}
 		wantCap := sess.CreatedAt.Add(s.MaxSessionLife)
@@ -293,7 +297,7 @@ func TestRefreshHonorsAbsoluteSessionLife(t *testing.T) {
 
 func (s *Service) loginSession(t *testing.T) (string, *model.Actor, error) {
 	t.Helper()
-	if _, err := s.Register(context.Background(), RegisterInput{Email: "human@example.com", Password: "hunter2safe"}); err != nil {
+	if _, _, err := s.Register(context.Background(), RegisterInput{Email: "human@example.com", Password: "hunter2safe"}, "ip", "ua"); err != nil {
 		return "", nil, err
 	}
 	return s.Login(context.Background(), "human@example.com", "hunter2safe", "ip", "ua")

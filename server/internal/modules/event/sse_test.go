@@ -17,6 +17,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
@@ -83,9 +84,9 @@ func TestSSEReplayFromLastEventID(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	emit("evt_01", TypeTaskCreated)
-	emit("evt_02", TypeTaskUpdated)
-	emit("evt_03", TypeTaskReleased)
+	emit("evt_01", outbox.TypeTaskCreated)
+	emit("evt_02", outbox.TypeTaskUpdated)
+	emit("evt_03", outbox.TypeTaskReleased)
 	// 模拟 dispatcher 已投递（重放只要求行在窗口内存在）。
 	if err := db.Model(&model.OutboxEvent{}).Where("1=1").Update("sent_at", time.Now()).Error; err != nil {
 		t.Fatal(err)
@@ -96,7 +97,7 @@ func TestSSEReplayFromLastEventID(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		// 未标记 sent_at：PollOnce 只投递未投递行。
 		row := model.OutboxEvent{
-			ID: "evt_04", Type: TypeMessageCreated,
+			ID: "evt_04", Type: outbox.TypeMessageCreated,
 			Payload:    []byte(`{"resource_revision":0,"data":{}}`),
 			OccurredAt: time.Now(),
 		}
@@ -166,7 +167,7 @@ func TestSSESnapshotRequiredOnExpiredCursor(t *testing.T) {
 
 	// 窗口内一行已知 id；客户端游标确定早于它且行不存在 → gap。
 	row := model.OutboxEvent{
-		ID: "evt_ffffff", Type: TypeTaskCreated, WorkspaceID: ptr.Of(wsID),
+		ID: "evt_ffffff", Type: outbox.TypeTaskCreated, WorkspaceID: ptr.Of(wsID),
 		Payload:    []byte(`{"resource_revision":0,"data":{}}`),
 		OccurredAt: time.Now(), SentAt: ptr.Of(time.Now()),
 	}
@@ -196,7 +197,7 @@ func TestSSESnapshotRequiredOnExpiredCursor(t *testing.T) {
 		}
 	}
 	events := readSSEEvents(t, string(buf))
-	if len(events) == 0 || events[0].Type != TypeSnapshotRequired {
+	if len(events) == 0 || events[0].Type != outbox.TypeSnapshotRequired {
 		t.Fatalf("want snapshot.required, got %+v", events)
 	}
 }

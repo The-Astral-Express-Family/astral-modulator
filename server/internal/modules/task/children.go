@@ -21,8 +21,8 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 )
 
 // ---- GET <container>/children ----
@@ -195,7 +195,7 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 		}); err != nil {
 			return err
 		}
-		return event.EmitTx(tx, event.TypeTaskCreated, wsID, p.ActorID, 1,
+		return outbox.EmitTx(tx, outbox.TypeTaskCreated, wsID, p.ActorID, 1,
 			map[string]any{"task_id": t.ID, "title": t.Title})
 	})
 	if err != nil {

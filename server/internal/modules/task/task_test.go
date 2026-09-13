@@ -14,6 +14,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
 
@@ -208,7 +209,7 @@ func TestSweeperExpiresLeases(t *testing.T) {
 	for {
 		select {
 		case env := <-events:
-			if env.Type == event.TypeTaskLeaseExpired {
+			if env.Type == outbox.TypeTaskLeaseExpired {
 				goto done // 跳过先前 claim 事件，找到目标事件
 			}
 		case <-deadline:

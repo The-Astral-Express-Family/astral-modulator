@@ -48,12 +48,17 @@ func (m *Module) register(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	actor, err := m.Svc.Register(r.Context(), in)
+	// 注册成功即建会话（A5）：两分支（bootstrap/邀请兑换）同形状，
+	// refresh 进 HttpOnly Cookie，响应 = Me + session（与 login 一致）。
+	actor, refresh, err := m.Svc.Register(r.Context(), in, clientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusCreated, m.meBody(r.Context(), *actor))
+	setSessionCookie(w, r, refresh, int(m.Svc.RefreshTTL.Seconds()))
+	resp := m.meBody(r.Context(), *actor)
+	resp.Session = &SessionInfo{ClientType: "web"}
+	httpx.WriteOK(w, r, http.StatusCreated, resp)
 }
 
 func (m *Module) login(w http.ResponseWriter, r *http.Request) {
@@ -167,16 +172,22 @@ func (m *Module) createDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 	httpx.WriteOK(w, r, http.StatusCreated, created)
 }
 
-// deviceBaseURL 解析 device flow 验证链接的 web 侧基址：WebBaseURL（显式配置，
-// dev 期 web 与 API 端口分离）→ PublicURL（生产同源）→ 请求 Host（兜底）。
-// 两个 verification 链接按 openapi `format: uri` 必须是绝对 URL——CLI 拿到后
-// 直接打开/展示，不做二次拼接。
+// deviceBaseURL 解析 device flow 验证链接的 web 侧基址（回退链见
+// ResolveWebBaseURL；邀请链接共用同一实现，docs/registration.md §2.3）。
 func (m *Module) deviceBaseURL(r *http.Request) string {
-	if m.WebBaseURL != "" {
-		return m.WebBaseURL
+	return ResolveWebBaseURL(m.WebBaseURL, m.PublicURL, r)
+}
+
+// ResolveWebBaseURL 是「指向 web 前端的绝对基址」的单一实现：
+// WebBaseURL（显式配置，dev 期 web 与 API 端口分离）→ PublicURL（生产同源）
+// → 请求 Host（兜底）。device verification_uri 与邀请链接按 openapi
+// `format: uri` 都必须是绝对 URL——客户端拿到后直接打开，不做二次拼接。
+func ResolveWebBaseURL(webBaseURL, publicURL string, r *http.Request) string {
+	if webBaseURL != "" {
+		return webBaseURL
 	}
-	if m.PublicURL != "" {
-		return m.PublicURL
+	if publicURL != "" {
+		return publicURL
 	}
 	scheme := "http"
 	if isHTTPS(r) {
