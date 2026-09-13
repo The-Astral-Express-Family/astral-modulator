@@ -82,6 +82,7 @@ go run ./cmd/astral-server
 |---|---|---|
 | `ASTRAL_HTTP_ADDR` | `:8080` | 监听地址 |
 | `ASTRAL_PUBLIC_URL` | — | canonical URL（写入 /.well-known） |
+| `ASTRAL_WEB_BASE_URL` | — | web 控制台基址（device flow 验证链接指向；生产同源留空回退 PublicURL，dev 指向 vite 端口） |
 | `ASTRAL_DATABASE_DSN` / `DATABASE_URL` | — | PostgreSQL DSN；空 = 桩模式 |
 | `ASTRAL_SERVER_ID` | 随机 | 稳定服务器身份；首启固化进 server_meta，此后库中值优先 |
 | `ASTRAL_AUTO_MIGRATE` | `true` | 启动时 goose up；**生产多实例必须关闭** |

@@ -707,6 +707,24 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   在 ASTRAL_PUBLIC_URL 未配置时返回相对路径 `/device`，CLI 需自行拼 base
   （well-known 已有 Host 兜底，device create 尚无）——候选后续小轮。
 
+
+### 第 28 轮（2026-09-13）：设备登录 VS Code 式直达 —— 验证链接绝对化 + 审批页单步确认
+
+- **verification 链接绝对化**：新增 env `ASTRAL_WEB_BASE_URL`（§9 已登记）——
+  device create 的 `verification_uri`/`verification_uri_complete` 按
+  WebBaseURL → PublicURL → 请求 Host 回退链拼**绝对 URL**（对齐 openapi
+  `format: uri`，round 27 验收遗留项关闭）。CLI 拿到即可直接打开/展示，
+  不再二次拼接；dev 下指向 vite 5173。
+- **审批页单步确认**：带 `?code=` 直达（CLI 默认路径）时隐藏手动输码框，
+  页面只剩「CLI 请求登录」确认卡片 + 批准/拒绝——对齐 VS Code 设备码登录
+  体验；无码入口（侧栏）保留手动输码回退。终态/轮询/守卫链路不变。
+- **安全取舍**：已登录仍需一次点击批准，不做纯自动批准——防 login-CSRF
+  （攻击者诱导已登录浏览器批准攻击者的 device_code，等于把本账号 CLI 凭证
+  送给攻击者），与 GitHub/VS Code 设备流一致。
+- **验证**：go test（新增 `TestDeviceBaseURL` 回退链断言）+ vue-tsc/build
+  全绿；浏览器实测带码直达（无输码框 → 批准 → 终态 → CLI 兑换 200）与
+  手动入口双路径；curl 确认 `verification_uri_complete=http://localhost:5173/device?code=…`。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -878,6 +896,7 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-12 | 第 22 轮：`GET /workspaces/{id}/events` 补 workspace 级订阅授权（非成员 404 / scope 不足 403，与 workspace 端点同语义；此前仅要求已认证，任何主体可订阅任意 workspace 流——§11 第 10 项安全修复）；openapi 补 404/403 响应 | 行为（安全） | CLI/Web |
 | 2026-09-12 | 第 10 轮（modenicheng）：actors 表增 `bio`/`avatar_url`（00012，头像仅 http(s) 外链，服务端不抓取）；新增端点 `PATCH /auth/me`（部分更新语义：display_name/bio/avatar_url）；`Me` 响应增 `email`（human 只读）；Actor schema 增 `bio`/`avatar_url`。同时修复 /auth/register、/auth/login、/auth/me 直接序列化 model.Actor 导致字段名 PascalCase 与契约 snake_case 漂移的潜伏 bug（auth 模块引入 actorDTO） | 补充+修复 | CLI/Web |
 | 2026-09-13 | 整合轮（merge origin/main）：两侧并行开发的 DTO 双轨合一——第 10 轮引入的私有 `actorDTO` 并入 round 20 的全仓单一来源 `ActorDTO`（增补 bio/avatar_url，构造器仍为 `ToActorDTO`），workspace 模块复用点不变、openapi Actor schema（bio/avatar_url 必填）覆盖两端点；`newActorDTO` 删除 | 内部（重构） | 无（wire 不变，与 Actor schema 契约一致） |
+| 2026-09-13 | 第 28 轮：新增 env `ASTRAL_WEB_BASE_URL`——device flow `verification_uri[_complete]` 的 web 控制台基址（回退 PublicURL → 请求 Host）；两链接由相对路径改为绝对 URL（对齐 openapi `format: uri`） | 补充 | CLI（直接打开 verification_uri_complete）/Web |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 
@@ -893,6 +912,9 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 6. **Device Flow 全链路（已实装 ✅，第 2 轮）**：
    - `POST /auth/device/authorizations` `{"client_type":"cli"}` → 201
      `{device_code, user_code, verification_uri, verification_uri_complete, expires_in:600, interval:3}`
+   - 两个 verification 链接为**绝对 URL**（第 28 轮起，基址 = ASTRAL_WEB_BASE_URL）：
+     CLI 默认直接打开/展示 `verification_uri_complete`（带码直达审批页，
+     已登录用户一步确认）；手动回退才展示 `verification_uri` + `user_code`
    - CLI 轮询 `POST /auth/device/authorizations/{device_code}/token`：
      pending → `400 AUTHORIZATION_PENDING`(retryable)；过快 → `400 SLOW_DOWN`（退避）；
      成功 → `200 {access_token, token_type:"Bearer", expires_in:900, refresh_token, actor_id}`；
