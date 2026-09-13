@@ -798,6 +798,37 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   ref + formatApiError 的平直写法。
 - **验证**：`go build/vet/test` 全绿（12 包 + 契约三门）。
 
+### 第 32 轮（2026-09-13，modenicheng）：侧栏上下文升级 + 演示身份守卫修复
+
+> 与第 30 轮（Lidozs55，P2 web）并行开发撞车：本线独立实现了一份 P2
+> （/register + InvitationsCard + api 层），push 前发现远端已落同类实现，
+> **裁决：采纳远端（b5a6f05）为 P2 事实来源**，本线 P2 提交与对应 TODO
+> 登记丢弃，仅保留侧栏工作变基上去；两线验证互为交叉确认（两端都实测过
+> 注册→建会话→SSE 事件→撤销全链路）。
+
+- **侧栏上下文升级**：AppSidebar 从静态两项（总览/设备授权）重构为
+  workspace 上下文导航——新增 WorkspaceSwitcher（可见 workspace 列表、
+  当前值跟随路由、深链命中列表外时补拉详情取名、切换即跳该 workspace
+  概览）+ workspace 子导航（概览/任务树/裁决队列，SidebarLink 承载高亮
+  样式）；「设备授权」从一级导航降级到底部工具位（保留 round 28 手动输码
+  回退语义）。演示身份下 workspace 段整体隐藏（mock 模式不消费真实 API）。
+- **session.isDemo**：演示登录态的可判别导出（本线实现，已在变基中与
+  第 30 轮的 adoptMe/register 合并）——总览页 listWorkspaces 与侧栏
+  workspace 拉取据此跳过，修复「后端在线但未登录 + VITE_TASKS_MOCK=1」
+  组合下 401 触发全局登出、演示身份被弹走的潜伏问题。
+- **登录/注册守卫补丁**：已登录访问 /login、/register 弹走的判断补
+  `!session.isDemo` 例外（第 30 轮守卫未覆盖该场景——演示身份会被误判为
+  已登录，邀请链接落地页在 mock 模式下不可达；浏览器实测复现并确认修复）。
+- **运行态**：本地 8080 常驻 astral-server.exe 仍是 round 27 时点的旧编译
+  产物（无邀请端点），已重建当前源码并重启（同 server/.env，dev 库数据
+  延续）；旧二进制已清理。
+- **验证**：vue-tsc + vite build 全绿；内置浏览器 E2E（本线 P2 实现 + 变基
+  后冒烟复验）——建工作区 → 侧栏切换器/子导航/深链高亮 → 签发 contributor
+  邀请（SSE `security.invite.created` 到达）→ 登出 → invite_url 注册新号
+  （预填/建会话/from 回跳）→ 贡献者视角子导航可用且邀请卡自隐藏 →
+  redeemed/revoked 状态流转 → 已登录访问 /register 弹走 → 演示身份下
+  /register 正常渲染、总览/侧栏不再触发 401 弹走。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
