@@ -59,7 +59,7 @@ func run() error {
 	idem := &idempotency.Middleware{Log: log} // DB 在有库分支补挂
 	mods := &app.Modules{
 		Idempotency: idem,
-		Auth:        &auth.Module{PublicURL: cfg.PublicURL},
+		Auth:        &auth.Module{PublicURL: cfg.PublicURL, WebBaseURL: cfg.WebBaseURL},
 		Tag:         &tag.Module{Auth: authSvc},
 		Memory:      &memory.Module{},
 		Document:    &document.Module{},

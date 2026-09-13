@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +127,25 @@ func TestDeviceFlow(t *testing.T) {
 	}
 	if _, err := s.ExchangeDeviceToken(ctx, created2.DeviceCode, "ip", "ua"); err == nil {
 		t.Fatal("denied exchange should fail")
+	}
+}
+
+func TestDeviceBaseURL(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/device/authorizations", nil)
+	if got, want := (&Module{}).deviceBaseURL(r), "http://example.com"; got != want {
+		t.Fatalf("host fallback: %q != %q", got, want)
+	}
+	if got, want := (&Module{PublicURL: "https://api.example.com"}).deviceBaseURL(r), "https://api.example.com"; got != want {
+		t.Fatalf("public url: %q != %q", got, want)
+	}
+	if got, want := (&Module{PublicURL: "https://api.example.com", WebBaseURL: "http://localhost:5173"}).deviceBaseURL(r), "http://localhost:5173"; got != want {
+		t.Fatalf("web base url precedence: %q != %q", got, want)
+	}
+	// X-Forwarded-Proto 按既有 isHTTPS 语义信任 https。
+	tlsReq := httptest.NewRequest(http.MethodPost, "/", nil)
+	tlsReq.Header.Set("X-Forwarded-Proto", "https")
+	if got, want := (&Module{}).deviceBaseURL(tlsReq), "https://example.com"; got != want {
+		t.Fatalf("forwarded https: %q != %q", got, want)
 	}
 }
 

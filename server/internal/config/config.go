@@ -20,6 +20,11 @@ type Config struct {
 	// PublicURL 即 canonical URL，写入 /.well-known/astral（architecture §7）。
 	// 为空时 well-known 里回退为请求 Host，并打 warning。
 	PublicURL string
+	// WebBaseURL 是 device flow 验证链接（verification_uri[_complete]）指向的
+	// web 控制台基址。生产同源部署留空即可（回退 PublicURL → 请求 Host）；
+	// 开发期 web 与 API 端口分离（vite 5173 / server 8080）时必须显式配置，
+	// 否则 CLI 拉起的链接会落到 API 端口上没有页面。
+	WebBaseURL string
 	// DatabaseDSN PostgreSQL 连接串。为空表示“无数据库的开发模式”：
 	// 服务可启动、healthz 可用，但一切依赖存储的端点返回 NOT_IMPLEMENTED/INTERNAL_ERROR，
 	// readyz 返回 503。
@@ -44,6 +49,7 @@ func Load() Config {
 	cfg := Config{
 		HTTPAddr:       env("ASTRAL_HTTP_ADDR", ":8080"),
 		PublicURL:      strings.TrimRight(os.Getenv("ASTRAL_PUBLIC_URL"), "/"),
+		WebBaseURL:     strings.TrimRight(os.Getenv("ASTRAL_WEB_BASE_URL"), "/"),
 		DatabaseDSN:    getEnvDefault("ASTRAL_DATABASE_DSN", "DATABASE_URL"),
 		ServerID:       os.Getenv("ASTRAL_SERVER_ID"),
 		AutoMigrate:    envBool("ASTRAL_AUTO_MIGRATE", true),
@@ -68,8 +74,8 @@ func (c Config) Describe() string {
 	if c.DatabaseDSN != "" {
 		db = "postgres"
 	}
-	return fmt.Sprintf("addr=%s public_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v",
-		c.HTTPAddr, c.PublicURL, db, c.ServerID, c.AutoMigrate, c.DevCORSOrigins)
+	return fmt.Sprintf("addr=%s public_url=%s web_base_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v",
+		c.HTTPAddr, c.PublicURL, c.WebBaseURL, db, c.ServerID, c.AutoMigrate, c.DevCORSOrigins)
 }
 
 func env(key, def string) string {

@@ -17,6 +17,9 @@ type Module struct {
 	Svc *Service
 	// PublicURL 用于拼 verification_uri。
 	PublicURL string
+	// WebBaseURL 是 device flow 链接的 web 控制台基址（dev 期 web 与 API
+	// 端口分离时必填）；优先级高于 PublicURL，见 deviceBaseURL。
+	WebBaseURL string
 }
 
 // RegisterPublic 挂载免鉴权的 /auth/* 端点（由 app.router 在 Authenticate 之前装配）。
@@ -156,12 +159,30 @@ func (m *Module) createDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	created, err := m.Svc.CreateDeviceAuthorization(r.Context(), in.ClientType, m.PublicURL)
+	created, err := m.Svc.CreateDeviceAuthorization(r.Context(), in.ClientType, m.deviceBaseURL(r))
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
 	httpx.WriteOK(w, r, http.StatusCreated, created)
+}
+
+// deviceBaseURL 解析 device flow 验证链接的 web 侧基址：WebBaseURL（显式配置，
+// dev 期 web 与 API 端口分离）→ PublicURL（生产同源）→ 请求 Host（兜底）。
+// 两个 verification 链接按 openapi `format: uri` 必须是绝对 URL——CLI 拿到后
+// 直接打开/展示，不做二次拼接。
+func (m *Module) deviceBaseURL(r *http.Request) string {
+	if m.WebBaseURL != "" {
+		return m.WebBaseURL
+	}
+	if m.PublicURL != "" {
+		return m.PublicURL
+	}
+	scheme := "http"
+	if isHTTPS(r) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
 
 func (m *Module) exchangeDeviceToken(w http.ResponseWriter, r *http.Request) {
