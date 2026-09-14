@@ -1217,4 +1217,12 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
     server_meta + admin 切换）；全工作区可见（platform:workspaces:read，运维
     排查用）；平台级 agent 账号（动 D9 语义）；web 全局 403 统一出口（现仍走
     各 surface fail-closed）；CLI `astral me` 消费 platform_role
+23. 【✅ 第 35 轮完成】web 请求层重构：api/client 由手写 fetch 换 axios 实例
+    （拦截器管请求头/Bearer/请求 id/204 归一），失败统一经 vue-sonner toast
+    （正文=服务端 message，副文=code·request_id）；silent 尾参豁免后台/语义化
+    路径（boot 探测、轮询、403 fail-closed、详情面板冲突流）；删各视图内联
+    ErrorAlert/error ref（useApiAction 瘦身为 busy/run；App.vue boot 横幅保留）。
+    修复：login/register 401 不再误触全局会话过期出口（已登录态错密码会误杀
+    有效会话）；401 出口补「登录已过期」toast。真机验证：错密码 toast、404
+    toast、登录/总览/admin 数据链路、多标签刷新竞争可自愈（既有行为）
 
