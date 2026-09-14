@@ -10,7 +10,6 @@ import { useApiAction } from '@/composables/useApiAction'
 import { usePolling } from '@/composables/usePolling'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import ApprovalsTable from '@/components/approvals/ApprovalsTable.vue'
-import ErrorAlert from '@/components/shared/ErrorAlert.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import {
   AlertDialog,
@@ -26,7 +25,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 
 const workspaceId = useWorkspaceId()
-const { error, run } = useApiAction()
+const { run } = useApiAction()
 
 const approvals = ref<Approval[]>([])
 const busyId = ref<string | null>(null)
@@ -37,11 +36,16 @@ const pending = ref<{ item: Approval; decision: 'approve' | 'deny' } | null>(nul
 const dialogOpen = ref(false)
 
 const REFRESH_MS = 15_000
-const { start } = usePolling(load, REFRESH_MS, { skip: () => busyId.value !== null })
+// immediate: false —— 首载由 onMounted 显式执行（带全局错误提示），
+// 后续轮询走 silent：后端短暂失联时不每 15s 刷一次错误 toast。
+const { start } = usePolling(() => load({ silent: true }), REFRESH_MS, {
+  skip: () => busyId.value !== null,
+  immediate: false,
+})
 
-async function load(): Promise<void> {
+async function load(opts: { silent?: boolean } = {}): Promise<void> {
   await run(async () => {
-    approvals.value = (await listApprovals(workspaceId.value, { status: 'requested' })).items
+    approvals.value = (await listApprovals(workspaceId.value, { status: 'requested' }, opts)).items
   })
   loaded.value = true
 }
@@ -93,9 +97,7 @@ onMounted(async () => {
       workspace: <code class="font-mono text-xs">{{ workspaceId }}</code>（每 15 秒自动刷新）
     </p>
 
-    <ErrorAlert v-if="error" :message="error" />
-
-    <Empty v-if="loaded && !approvals.length && !error" class="border">
+    <Empty v-if="loaded && !approvals.length" class="border">
       <EmptyHeader>
         <EmptyTitle>没有待裁决的请求。</EmptyTitle>
       </EmptyHeader>

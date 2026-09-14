@@ -4,12 +4,14 @@
 import { apiFetch, apiPath } from '../client'
 import type { Capabilities, Page, WellKnown, Workspace } from '../types'
 
+/** boot 探测：失败由 App.vue 的 bootError 横幅承载，不重复弹 toast。 */
 export function getWellKnown(): Promise<WellKnown> {
-  return apiFetch('/.well-known/astral')
+  return apiFetch('/.well-known/astral', { silent: true })
 }
 
+/** boot 探测：匿名可访问，失败不阻塞也不提示。 */
 export function getCapabilities(): Promise<Capabilities> {
-  return apiFetch('/api/v1/meta/capabilities')
+  return apiFetch('/api/v1/meta/capabilities', { silent: true })
 }
 
 export function listWorkspaces(

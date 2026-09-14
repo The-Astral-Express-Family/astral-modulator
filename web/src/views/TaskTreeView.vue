@@ -12,7 +12,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ListTree, Plus } from '@lucide/vue'
 import { toast } from 'vue-sonner'
-import { formatApiError } from '../api/client'
+import { notifyApiError } from '../api/client'
 import { taskApi } from '../api/taskSource'
 import type { TaskCreatePayload } from '../api/modules/task'
 import type { EventEnvelope, Member, Tag, Task, TaskSearchHit, TaskStatus } from '../api/types'
@@ -55,7 +55,6 @@ const assigneeInput = ref('')
 const members = ref<Member[]>([])
 const tagDict = ref<Tag[]>([])
 const selected = ref<Task | null>(null)
-const error = ref<string | null>(null)
 const loading = ref(false)
 const hits = ref<TaskSearchHit[]>([])
 
@@ -119,10 +118,9 @@ async function reloadVisible(): Promise<void> {
     ])
     roots.value = freshRoots
     containers.forEach((id, i) => childrenByContainer.value.set(id, freshChildren[i]!))
-    error.value = null
     if (selected.value) await refreshDetail()
-  } catch (e) {
-    error.value = formatApiError(e)
+  } catch {
+    // 失败已由全局拦截器 toast（mock 模式列表不抛错）。
   } finally {
     loading.value = false
   }
@@ -140,9 +138,9 @@ function scheduleReload(): void {
 async function refreshDetail(): Promise<void> {
   if (!selected.value) return
   try {
-    selected.value = await taskApi.getTask(selected.value.id)
+    selected.value = await taskApi.getTask(selected.value.id, { silent: true })
   } catch {
-    selected.value = null // 被删除/无权限：收起详情
+    selected.value = null // 被删除/无权限：收起详情（silent，不打扰）
   }
 }
 
@@ -150,9 +148,8 @@ async function openDetail(task: Pick<Task, 'id'>): Promise<void> {
   detailLoading.value = true
   try {
     selected.value = await taskApi.getTask(task.id)
-    error.value = null
-  } catch (e) {
-    error.value = formatApiError(e)
+  } catch {
+    // 失败已由全局拦截器 toast；保持原选中不变。
   } finally {
     detailLoading.value = false
   }
@@ -182,9 +179,8 @@ async function toggle(task: Task): Promise<void> {
       loading.value = true
       try {
         childrenByContainer.value.set(task.id, await fetchChildren(task.id))
-        error.value = null
-      } catch (e) {
-        error.value = formatApiError(e)
+      } catch {
+        // 失败已由全局拦截器 toast；回退展开态。
         next.delete(task.id)
       } finally {
         loading.value = false
@@ -233,7 +229,7 @@ const canSearch = computed(() =>
 
 async function runSearch(): Promise<void> {
   if (!canSearch.value) {
-    error.value = '搜索至少需要一个条件（regex / fuzzy / tag / status / assignee）'
+    toast.error('搜索至少需要一个条件（regex / fuzzy / tag / status / assignee）')
     return
   }
   loading.value = true
@@ -248,9 +244,8 @@ async function runSearch(): Promise<void> {
     })
     hits.value = page.items
     mode.value = 'search'
-    error.value = null
-  } catch (e) {
-    error.value = formatApiError(e)
+  } catch {
+    // 失败已由全局拦截器 toast。
   } finally {
     loading.value = false
   }
@@ -311,7 +306,8 @@ async function handleCreate(payload: TaskCreatePayload): Promise<void> {
     void openDetail(created)
     scheduleReload()
   } catch (e) {
-    error.value = formatApiError(e)
+    // 真实 API 失败已由拦截器 toast；mock 抛错不走 axios，用手动出口兜底。
+    if (TASKS_MOCK) notifyApiError(e)
   }
 }
 
@@ -405,8 +401,6 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
       @reset="resetToTree"
     />
 
-    <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
-
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
       <!-- 左栏：树 / 搜索结果 -->
       <Card class="flex min-h-[60vh] flex-col overflow-hidden">
@@ -491,7 +485,7 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
                 </div>
               </template>
             </TransitionGroup>
-            <Empty v-if="!loading && !rows.length && !error">
+            <Empty v-if="!loading && !rows.length">
               <EmptyHeader>
                 <EmptyTitle>没有任务。</EmptyTitle>
                 <EmptyDescription>当前过滤条件下无结果，或工作区还没有任务。</EmptyDescription>

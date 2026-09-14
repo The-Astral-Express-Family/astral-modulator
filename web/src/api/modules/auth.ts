@@ -2,6 +2,7 @@
 // Web 会话模型：refresh token 存 HttpOnly Cookie，access token 存内存（见 stores/session）。
 
 import { apiFetch, apiPath } from '../client'
+import type { CallOpts } from '../client'
 import type { Actor, ID, PlatformRole } from '../types'
 
 export interface MeResponse {
@@ -37,17 +38,19 @@ export interface TokenPair {
   actor_id: ID
 }
 
-/** 用 HttpOnly Cookie 换新 access token（cookie 模式不传 refresh_token）。 */
+/** 用 HttpOnly Cookie 换新 access token（cookie 模式不传 refresh_token）。
+ * 仅 boot 探测 / 静默续期调用：失败不弹 toast（Cookie 兜底或 401 出口接管）。 */
 export function refreshWithCookie(): Promise<TokenPair> {
-  return apiFetch('/api/v1/auth/token/refresh', { method: 'POST', body: {} })
+  return apiFetch('/api/v1/auth/token/refresh', { method: 'POST', body: {}, silent: true })
 }
 
 export function logout(): Promise<void> {
   return apiFetch('/api/v1/auth/logout', { method: 'POST', body: {} })
 }
 
+/** boot 会话恢复探测：未登录是常态（401 不提示，匿名期正常路径）。 */
 export function getMe(): Promise<MeResponse> {
-  return apiFetch('/api/v1/auth/me')
+  return apiFetch('/api/v1/auth/me', { silent: true })
 }
 
 export interface UpdateMeInput {
@@ -72,8 +75,12 @@ export interface DeviceAuthorizationView {
   expires_at: string
 }
 
-export function findDeviceAuthorization(userCode: string): Promise<DeviceAuthorizationView> {
-  return apiFetch(apiPath('/api/v1/auth/device/authorizations', { user_code: userCode }))
+/** 查询设备授权：手动查询走全局 toast；轮询传 silent（网络抖动不打断循环）。 */
+export function findDeviceAuthorization(
+  userCode: string,
+  opts: CallOpts = {},
+): Promise<DeviceAuthorizationView> {
+  return apiFetch(apiPath('/api/v1/auth/device/authorizations', { user_code: userCode }), opts)
 }
 
 export function approveDeviceAuthorization(id: ID): Promise<void> {

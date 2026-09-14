@@ -42,7 +42,7 @@ const issued = ref<InvitationCreated | null>(null)
 const role = ref<string>('contributor')
 const ttl = ref<string>('604800')
 const busyId = ref<string | null>(null)
-const { busy: issuing, error, run } = useApiAction()
+const { busy: issuing, run } = useApiAction()
 
 const ROLE_OPTIONS = [
   { value: 'viewer', label: 'viewer（只读）' },
@@ -114,7 +114,6 @@ watch(
       <CardTitle>邀请</CardTitle>
     </CardHeader>
     <CardContent class="flex flex-col gap-4">
-      <ErrorAlert v-if="error" :message="error" />
       <form class="flex items-end gap-2" @submit.prevent="issue">
         <Field>
           <FieldLabel for="invite-role">角色</FieldLabel>

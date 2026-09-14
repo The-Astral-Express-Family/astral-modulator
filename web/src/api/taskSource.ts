@@ -7,6 +7,7 @@ import * as realTask from './modules/task'
 import { listMembers as realListMembers, listTags as realListTags } from './modules/workspace'
 import { subscribeEvents } from './sse'
 import type { SseOptions } from './sse'
+import type { CallOpts } from './client'
 import type { Lease, Member, Page, Tag, Task, TaskSearchHit } from './types'
 import { TASKS_MOCK } from '../lib/mockMode'
 import { mockTaskApi, subscribeMockEvents } from '../mocks/taskMock'
@@ -20,18 +21,19 @@ export interface TaskApi {
   ): Promise<Page<Task>>
   listTaskChildren(taskId: string, params?: realTask.TaskFilterParams): Promise<Page<Task>>
   searchTasks(workspaceId: string, params: realTask.TaskSearchParams): Promise<Page<TaskSearchHit>>
-  getTask(taskId: string): Promise<Task>
+  getTask(taskId: string, opts?: CallOpts): Promise<Task>
   createRoot(workspaceId: string, payload: realTask.TaskCreatePayload): Promise<Task>
   createChild(taskId: string, payload: realTask.TaskCreatePayload): Promise<Task>
-  updateTask(taskId: string, payload: realTask.TaskUpdatePayload): Promise<Task>
+  updateTask(taskId: string, payload: realTask.TaskUpdatePayload, opts?: CallOpts): Promise<Task>
   claimTask(
     taskId: string,
     payload: { expected_revision: number; lease_seconds?: number },
+    opts?: CallOpts,
   ): Promise<{ task: Task; lease: Lease }>
-  renewLease(taskId: string, leaseSeconds?: number): Promise<Lease>
-  releaseLease(taskId: string): Promise<void>
-  attachTaskTag(taskId: string, tagId: string, expectedRevision?: number): Promise<Task>
-  detachTaskTag(taskId: string, tagId: string): Promise<void>
+  renewLease(taskId: string, leaseSeconds?: number, opts?: CallOpts): Promise<Lease>
+  releaseLease(taskId: string, opts?: CallOpts): Promise<void>
+  attachTaskTag(taskId: string, tagId: string, expectedRevision?: number, opts?: CallOpts): Promise<Task>
+  detachTaskTag(taskId: string, tagId: string, opts?: CallOpts): Promise<void>
   listTags(workspaceId: string): Promise<Page<Tag>>
   // 成员列表（assignee 显示名/头像）。任务视图在 mock 模式下也必须离线可用，
   // 所以经本接口走缝而非直接调 workspace 模块——否则真实 API 401 会触发全局登出。

@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 const session = useSessionStore()
-const { error: wsError, run } = useApiAction()
+const { run } = useApiAction()
 const workspaces = ref<Workspace[]>([])
 
 // 路由守卫已保证 boot 完成后再挂载；未登录时本页匿名可看（下方登录引导卡片）。
@@ -46,7 +46,7 @@ onMounted(async () => {
           </Button>
         </CardContent>
       </Card>
-    <WorkspaceListCard v-else :workspaces="workspaces" :error="wsError" />
+    <WorkspaceListCard v-else :workspaces="workspaces" />
 
     <CapabilitiesCard v-if="session.capabilities" :capabilities="session.capabilities" />
   </div>

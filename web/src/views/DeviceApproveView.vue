@@ -15,7 +15,6 @@ import { useApiAction } from '@/composables/useApiAction'
 import { usePolling } from '@/composables/usePolling'
 import DeviceAuthorizationCard from '@/components/device/DeviceAuthorizationCard.vue'
 import DeviceCodeLookup from '@/components/device/DeviceCodeLookup.vue'
-import ErrorAlert from '@/components/shared/ErrorAlert.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import StatusBadge from '@/components/shared/StatusBadge.vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -30,7 +29,7 @@ const fromQueryCode = ref(false)
 // 终态结果（批准/拒绝/过期/失效）：持久展示，直到下一次查询。
 const terminal = ref<{ status: DeviceAuthorizationView['status']; message: string } | null>(null)
 
-const { busy, error, run } = useApiAction()
+const { busy, run } = useApiAction()
 
 // 联调收尾（TODO.md §11 第 6 项）：pending 状态下每 5s 轮询一次，
 // 请求在别处被处理/过期时页面自动跟进，不需要人工刷新。
@@ -68,10 +67,10 @@ async function pollOnce(): Promise<void> {
   const code = view.value?.user_code
   if (!code) return
   try {
-    const fresh = await findDeviceAuthorization(code)
+    const fresh = await findDeviceAuthorization(code, { silent: true })
     if (fresh.status !== 'pending') enterTerminal(fresh.status)
   } catch {
-    // 查询失败（网络抖动等）不打断轮询；下一次循环重试。
+    // 查询失败（网络抖动等）不打断轮询；下一次循环重试（silent：不刷屏）。
   }
 }
 
@@ -80,7 +79,6 @@ function userCodeFromQuery(): string {
 }
 
 async function lookup(code: string): Promise<void> {
-  error.value = null
   terminal.value = null
   view.value = null
   stop()
@@ -115,8 +113,6 @@ onMounted(() => {
       <PageHeader title="设备授权" />
 
       <DeviceCodeLookup v-if="!fromQueryCode" v-model="manualCode" :busy="busy" @lookup="lookup" />
-
-      <ErrorAlert v-if="error" :message="error" />
 
       <DeviceAuthorizationCard
         v-if="view"

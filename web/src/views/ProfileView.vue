@@ -5,7 +5,6 @@ import { computed, reactive } from 'vue'
 import { toast } from 'vue-sonner'
 import { updateMe } from '@/api/modules/auth'
 import type { PlatformRole } from '@/api/types'
-import ErrorAlert from '@/components/shared/ErrorAlert.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import UserAvatar from '@/components/shared/UserAvatar.vue'
 import { Button } from '@/components/ui/button'
@@ -30,7 +29,7 @@ const ROLE_LABELS: Record<PlatformRole, string> = {
 }
 
 const session = useSessionStore()
-const { busy, error, run } = useApiAction()
+const { busy, run } = useApiAction()
 
 const form = reactive({
   display_name: session.actor?.display_name ?? '',
@@ -69,7 +68,8 @@ function validate(): string | null {
 async function save(): Promise<void> {
   const problem = validate()
   if (problem) {
-    error.value = problem
+    // 本地校验不经过 API 拦截器，手动走同一 toast 出口。
+    toast.error(problem)
     return
   }
   await run(async () => {
@@ -95,7 +95,6 @@ async function save(): Promise<void> {
     <Card>
       <CardContent>
         <form class="flex flex-col gap-6" @submit.prevent="save">
-          <ErrorAlert v-if="error" :message="error" />
           <div class="flex items-center gap-4">
             <UserAvatar :actor="previewActor" class="size-16" fallback-class="text-2xl" />
             <div class="min-w-0 flex-1">

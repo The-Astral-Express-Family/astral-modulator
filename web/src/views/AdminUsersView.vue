@@ -13,7 +13,6 @@ import {
 } from '@/api/modules/admin'
 import type { AdminUser, PlatformRole } from '@/api/types'
 import { fmtTime } from '@/lib/format'
-import ErrorAlert from '@/components/shared/ErrorAlert.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
@@ -45,7 +44,7 @@ const session = useSessionStore()
 const canAccess = ref<boolean | null>(null)
 const users = ref<AdminUser[]>([])
 const busyId = ref<string | null>(null)
-const { error, run } = useApiAction()
+const { run } = useApiAction()
 
 const ROLE_VARIANTS: Record<PlatformRole, BadgeVariants['variant']> = {
   admin: 'default',
@@ -120,7 +119,6 @@ async function changeRole(u: AdminUser, role: HumanRole): Promise<void> {
     </Card>
 
     <template v-else>
-      <ErrorAlert v-if="error" :message="error" />
       <Card>
         <CardHeader>
           <CardTitle>平台用户（{{ users.length }}）</CardTitle>

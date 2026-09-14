@@ -3,6 +3,7 @@
 // = 根层，task 容器 = 子层）；平面查询走 task-search（至少一个过滤条件）。
 
 import { apiFetch, apiPath } from '../client'
+import type { CallOpts } from '../client'
 import type { Lease, Page, Task, TaskPriority, TaskSearchHit } from '../types'
 
 export interface TaskFilterParams {
@@ -46,8 +47,10 @@ export function searchTasks(
 }
 
 // 详情响应填充 lease（tags/children_count 集合响应也带，详情另有 lease）。
-export function getTask(taskId: string): Promise<Task> {
-  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`)
+// 详情面板的写路径统一 silent（冲突/租约过期由面板按语义提示），回源刷新亦 silent；
+// 用户主动点开的详情查询走全局 toast。
+export function getTask(taskId: string, opts: CallOpts = {}): Promise<Task> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`, opts)
 }
 
 // ---- 写操作（round 25 任务视图 UI 移植；端点在 v2 中未变，集合寻址见上）----
@@ -85,10 +88,15 @@ export interface TaskUpdatePayload {
 }
 
 // 乐观并发：expected_revision 不符 → 409 REVISION_CONFLICT（details.current_revision）。
-export function updateTask(taskId: string, payload: TaskUpdatePayload): Promise<Task> {
+export function updateTask(
+  taskId: string,
+  payload: TaskUpdatePayload,
+  opts: CallOpts = {},
+): Promise<Task> {
   return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`, {
     method: 'PATCH',
     body: payload,
+    ...opts,
   })
 }
 
@@ -96,23 +104,30 @@ export function updateTask(taskId: string, payload: TaskUpdatePayload): Promise<
 export function claimTask(
   taskId: string,
   payload: { expected_revision: number; lease_seconds?: number },
+  opts: CallOpts = {},
 ): Promise<{ task: Task; lease: Lease }> {
   return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/claim`, {
     method: 'POST',
     body: payload,
+    ...opts,
   })
 }
 
-export function renewLease(taskId: string, leaseSeconds?: number): Promise<Lease> {
+export function renewLease(
+  taskId: string,
+  leaseSeconds?: number,
+  opts: CallOpts = {},
+): Promise<Lease> {
   return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/lease/renew`, {
     method: 'POST',
     body: leaseSeconds ? { lease_seconds: leaseSeconds } : {},
+    ...opts,
   })
 }
 
 // 释放：仅 holder（或 task:override）；清租约 + 清 assignee + in_progress→open。
-export function releaseLease(taskId: string): Promise<void> {
-  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/lease`, { method: 'DELETE' })
+export function releaseLease(taskId: string, opts: CallOpts = {}): Promise<void> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/lease`, { method: 'DELETE', ...opts })
 }
 
 // attach 幂等：已关联时返回当前 Task、不 bump revision。
@@ -120,17 +135,18 @@ export function attachTaskTag(
   taskId: string,
   tagId: string,
   expectedRevision?: number,
+  opts: CallOpts = {},
 ): Promise<Task> {
   return apiFetch(
     `/api/v1/tasks/${encodeURIComponent(taskId)}/tags/${encodeURIComponent(tagId)}`,
-    { method: 'PUT', body: expectedRevision ? { expected_revision: expectedRevision } : {} },
+    { method: 'PUT', body: expectedRevision ? { expected_revision: expectedRevision } : {}, ...opts },
   )
 }
 
 // detach 幂等：未关联时 204、不 bump revision。
-export function detachTaskTag(taskId: string, tagId: string): Promise<void> {
+export function detachTaskTag(taskId: string, tagId: string, opts: CallOpts = {}): Promise<void> {
   return apiFetch(
     `/api/v1/tasks/${encodeURIComponent(taskId)}/tags/${encodeURIComponent(tagId)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', ...opts },
   )
 }

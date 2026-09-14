@@ -72,7 +72,8 @@ watch(
   },
 )
 
-// ---- 统一写路径：成功 emit changed；冲突/租约过期 emit stale；其余错误 toast ----
+// ---- 统一写路径（silent：错误提示由本面板按语义发，不走全局拦截器）：
+// 成功 emit changed；冲突/租约过期 emit stale + 专属文案；其余错误单行 toast。----
 
 async function perform(action: () => Promise<Task>, successMsg: string): Promise<void> {
   busy.value = true
@@ -96,7 +97,7 @@ function saveTitle(): void {
   const title = titleDraft.value.trim()
   if (!title) return
   void perform(
-    () => taskApi.updateTask(props.task.id, { expected_revision: props.task.revision, title }),
+    () => taskApi.updateTask(props.task.id, { expected_revision: props.task.revision, title }, { silent: true }),
     '标题已保存。',
   ).then(() => {
     editingTitle.value = false
@@ -106,10 +107,14 @@ function saveTitle(): void {
 function saveDescription(): void {
   void perform(
     () =>
-      taskApi.updateTask(props.task.id, {
-        expected_revision: props.task.revision,
-        description: descDraft.value,
-      }),
+      taskApi.updateTask(
+        props.task.id,
+        {
+          expected_revision: props.task.revision,
+          description: descDraft.value,
+        },
+        { silent: true },
+      ),
     '描述已保存。',
   ).then(() => {
     editingDesc.value = false
@@ -118,24 +123,28 @@ function saveDescription(): void {
 
 function setStatus(status: TaskStatus): void {
   void perform(
-    () => taskApi.updateTask(props.task.id, { expected_revision: props.task.revision, status }),
+    () => taskApi.updateTask(props.task.id, { expected_revision: props.task.revision, status }, { silent: true }),
     `状态已改为「${TASK_STATUS_META[status]!.label}」。`,
   )
 }
 
 function setPriority(priority: TaskPriority): void {
   void perform(
-    () => taskApi.updateTask(props.task.id, { expected_revision: props.task.revision, priority }),
+    () => taskApi.updateTask(props.task.id, { expected_revision: props.task.revision, priority }, { silent: true }),
     `优先级已改为「${TASK_PRIORITY_META[priority]!.label}」。`,
   )
 }
 
 function claim(): void {
   void perform(async () => {
-    const result = await taskApi.claimTask(props.task.id, {
-      expected_revision: props.task.revision,
-      lease_seconds: Number(claimSeconds.value),
-    })
+    const result = await taskApi.claimTask(
+      props.task.id,
+      {
+        expected_revision: props.task.revision,
+        lease_seconds: Number(claimSeconds.value),
+      },
+      { silent: true },
+    )
     return result.task
   }, '已认领，租约生效。')
 }
@@ -143,7 +152,7 @@ function claim(): void {
 function renewLease(): void {
   busy.value = true
   taskApi
-    .renewLease(props.task.id)
+    .renewLease(props.task.id, undefined, { silent: true })
     .then((lease) => {
       toast.success('租约已续期。')
       emit('changed', { ...props.task, lease })
@@ -163,21 +172,21 @@ function renewLease(): void {
 
 function releaseLease(): void {
   void perform(async () => {
-    await taskApi.releaseLease(props.task.id)
+    await taskApi.releaseLease(props.task.id, { silent: true })
     return taskApi.getTask(props.task.id)
   }, '已释放租约。')
 }
 
 function attachTag(tagId: string): void {
   void perform(
-    () => taskApi.attachTaskTag(props.task.id, tagId, props.task.revision),
+    () => taskApi.attachTaskTag(props.task.id, tagId, props.task.revision, { silent: true }),
     '已关联标签。',
   )
 }
 
 function detachTag(tagId: string): void {
   void perform(async () => {
-    await taskApi.detachTaskTag(props.task.id, tagId)
+    await taskApi.detachTaskTag(props.task.id, tagId, { silent: true })
     return taskApi.getTask(props.task.id)
   }, '已移除标签。')
 }

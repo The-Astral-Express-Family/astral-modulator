@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // Human 本地登录页（TODO.md D6）。独立布局（不套 MainLayout）。
 // 登录成功后跳回 from 指定的来源页或总览；已登录用户由路由守卫直接弹走。
+// 登录失败（错密码等）由 api/client 拦截器统一 toast。
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApiAction } from '@/composables/useApiAction'
 import { useLoginRedirect } from '@/composables/useLoginRedirect'
 import { useSessionStore } from '@/stores/session'
-import ErrorAlert from '@/components/shared/ErrorAlert.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
@@ -17,7 +17,7 @@ import { Spinner } from '@/components/ui/spinner'
 const session = useSessionStore()
 const router = useRouter()
 const { consumeRedirect } = useLoginRedirect()
-const { busy, error, run } = useApiAction()
+const { busy, run } = useApiAction()
 
 const email = ref('')
 const password = ref('')
@@ -35,7 +35,6 @@ async function submit(): Promise<void> {
       <Card>
         <CardContent>
           <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <ErrorAlert v-if="error" :message="error" />
             <FieldGroup>
               <Field>
                 <FieldLabel for="email">邮箱</FieldLabel>

@@ -8,7 +8,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useApiAction } from '@/composables/useApiAction'
 import { useLoginRedirect } from '@/composables/useLoginRedirect'
 import { useSessionStore } from '@/stores/session'
-import ErrorAlert from '@/components/shared/ErrorAlert.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
@@ -20,7 +19,7 @@ const session = useSessionStore()
 const route = useRoute()
 const router = useRouter()
 const { consumeRedirect } = useLoginRedirect()
-const { busy, error, run } = useApiAction()
+const { busy, run } = useApiAction()
 
 const inviteCode = ref(typeof route.query.code === 'string' ? route.query.code : '')
 const email = ref('')
@@ -47,7 +46,6 @@ async function submit(): Promise<void> {
       <Card>
         <CardContent>
           <form class="flex flex-col gap-4" @submit.prevent="submit">
-            <ErrorAlert v-if="error" :message="error" />
             <FieldGroup>
               <Field>
                 <FieldLabel for="invite-code">邀请码</FieldLabel>
