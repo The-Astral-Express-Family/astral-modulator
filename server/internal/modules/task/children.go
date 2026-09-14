@@ -69,7 +69,7 @@ func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID strin
 	if v := q.Get("cursor"); v != "" {
 		query = query.Where("tasks.id < ?", v)
 	}
-	limit := parseLimit(q.Get("limit"), 50, 200)
+	limit := httpx.ParseLimit(q.Get("limit"), 50, 200)
 
 	var rows []model.Task
 	if err := query.Order("tasks.id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {

@@ -191,33 +191,46 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	//   workspace 广播：本 workspace 成员可见；
 	//   actor 私信：仅限本 workspace 内、收发双方（防跨 workspace 读他处私信）；
 	//   task thread：只限本 workspace 的任务（子查询约束）。
+	q := r.URL.Query()
 	query := m.DB.WithContext(r.Context()).Model(&model.Message{}).
 		Where("(workspace_id = ? AND target_type = 'workspace') "+
 			"OR (workspace_id = ? AND target_type = 'actor' AND (target_id = ? OR sender_id = ?)) "+
 			"OR (target_type = 'task' AND target_id IN (SELECT id FROM tasks WHERE workspace_id = ?))",
 			wsID, wsID, p.ActorID, p.ActorID, wsID)
-	if v := r.URL.Query().Get("thread_id"); v != "" {
+	if v := q.Get("thread_id"); v != "" {
 		query = query.Where("thread_id = ?", v)
 	}
-	if v := r.URL.Query().Get("target_id"); v != "" {
+	if v := q.Get("target_id"); v != "" {
 		query = query.Where("target_id = ?", v)
 	}
+	// cursor 分页沿用容器集合语义：id 即游标（uuidv7 字典序 = 时间序），
+	// 本列表最新在前（DESC），cursor 取上一页最末（最旧）一行 id。
+	limit := httpx.ParseLimit(q.Get("limit"), 50, 200)
+	if v := q.Get("cursor"); v != "" {
+		query = query.Where("id < ?", v)
+	}
 	var rows []model.Message
-	if err := query.Order("id DESC").Limit(100).Find(&rows).Error; err != nil {
+	if err := query.Order("id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return
+	}
+	next := ""
+	if len(rows) > limit {
+		rows = rows[:limit]
+		next = rows[len(rows)-1].ID
 	}
 	items := make([]messageDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toMessageDTO(row))
 	}
-	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, next))
 }
 
 // listTaskThread 任务线程消息（phase-4 遗留 501 桩的实装）：task 归属校验 +
-// workspace 级 message:read scope；线程按时间正序（阅读序），与 workspace
-// 列表的最新在前互为场景。task 加载/404 语义复用 task.LoadForWorkspace
-// （task 是本端点主语 → 404 用专用码 TASK_NOT_FOUND）。
+// workspace 级 message:read scope。线程按时间正序（阅读序），与 workspace
+// 列表的最新在前互为场景；cursor 同为 id 游标，方向随排序（id > cursor）。
+// task 加载/404 语义复用 task.LoadForWorkspace（task 是本端点主语 → 404 用
+// 专用码 TASK_NOT_FOUND）。
 func (m *Module) listTaskThread(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "task_id")
 	loaded, apiErr := m.Tasks.LoadForWorkspace(r.Context(), auth.PrincipalFrom(r.Context()), taskID, auth.ScopeMessageRead)
@@ -225,16 +238,26 @@ func (m *Module) listTaskThread(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
+	q := r.URL.Query()
+	limit := httpx.ParseLimit(q.Get("limit"), 50, 200)
+	query := m.DB.WithContext(r.Context()).
+		Where("workspace_id = ? AND target_type = 'task' AND target_id = ?", loaded.WorkspaceID, taskID)
+	if v := q.Get("cursor"); v != "" {
+		query = query.Where("id > ?", v)
+	}
 	var rows []model.Message
-	if err := m.DB.WithContext(r.Context()).
-		Where("workspace_id = ? AND target_type = 'task' AND target_id = ?", loaded.WorkspaceID, taskID).
-		Order("id ASC").Limit(100).Find(&rows).Error; err != nil {
+	if err := query.Order("id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return
+	}
+	next := ""
+	if len(rows) > limit {
+		rows = rows[:limit]
+		next = rows[len(rows)-1].ID
 	}
 	items := make([]messageDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toMessageDTO(row))
 	}
-	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, ""))
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, next))
 }

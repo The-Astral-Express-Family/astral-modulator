@@ -925,6 +925,43 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
   dev server 已重建重启（同 .env，migration 00014 已在 dev 库生效，probe 经
   存量回填成为 admin）。
 
+### 第 33 轮 B 线（2026-09-14，Lidozs55）：全仓审查调优轮 —— 代码/逻辑/契约/架构/端点
+
+> 与第 33 轮（modenicheng，平台角色基建）撞号：按「第 29/32 轮」先例以分线
+> 标注区分；两会话改动不相交（本线 message/task/httpx + openapi 契约收口，
+> 对方线 platform roles/admin），变基无代码冲突。
+
+- **审查范围**：server 全部 48 个源文件（本轮未读过的 sse 尾段/hub/retention/
+  search/filters/tag 全量/device/middleware/profile/router/audit/idempotency/
+  document/memory/store/main/config）、openapi.yaml 43 路径逐段、web types.ts
+  与 api 模块对照、模块依赖方向（go list）、CLI msg 消费面。整体结论：分层
+  无环、错误语义统一、并发写全部条件更新、事务性 outbox/audit 一致——
+  底子干净，问题集中在「契约宣称 vs 实现现状」的四处漂移。
+- **messages 分页断链闭合（本轮主修）**：openapi 两个 message 列表端点声明
+  `Limit/Cursor + MessagePage`，CLI 的 `msg list` 也已按分页消费
+  （addPageParams/fetchPageItems/--all），但 server 恒 `Limit(100)` 且忽略
+  两个参数——宣称完成实际断链的典型（§11 卷首语要求优先闭合）。两 handler
+  落实 id 游标翻页（workspace 列表 DESC `id <`、task 线程 ASC `id >`，
+  方向随排序），limit 缺省 50 上限 200。
+- **`httpx.ParseLimit` 单点**：limit 钳制从 task 私有 helper 提为 httpx
+  共享（children/task-search/messages 三类集合端点同一实现），openapi
+  `parameters/Limit`（default 50/max 200）的服务端对账点唯一。
+- **openapi 补声明**：`listMessages` 补已实装的 `target_id` 过滤参数；
+  Message schema 补 `target_type`/`target_id`（DTO 恒序列化，契约漏声明）；
+  documents 四端点 + audit list 六个脚手架桩补 `501 NOT_IMPLEMENTED` 响应
+  ——此前契约只写 200，属于向客户端超卖现状。
+- **审查过不动的（记录理由）**：presence/documents/conflicts/audit 四个
+  内联 `{items}` 列表维持 §11 第 11 项待裁决，不提前动手；hub 慢订阅者
+  丢弃策略与 SSE 同毫秒 uuidv7 去重极小概率误杀均为文档化接受设计；
+  Login 的 raw error 上抛（500 由 RespondError 收口）语义已正确；
+  Stub 模式 nil-DB 模块在 Authenticate 401 墙之后，不可达；
+  `ApprovalsTable.vue`/`search.go`/`filters.go` 等近期代码无问题。
+- **验证**：契约三门（routes/error-codes/event-types）以 `-count=1` 强制
+  重跑全绿（openapi.yaml 在包目录外，注意 go test 缓存陷阱）；go
+  build/vet/test 全部 12 包全绿（message 新增两个分页契约测试）；web
+  `vue-tsc` + `vite build` 全绿。openapi 增量（Message required、target_id、
+  501 声明）归入 §11 第 14 项的 CLI 快照刷新（随 P3 `astral register`）。
+
 ## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
 
 两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
@@ -1108,6 +1145,8 @@ credential store、workspace binding、protocol snapshot 机制；login/init 业
 | 2026-09-13 | 第 33 轮：Me 响应（/auth/me、login、register 共用）增 required 字段 `platform_role`（enum admin/user/agent/service，D16）；actor 形状（ActorDTO/成员列表）不带该字段；migration 00014 `actors.platform_role` + `disabled_at`（纯增量，protocol_version 不变） | 补充 | Web/CLI（CLI 纯增量兼容，`astral me` 后续可选消费） |
 | 2026-09-13 | 第 33 轮：行为收口——签发/吊销不绑定 workspace 的服务器级 credential 由「任意已注册 human」改为 `platform:credentials:manage`（admin 专属，403 INSUFFICIENT_SCOPE）；绑定 workspace 的路径不变（agent:manage） | 行为（破坏性收紧） | CLI（此前凭 human token 可发的用法被拒） |
 | 2026-09-13 | 第 34 轮：新增端点 `GET /admin/users`、`POST /admin/users/{id}/disable|enable`、`POST /admin/users/{id}/role`（body `{platform_role: admin\|user}`，返回 AdminUser）；新 schema `AdminUser`（含 email/disabled_at）；新增 scope 词表 `platform:users:read`/`platform:users:manage`/`platform:credentials:manage`（admin 角色专属，D16）；停用后该 actor 全部会话/凭证 401 `TOKEN_REVOKED`（account disabled） | 补充 | Web（CLI 不消费 /admin/*） |
+| 2026-09-14 | 第 33 轮 B 线：**messages 两个列表端点落实已声明的分页**——`GET /workspaces/{id}/messages`（id 游标 DESC，此前恒 `Limit(100)` 且忽略 limit/cursor，CLI `--all`/`--limit` 被静默丢弃）与 `GET /tasks/{id}/messages`（id 游标 ASC）补 `{items,next_cursor}` 真实翻页（limit 缺省 50 上限 200，经新 `httpx.ParseLimit` 单点，与 children/task-search 同语义）；openapi `listMessages` 补声明已实装的 `target_id` 过滤参数 | 行为（对齐契约） | CLI（msg list 分页立即生效） |
+| 2026-09-14 | 第 33 轮 B 线：openapi Message schema 补 `target_type`/`target_id`（服务端 DTO 恒序列化、契约漏声明，required 同步补齐）；documents 四端点与 audit list 六个脚手架桩补声明 `501 NOT_IMPLEMENTED` 响应（此前契约只写 200，超卖现状） | 契约文档 | CLI（快照随 P3 `astral register` 一并刷新，归入 §11 第 14 项） |
 
 ## 10. 对接 astral-cli 的联调清单（避免踩坑）
 

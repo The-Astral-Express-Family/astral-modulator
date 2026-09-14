@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -202,7 +201,7 @@ func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 		Tag:      q.Get("tag"),
 		Status:   q.Get("status"),
 		Assignee: q.Get("assignee"),
-		Limit:    parseLimit(q.Get("limit"), 50, 200),
+		Limit:    httpx.ParseLimit(q.Get("limit"), 50, 200),
 		Cursor:   q.Get("cursor"),
 	})
 	if apiErr != nil {
@@ -625,18 +624,4 @@ func validPriority(p string) bool {
 		return true
 	}
 	return false
-}
-
-func parseLimit(raw string, def, max int) int {
-	if raw == "" {
-		return def
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
-		return def
-	}
-	if n > max {
-		return max
-	}
-	return n
 }

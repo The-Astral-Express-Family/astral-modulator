@@ -14,6 +14,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/task"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
 
@@ -32,7 +33,9 @@ func setup(t *testing.T) *fixture {
 	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	m := &Module{DB: db, Auth: svc}
+	// listTaskThread 经 task.LoadForWorkspace 校验 task 主语，须接真实 task 模块。
+	tasks := &task.Module{DB: db, Auth: svc}
+	m := &Module{DB: db, Auth: svc, Tasks: tasks}
 
 	human := &model.Actor{ID: "usr_h1", Kind: "human", DisplayName: "H"}
 	agentA := &model.Actor{ID: "agt_a1", Kind: "agent", DisplayName: "A"}
@@ -143,5 +146,111 @@ func TestReachabilityRules(t *testing.T) {
 	seedMessage(t, f, f.ws1, f.human.ID, "workspace", f.ws1, "broadcast-1")
 	if bodies := listBodies(t, f, f.ws1); len(bodies) != 1 {
 		t.Fatalf("broadcast 可见 = %v，应为 [broadcast-1]", bodies)
+	}
+}
+
+// listPage 以 human 身份调用 workspace 消息列表，返回行与 next_cursor
+//（null 解析为空串，与 NewPage 语义对齐）。
+func listPage(t *testing.T, f *fixture, wsID, rawQuery string) ([]messageDTO, string) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/messages?"+rawQuery, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("workspace_id", wsID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = auth.WithPrincipal(ctx, &auth.Principal{ActorID: f.human.ID, Kind: "human"})
+	rec := httptest.NewRecorder()
+	f.m.list(rec, req.WithContext(ctx))
+	if rec.Code != 200 {
+		t.Fatalf("list status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Items      []messageDTO `json:"items"`
+		NextCursor *string      `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	next := ""
+	if page.NextCursor != nil {
+		next = *page.NextCursor
+	}
+	return page.Items, next
+}
+
+// threadPage 以 human 身份调用 task thread 列表（human 是 fixture 两 ws 的 owner）。
+func threadPage(t *testing.T, f *fixture, taskID, rawQuery string) ([]messageDTO, string) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/v1/tasks/"+taskID+"/messages?"+rawQuery, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("task_id", taskID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = auth.WithPrincipal(ctx, &auth.Principal{ActorID: f.human.ID, Kind: "human"})
+	rec := httptest.NewRecorder()
+	f.m.listTaskThread(rec, req.WithContext(ctx))
+	if rec.Code != 200 {
+		t.Fatalf("thread status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Items      []messageDTO `json:"items"`
+		NextCursor *string      `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	next := ""
+	if page.NextCursor != nil {
+		next = *page.NextCursor
+	}
+	return page.Items, next
+}
+
+func idsOf(items []messageDTO) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.ID)
+	}
+	return out
+}
+
+// TestListPaginationContract 落实 openapi 已声明的 Limit/Cursor + MessagePage：
+// workspace 列表最新在前（id DESC），next_cursor 为空串即到末页。
+// seedMessage 的 id 形如 msg_<body>，字典序 = 播种序，可作稳定游标。
+func TestListPaginationContract(t *testing.T) {
+	f := setup(t)
+	for _, b := range []string{"a", "b", "c", "d", "e"} {
+		seedMessage(t, f, f.ws1, f.human.ID, "workspace", f.ws1, "pg_"+b)
+	}
+	items, next := listPage(t, f, f.ws1, "limit=2")
+	if got := idsOf(items); len(got) != 2 || got[0] != "msg_pg_e" || got[1] != "msg_pg_d" || next != "msg_pg_d" {
+		t.Fatalf("第 1 页 = %v next=%q，应为 [e d] next=msg_pg_d", got, next)
+	}
+	items, next = listPage(t, f, f.ws1, "limit=2&cursor="+next)
+	if got := idsOf(items); len(got) != 2 || got[0] != "msg_pg_c" || got[1] != "msg_pg_b" || next != "msg_pg_b" {
+		t.Fatalf("第 2 页 = %v next=%q，应为 [c b] next=msg_pg_b", got, next)
+	}
+	items, next = listPage(t, f, f.ws1, "cursor="+next)
+	if got := idsOf(items); len(got) != 1 || got[0] != "msg_pg_a" || next != "" {
+		t.Fatalf("末页 = %v next=%q，应为 [a] next=\"\"", got, next)
+	}
+}
+
+// TestTaskThreadPaginationContract：线程按时间正序（阅读序），cursor 方向
+// 随排序（id > cursor），与 workspace 列表互为场景。
+func TestTaskThreadPaginationContract(t *testing.T) {
+	f := setup(t)
+	task := model.Task{ID: "tsk_pg1", WorkspaceID: f.ws1, Title: "T", Status: "open", Priority: "normal", Revision: 1, CreatedBy: f.human.ID}
+	if err := f.db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range []string{"a", "b", "c"} {
+		seedMessage(t, f, f.ws1, f.human.ID, "task", task.ID, "th_"+b)
+	}
+	items, next := threadPage(t, f, task.ID, "limit=2")
+	if got := idsOf(items); len(got) != 2 || got[0] != "msg_th_a" || got[1] != "msg_th_b" || next != "msg_th_b" {
+		t.Fatalf("第 1 页 = %v next=%q，应为 [a b] next=msg_th_b", got, next)
+	}
+	items, next = threadPage(t, f, task.ID, "limit=2&cursor="+next)
+	if got := idsOf(items); len(got) != 1 || got[0] != "msg_th_c" || next != "" {
+		t.Fatalf("末页 = %v next=%q，应为 [c] next=\"\"", got, next)
 	}
 }
