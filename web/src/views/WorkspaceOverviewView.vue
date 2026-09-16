@@ -156,6 +156,18 @@ onUnmounted(() => {
         <Button as-child variant="outline">
           <RouterLink :to="`/workspaces/${workspaceId}/messages`">消息</RouterLink>
         </Button>
+        <Button as-child variant="outline">
+          <RouterLink :to="`/workspaces/${workspaceId}/documents`">文档</RouterLink>
+        </Button>
+        <Button as-child variant="outline">
+          <RouterLink :to="`/workspaces/${workspaceId}/conflicts`">冲突</RouterLink>
+        </Button>
+        <Button as-child variant="outline">
+          <RouterLink :to="`/workspaces/${workspaceId}/members`">成员与凭证</RouterLink>
+        </Button>
+        <Button as-child variant="outline">
+          <RouterLink :to="`/workspaces/${workspaceId}/audit`">审计</RouterLink>
+        </Button>
       </div>
     </CardContent>
   </Card>

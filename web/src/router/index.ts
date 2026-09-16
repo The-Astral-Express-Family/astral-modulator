@@ -82,6 +82,30 @@ export const router = createRouter({
           meta: { auth: 'required' },
         },
         {
+          path: 'workspaces/:workspaceId/documents',
+          name: 'workspace-documents',
+          component: () => import('../views/DocumentsView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
+          path: 'workspaces/:workspaceId/conflicts',
+          name: 'workspace-conflicts',
+          component: () => import('../views/ConflictsView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
+          path: 'workspaces/:workspaceId/members',
+          name: 'workspace-members',
+          component: () => import('../views/MembersView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
+          path: 'workspaces/:workspaceId/audit',
+          name: 'workspace-audit',
+          component: () => import('../views/AuditView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
           path: ':pathMatch(.*)*',
           name: 'not-found',
           component: () => import('../views/NotFoundView.vue'),
