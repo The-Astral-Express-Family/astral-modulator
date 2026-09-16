@@ -38,8 +38,8 @@ func (s *Service) Authenticate(next http.Handler) http.Handler {
 		}
 		p, apiErr := s.ResolvePrincipal(r.Context(), bearer, cookieRefresh)
 		if apiErr != nil {
-			// TODO: audit 记录认证失败（集中登记见 audit/module.go 服务器级审计条目；
-			// 需要先向 Service 注入 recorder，避免中间件反向依赖装配层）。
+			// 401 的审计在 ResolvePrincipal 各失败分支内落库
+			// （action=auth.bearer，见 audit.go；S4-3）。
 			httpx.WriteError(w, r, apiErr)
 			return
 		}

@@ -57,7 +57,7 @@ func (m *Module) register(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, refresh, int(m.Svc.RefreshTTL.Seconds()))
 	resp := m.meBody(r.Context(), *actor)
-	resp.Session = &SessionInfo{ClientType: "web"}
+	resp.Session = m.Svc.SessionInfoByRefresh(r.Context(), refresh)
 	httpx.WriteOK(w, r, http.StatusCreated, resp)
 }
 
@@ -76,7 +76,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, refresh, int(m.Svc.RefreshTTL.Seconds()))
 	resp := m.meBody(r.Context(), *actor)
-	resp.Session = &SessionInfo{ClientType: "web"}
+	resp.Session = m.Svc.SessionInfoByRefresh(r.Context(), refresh)
 	httpx.WriteOK(w, r, http.StatusOK, resp)
 }
 
@@ -125,9 +125,13 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	// TODO(phase-6): 附 session 过期时间（Principal 已带 SessionID；MeResponse
-	// 契约增补属协议变更，需走 openapi 流程并登记 TODO.md §9）。
-	httpx.WriteOK(w, r, http.StatusOK, m.meBody(r.Context(), actor))
+	// S4-4：附 session 元数据（expires_at）。access/cookie 认证的 Principal
+	// 带 SessionID；credential 认证无 session，字段省略（Me.session 非必填）。
+	resp := m.meBody(r.Context(), actor)
+	if p.SessionID != "" {
+		resp.Session = m.Svc.SessionInfoByID(r.Context(), p.SessionID)
+	}
+	httpx.WriteOK(w, r, http.StatusOK, resp)
 }
 
 // updateMe 是 PATCH /auth/me：改自己的资料（display_name/bio/avatar_url）。

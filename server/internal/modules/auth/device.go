@@ -12,6 +12,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ptr"
 )
 
@@ -158,8 +159,15 @@ func (s *Service) ExchangeDeviceToken(ctx context.Context, deviceCode, ip, ua st
 		_ = s.DB.WithContext(ctx).Model(&model.DeviceAuthorization{}).Where("id = ?", row.ID).Update("updated_at", time.Now()).Error
 		return nil, &httpx.APIError{Status: 400, Code: httpx.CodeAuthorizationPending, Message: "authorization pending", Retryable: ptr.Of(true)}
 	case "denied":
+		// 兑换方（CLI）无身份，actor 不可辨；target 指向被拒的授权请求。
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthDevice,
+			TargetType: "device_authorization", TargetID: row.ID,
+			Details: map[string]any{"status": "denied"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "authorization denied"}
 	case "expired":
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthDevice,
+			TargetType: "device_authorization", TargetID: row.ID,
+			Details: map[string]any{"status": "expired"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "device authorization expired"}
 	case "exchanged":
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "device_code already used"}

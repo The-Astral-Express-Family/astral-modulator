@@ -392,10 +392,17 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (re
 			s.Log.Error("login lookup failed", "err", e)
 			return "", nil, httpx.Internal("login failed")
 		}
-		// 不区分“无此邮箱/口令错误”，避免枚举。
+		// 不区分“无此邮箱/口令错误”，避免枚举。审计 details 同口径
+		// （reason=invalid credentials），不给内部留枚举信号外的旁路。
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthLogin,
+			Details: map[string]any{"reason": "invalid credentials"}})
 		return "", nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid credentials"}
 	}
 	if !CheckPassword(password, ha.PasswordHash) {
+		// 邮箱命中 → actor 可辨。
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthLogin, ActorID: ha.ActorID,
+			TargetType: "actor", TargetID: ha.ActorID,
+			Details: map[string]any{"reason": "invalid credentials"}})
 		return "", nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid credentials"}
 	}
 	var actorRow model.Actor
@@ -405,6 +412,9 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (re
 	// 停用账号禁止登录（admin 用户管理，round 34）；文案不区分口令对错
 	// 之外的状态细节。
 	if actorRow.DisabledAt != nil {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthLogin, ActorID: actorRow.ID,
+			TargetType: "actor", TargetID: actorRow.ID,
+			Details: map[string]any{"reason": "account disabled"}})
 		return "", nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "account disabled"}
 	}
 	refresh, _, _, e := s.createSession(ctx, actorRow.ID, "web", ip, ua)
@@ -471,6 +481,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, ua string) (*To
 		var reused model.Session
 		if e := s.DB.WithContext(ctx).Where("prev_refresh_token_hash = ?", hash).First(&reused).Error; e == nil {
 			s.revokeFamily(ctx, &reused, "refresh_token_replay")
+			// 重放是可辨 actor 的认证失败（被撤销 family 的属主），落审计；
+			// target 指 family（撤销的是整族，session_id 只是入口）。
+			s.auditDenied(ctx, audit.Entry{Action: actionAuthRefresh, ActorID: reused.ActorID,
+				TargetType: "session", TargetID: reused.FamilyID,
+				Details: map[string]any{"reason": "refresh_token_replay"}})
 			return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "refresh token reuse detected; session family revoked"}
 		}
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "unknown refresh token"}
@@ -542,7 +557,7 @@ func (s *Service) revokeFamily(ctx context.Context, sess *model.Session, reason 
 	}
 	s.Log.Warn("session family revoked", "reason", reason, "actor_id", sess.ActorID)
 	s.notifyRevoked(sess.ActorID)
-	// TODO: audit 记录撤销动作（集中登记见 audit/module.go 服务器级审计条目）。
+	// 撤销动作的审计在调用点（Refresh 重放分支，action=auth.refresh）。
 }
 
 // Logout 撤销 refresh token 对应的 session。
@@ -629,6 +644,39 @@ type SessionInfo struct {
 	ExpiresAt  string `json:"expires_at,omitempty"`
 }
 
+// SessionInfoByID / SessionInfoByRefresh 装载 Me 响应的 session 块（S4-4）：
+// /auth/me 走 SessionID（Principal 已带），login/register 走刚签发的
+// refresh token。查无/桩模式返回 nil（session 字段 omitempty，调用方免判空）。
+func (s *Service) SessionInfoByID(ctx context.Context, sessionID string) *SessionInfo {
+	if sessionID == "" || s.DB == nil {
+		return nil
+	}
+	var sess model.Session
+	if err := s.DB.WithContext(ctx).First(&sess, "id = ?", sessionID).Error; err != nil {
+		return nil
+	}
+	return toSessionInfo(&sess)
+}
+
+func (s *Service) SessionInfoByRefresh(ctx context.Context, refreshToken string) *SessionInfo {
+	if refreshToken == "" || s.DB == nil {
+		return nil
+	}
+	var sess model.Session
+	if err := s.DB.WithContext(ctx).Where("refresh_token_hash = ?", HashToken(refreshToken)).First(&sess).Error; err != nil {
+		return nil
+	}
+	return toSessionInfo(&sess)
+}
+
+func toSessionInfo(sess *model.Session) *SessionInfo {
+	info := &SessionInfo{ClientType: sess.ClientType}
+	if v := httpx.TimeString(&sess.ExpiresAt); v != nil {
+		info.ExpiresAt = *v
+	}
+	return info
+}
+
 // ---- resolve principal：三种凭证来源 ----
 
 // ResolvePrincipal 解析请求身份。顺序：Bearer access → Bearer credential → Cookie session。
@@ -646,6 +694,10 @@ func (s *Service) ResolvePrincipal(ctx context.Context, bearer, cookieRefresh st
 	if cookieRefresh != "" {
 		return s.authenticateCookieSession(ctx, cookieRefresh)
 	}
+	// 缺凭证（连不到任何认证路径）：按 auth.bearer denied 落审计
+	// （actor 不可辨 → NULL），量由 S5 限流兜住。
+	s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer,
+		Details: map[string]any{"reason": "authentication required"}})
 	return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "authentication required"}
 }
 
@@ -656,12 +708,19 @@ func (s *Service) liveSession(ctx context.Context, hashColumn, hash, notFoundMsg
 	var sess model.Session
 	err := s.DB.WithContext(ctx).Where(hashColumn+" = ?", hash).First(&sess).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 无效 token（查无 session）：actor 不可辨。
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer,
+			Details: map[string]any{"reason": notFoundMsg}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: notFoundMsg}
 	}
 	if err != nil {
 		return nil, httpx.Internal("auth lookup failed")
 	}
 	if sess.RevokedAt != nil {
+		// session 已撤销（含重放连坐的整族撤销）：actor 可辨。
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: sess.ActorID,
+			TargetType: "session", TargetID: sess.ID,
+			Details: map[string]any{"reason": "session revoked"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "session revoked"}
 	}
 	return &sess, nil
@@ -674,12 +733,17 @@ func (s *Service) authActor(ctx context.Context, actorID string) (*model.Actor, 
 	var actor model.Actor
 	err := s.DB.WithContext(ctx).First(&actor, "id = ?", actorID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// session 在而 actor 已删：actor_id 来自 session，可辨。
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: actorID,
+			Details: map[string]any{"reason": "actor missing"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "actor missing"}
 	}
 	if err != nil {
 		return nil, httpx.Internal("auth lookup failed")
 	}
 	if actor.DisabledAt != nil {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: actor.ID,
+			Details: map[string]any{"reason": "account disabled"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "account disabled"}
 	}
 	return &actor, nil
@@ -691,6 +755,9 @@ func (s *Service) authenticateAccessToken(ctx context.Context, token string) (*P
 		return nil, apiErr
 	}
 	if time.Now().After(sess.AccessExpiresAt) {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: sess.ActorID,
+			TargetType: "session", TargetID: sess.ID,
+			Details: map[string]any{"reason": "access token expired"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "access token expired"}
 	}
 	actor, apiErr := s.authActor(ctx, sess.ActorID)
@@ -704,22 +771,37 @@ func (s *Service) authenticateCredential(ctx context.Context, secret string) (*P
 	var cred model.Credential
 	err := s.DB.WithContext(ctx).Where("secret_hash = ?", HashToken(secret)).First(&cred).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 伪造/吊销后残存的 secret：不可归属任何 actor。
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer,
+			Details: map[string]any{"reason": "invalid credential"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "invalid credential"}
 	}
 	if err != nil {
 		return nil, httpx.Internal("auth lookup failed")
 	}
 	if cred.RevokedAt != nil {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: cred.ActorID,
+			TargetType: "credential", TargetID: cred.ID,
+			Details: map[string]any{"reason": "credential revoked"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "credential revoked"}
 	}
 	if cred.ExpiresAt != nil && time.Now().After(*cred.ExpiresAt) {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: cred.ActorID,
+			TargetType: "credential", TargetID: cred.ID,
+			Details: map[string]any{"reason": "credential expired"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "credential expired"}
 	}
 	var actor model.Actor
 	if err := s.DB.WithContext(ctx).First(&actor, "id = ?", cred.ActorID).Error; err != nil {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: cred.ActorID,
+			TargetType: "credential", TargetID: cred.ID,
+			Details: map[string]any{"reason": "credential actor missing"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeAuthRequired, Message: "credential actor missing"}
 	}
 	if actor.DisabledAt != nil {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: cred.ActorID,
+			TargetType: "credential", TargetID: cred.ID,
+			Details: map[string]any{"reason": "account disabled"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "account disabled"}
 	}
 	// last_used 异步更新，失败不影响请求；按分钟节流，避免每请求一条
@@ -743,6 +825,9 @@ func (s *Service) authenticateCookieSession(ctx context.Context, refresh string)
 		return nil, apiErr
 	}
 	if time.Now().After(sess.ExpiresAt) {
+		s.auditDenied(ctx, audit.Entry{Action: actionAuthBearer, ActorID: sess.ActorID,
+			TargetType: "session", TargetID: sess.ID,
+			Details: map[string]any{"reason": "session expired"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "session expired"}
 	}
 	actor, apiErr := s.authActor(ctx, sess.ActorID)
