@@ -35,10 +35,40 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Get("/admin/audit", m.listAudit)
 }
 
+// listAudit 是 GET /admin/audit（round 38 T5 / TODO.md S4-2）：平台级审计
+// 查询，RequireGlobal + platform:audit:read（round 37 常量，admin bundle 内）。
+// workspace_id/actor_id/action/outcome 过滤（均可选）；不带 workspace_id 时
+// 不按工作区收口——必须能看到 workspace_id IS NULL 的服务器级记录
+// （认证失败等，round 37 契约）。过滤/分页核心复用 audit.ListEntries
+// （与 workspace 端点同惯例：id 降序游标）。只读端点：无 audit 自记、无 outbox。
 func (m *Module) listAudit(w http.ResponseWriter, r *http.Request) {
-	// TODO(phase-6): 平台级审计查询（platform:audit:read）：含 workspace_id IS NULL
-	//  的服务器级记录（认证失败等，round 37 契约）；created_at 降序游标分页。
-	httpx.NotImplemented(w, r, "admin.audit.list", "phase-6", "api/openapi.yaml listAdminAudit")
+	if apiErr := auth.RequireGlobal(r, auth.ScopePlatformAuditRead); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	q := r.URL.Query()
+	outcome, apiErr := audit.ParseOutcome(q.Get("outcome"))
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	rows, next, err := audit.ListEntries(r.Context(), m.DB, audit.ListFilter{
+		WorkspaceID: q.Get("workspace_id"),
+		ActorID:     q.Get("actor_id"),
+		Action:      q.Get("action"),
+		Outcome:     outcome,
+		Cursor:      q.Get("cursor"),
+		Limit:       httpx.ParseLimit(q.Get("limit"), 50, 200),
+	})
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	items := make([]audit.EntryDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, audit.ToEntryDTO(row))
+	}
+	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(items, next))
 }
 
 // UserDTO 是 admin 用户列表项：平台视角比 ActorDTO 多邮箱/角色/停用态。
