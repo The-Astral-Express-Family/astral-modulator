@@ -249,7 +249,10 @@ func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, u
 		if err := tx.Create(actor).Error; err != nil {
 			return err
 		}
-		return tx.Create(&model.HumanAuth{ActorID: actor.ID, Email: in.Email, PasswordHash: hash}).Error
+		if err := tx.Create(&model.HumanAuth{ActorID: actor.ID, Email: in.Email, PasswordHash: hash}).Error; err != nil {
+			return err
+		}
+		return seedOrgMemory(tx, actor.ID)
 	})
 	if err != nil {
 		return nil, "", err
@@ -260,6 +263,39 @@ func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, u
 	}
 	s.Log.Info("bootstrap human registered", "actor_id", actor.ID)
 	return actor, refresh, nil
+}
+
+// orgMemorySlug 是组织记忆保留 workspace 的 slug（M1 裁决，round 37；
+// memory 模块注释是该裁决的活文档锚点）。
+const orgMemorySlug = "org-memory"
+
+// seedOrgMemory 在冷启动注册事务内种子组织记忆 workspace（M1 裁决）：
+// slug=org-memory 不存在则创建（name "Organization Memory"，created_by=
+// 新 actor）并为其建 owner membership，照 workspace 创建惯例落 audit。
+// 「已有 human 即 403」守卫在前保证无并发竞争（slug 唯一索引兜底残余窗口）；
+// 刻意不进 goose migration——workspaces.created_by NOT NULL，migration 期
+// 没有可引用的 actor（TODO.md §0.1-3）。
+func seedOrgMemory(tx *gorm.DB, actorID string) error {
+	var existing model.Workspace
+	err := tx.Where("slug = ?", orgMemorySlug).First(&existing).Error
+	if err == nil {
+		return nil // 已种子：防御分支（守卫保证正常只走到这里一次）
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	ws := model.Workspace{ID: ids.New(ids.Workspace), Name: "Organization Memory", Slug: orgMemorySlug, CreatedBy: actorID}
+	if err := tx.Create(&ws).Error; err != nil {
+		return err
+	}
+	if err := tx.Create(&model.WorkspaceMember{WorkspaceID: ws.ID, ActorID: actorID, Role: "owner"}).Error; err != nil {
+		return err
+	}
+	return audit.RecordInTx(tx, audit.Entry{
+		WorkspaceID: ws.ID, ActorID: actorID,
+		Action: "workspace.create", Outcome: "allowed",
+		TargetType: "workspace", TargetID: ws.ID,
+	})
 }
 
 // registerWithInvite 是邀请兑换注册（docs/registration.md §4）：
