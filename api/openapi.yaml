@@ -1137,7 +1137,6 @@ paths:
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-6 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: 审计分页列表
           content:
@@ -1149,6 +1148,8 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/AuditEntry" }
                   next_cursor: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
 
   /admin/audit:
     get:
@@ -1163,7 +1164,6 @@ paths:
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-6 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: 审计分页列表（created_at 降序）
           content:

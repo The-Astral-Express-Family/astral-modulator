@@ -48,8 +48,10 @@ export interface CallOpts {
 }
 
 const CLIENT = 'web'
-// TODO(phase-2): 与服务端 version 对齐来源（读 package.json 或构建注入），避免双写。
-const CLIENT_VERSION = '0.1.0'
+// X-Astral-Client-Version 携带协议版本整数（protocol.md §2/§7）：服务端
+// 对低于 min_cli_protocol_version 的请求回 400 CLIENT_VERSION_UNSUPPORTED。
+// 与服务端 httpx.MinCLIProtocolVersion 同源语义（跨语言双写，两侧同步改）。
+const CLIENT_VERSION = '2'
 
 // Bearer 来源由 session store 注入（避免 client→store 循环依赖）。
 let tokenProvider: (() => string | null) | null = null

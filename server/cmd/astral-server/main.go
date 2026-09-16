@@ -17,6 +17,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/app"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/admin"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
@@ -100,7 +101,13 @@ func run() error {
 		mods.Message = msgMod
 		mods.Presence = presMod
 		mods.Tag = tagMod
+		mods.Document = &document.Module{DB: gormDB, Auth: authSvc}
 		mods.Admin = &admin.Module{DB: gormDB, Auth: authSvc, Log: log}
+		// audit 查询端点的授权注入：audit 包不能直接 import auth（auth 写审计
+		// 反向依赖 audit，会成环），见 audit.WorkspaceAuthorizer。
+		mods.Audit = &audit.Module{DB: gormDB, Authorize: func(r *http.Request, workspaceID string) *httpx.APIError {
+			return auth.RequireWorkspace(r, authSvc, workspaceID, auth.ScopeAuditRead)
+		}}
 
 		// SSE 重放需要读 outbox；订阅授权需要 auth service。
 		mods.Events.DB = gormDB

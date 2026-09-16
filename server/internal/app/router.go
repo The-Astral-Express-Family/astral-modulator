@@ -84,6 +84,9 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 	r.Get("/readyz", readyzHandler(db))
 
 	r.Route("/api/v1", func(api chi.Router) {
+		// 版本协商（R2/NFR-004）：带 X-Astral-Client-Version 头且低于
+		// min_cli_protocol_version 的请求直接 400；头缺失放行（浏览器/测试）。
+		api.Use(httpx.ClientVersionMiddleware)
 		api.NotFound(func(w http.ResponseWriter, req *http.Request) {
 			httpx.WriteError(w, req, httpx.NotFound("no such endpoint under /api/v1"))
 		})
@@ -110,7 +113,8 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		// 公共 auth 端点（免鉴权；device create/exchange、register/login/refresh/logout）。
 		mods.Auth.RegisterPublic(api)
 
-		// 受保护 API。TODO: 认证/授权失败写 audit（集中登记见 audit/module.go）。
+		// 受保护 API。认证失败的审计在 auth.Service 各失败分支落库（S4-3，
+		// action=auth.bearer 等；成功路径不写——R7，sessions 表自身即事实）。
 		api.Group(func(priv chi.Router) {
 			priv.Use(mods.Auth.Svc.Authenticate)
 			// 幂等：挂载于鉴权后（actor 身份参与键空间）；仅当客户端携带
@@ -143,7 +147,7 @@ func wellKnownHandler(cfg config.Config, log *slog.Logger) http.HandlerFunc {
 			CanonicalURL:          cfg.PublicURL,
 			APIBase:               "/api/v1",
 			ProtocolVersion:       httpx.ProtocolVersion,
-			MinCLIProtocolVersion: 2,
+			MinCLIProtocolVersion: httpx.MinCLIProtocolVersion,
 		}
 		resp.Auth.DeviceLogin = true
 		if resp.CanonicalURL == "" {
