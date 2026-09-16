@@ -1,6 +1,8 @@
-// API 类型定义 —— 手工对齐 api/openapi.yaml。
-// TODO(phase-2): 换成 openapi-typescript 从 openapi.yaml 生成，消除手工同步漂移。
-// 在此之前：改契约必须同时改 openapi.yaml 和本文件，并在 TODO.md 登记。
+// API 类型定义 —— 手工对齐 api/openapi.yaml 的存量别名层。
+// 生成类型已落地：src/api/schema.d.ts（npm run gen:api 产出，CI drift 门校验
+// 与 openapi.yaml 一致，TODO.md S6-2）。S7 各视图迁移时改用生成类型
+// （import type { components, operations } from '@/api/schema'），本文件保留
+// 导出别名供存量视图，随迁移逐步删除（TODO.md S7）。
 
 export type ID = string
 

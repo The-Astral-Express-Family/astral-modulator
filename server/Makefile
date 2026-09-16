@@ -6,8 +6,9 @@
 .PHONY: web-dist openapi-lint serve-db
 
 # openapi-lint：redocly 校验契约唯一事实来源（TODO.md §0.2 验证命令）。
+# 版本与 CI（.github/workflows/ci.yml）钉死一致，避免本地/CI 漂移。
 openapi-lint:
-	cd ../api && npx @redocly/cli lint openapi.yaml
+	cd ../api && npx --yes @redocly/cli@1.34.2 lint openapi.yaml
 
 # serve-db：起开发 PostgreSQL（docker compose，端口 5433）。goose 迁移由
 # server 启动时自动执行（store.Open 内嵌 goose up，幂等；ASTRAL_AUTO_MIGRATE
