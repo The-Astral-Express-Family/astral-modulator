@@ -1380,3 +1380,14 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 23. 【✅ 第 35 轮完成】web 请求层重构：api/client 换 axios 实例（拦截器管
     请求头/Bearer/请求 id/204 归一）+ 失败统一 toast（silent 尾参豁免后台路径）
     + useApiAction 瘦身；修复 login/register 401 误触全局登出
+
+## A（续）. 第 37 轮 B 线（2026-09-16，Lidozs55）：实施总纲接入 repo-hygiene 卫生门
+
+用户指示：实现过程须定期过卫生门（已有 repo-hygiene skill，实现模型应能
+自行调用）。可达性验证：不查路径、直接按名调用成功（harness 解析到用户级
+`~/.agents/skills/repo-hygiene`，SKILL.md + scripts/hygiene-check.mjs 完整）。
+
+总纲改动：新增 §0.4 卫生门（完整档 = 每个 S 阶段收尾，相邻小阶段可合并；
+快速档 = 阶段内每 3-4 任务/单个大任务后；S1 收尾做 skill §0 校准落
+.hygiene.config.json + .hygiene-baseline.json；skill 不可达时的降级清单；
+修复纪律遵循 skill §E）；§2 序言与 S1/S8 收尾项同步挂钩。无契约变更。

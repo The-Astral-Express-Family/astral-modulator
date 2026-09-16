@@ -5,8 +5,9 @@
 > Sync）+ Phase 6（GUI/Hardening）全部余量，已拆成按依赖排序的阶段 S1-S8，
 > 每项自带决策依据与验收标准。相关契约与 501 桩已由 round 37 先行铺好。
 >
-> **执行模式**：按 §2 阶段顺序一次性完整实现；每阶段收尾跑 §0.2 验证命令，
-> 全绿才进入下一阶段；所有设计问题已有结论（§1），**不再讨论、不改裁决**；
+> **执行模式**：按 §2 阶段顺序一次性完整实现；每阶段收尾跑 §0.2 验证命令
+> + §0.4 卫生门，全绿才进入下一阶段；所有设计问题已有结论（§1），
+> **不再讨论、不改裁决**；
 > 遇本文件与代码/openapi/docs 冲突时以 `api/openapi.yaml` 为准，并把冲突
 > 记到 §9 表末备注行。
 >
@@ -68,6 +69,24 @@ web/src/{views,api,stores,...}      Vue3 SPA（axios 统一请求层 + 全局错
 docs/                               architecture/protocol/sync-semantics/registration/...
 ```
 
+### 0.4 卫生门（repo-hygiene skill，定期执行）
+
+实现全程按固定节奏调用 **`repo-hygiene`** skill（直接按名调用即可，无需
+路径；已验证可达，自包含、不在本仓安装任何脚本）：
+
+- **完整档**：每个 S 阶段收尾时，在 §0.2 验证全绿后追加（skill 的 A+B+C+D
+  全部；B 段必须派发只读 subagent 独立复核；P1/P2 当场修复后重跑 A）。
+  相邻小阶段可合并过门（S2+S3 一道、S4+S5 一道）；
+- **快速档**：阶段内每完成 3-4 个任务、或单个大任务落地后（如 S1-3、
+  S1-5、S5-2、S7 每两个视图）；
+- **首次完整档（S1 收尾）先做 skill §0 校准**：生成并提交仓库根
+  `.hygiene.config.json`（行数阈值 + allowlist）与 `.hygiene-baseline.json`
+  （TODO/FIXME/HACK 计数基线）；此后每道门计数不得上升；
+- **skill 不可达时降级**（如执行环境未装该 skill）：§0.2 全量命令 +
+  `git ls-files | xargs wc -l | sort -n` 行数抽查 + 本次新增文件按 skill
+  B 段七条自查 + §4 表内锚点引用 grep 可解析，并在提交信息注明降级；
+- 修复纪律遵循 skill §E：发现即修、重构优先于叠加、卫生重构单独成 commit。
+
 ## 1. 决策速查（全部已裁决，实现时不再讨论）
 
 ### 1.1 历史裁决（D/A/S 系列，一行结论；全文与理由见 TODO-archive.md §D）
@@ -126,6 +145,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 > 并**删除 openapi 中对应操作的 "501" 响应行**（契约门强制两侧同步）。
 > 每个任务的「验收」是完成的定义；端到端测试放 `server/tests/`（照既有
 > 集成测试模式），单元测试放各模块包内。
+> 阶段收尾 = §0.2 验证 + repo-hygiene 完整档（§0.4）；阶段内按 §0.4 跑快速档。
 
 ### S1 Phase 5 · document 模块实装（最大阶段）
 
@@ -182,6 +202,8 @@ docs/                               architecture/protocol/sync-semantics/registr
   验收：四种 resolution 各一测 + 已解决 409 + 详情 404。
 - [ ] **S1-6 契约收口**：删除 openapi documents 段全部 "501" 响应行；
   契约门 + redocly 绿；`grep -rn "TODO(phase-5" server` 仅剩已处置项。
+- [ ] **S1 收尾**：完整档卫生门（§0.4；首次含 skill §0 校准，落
+  `.hygiene.config.json` + `.hygiene-baseline.json` 并提交）。
 
 ### S2 Phase 5 收口：capabilities
 
@@ -278,7 +300,8 @@ docs/                               architecture/protocol/sync-semantics/registr
 - [ ] 逐项勾选本文件 §2；轮次详录写 TODO-archive.md §A 卷末（格式照既有轮次）。
 - [ ] NOT_IMPLEMENTED 此时应无任何端点返回：从 httpx/errors.go、openapi
   ErrorCode enum、api/schemas/error.json 三处移除（契约门强制同步）。
-- [ ] §0.2 全量验证命令绿；`git status` 干净。
+- [ ] 最后一道完整档卫生门（§0.4，含 D 段文档卫生）+ §0.2 全量验证命令绿；
+  `.hygiene-baseline.json` 刷新提交；`git status` 干净。
 
 ## 3. 明确不做 / 延期清单（不要顺手实现）
 
