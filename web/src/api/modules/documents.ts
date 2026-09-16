@@ -74,6 +74,8 @@ export function getDocument(
 
 // 版本化删除（tombstone）：base_revision 必填（缺失 400）；远端已变更时 409
 // DOCUMENT_CONFLICT 并落冲突工件。204 无 body。
+// GUI 无直接删除入口（删除经 ConflictsView resolve(ours) 或 CLI）；保留本
+// 封装为 CLI/同步语义对齐。
 export function deleteDocument(
   workspaceId: string,
   path: string,
