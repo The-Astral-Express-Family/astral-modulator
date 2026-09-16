@@ -129,13 +129,10 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			CreatedAt:   now,
 		}
 		if err := m.DB.Create(&row).Error; err != nil {
-			// 跨实例并发同键（进程内互斥管不到的窗口）：主键冲突 →
-			// 重读首到者的响应重放；读不到则放行本响应。
-			if cached, ok := m.lookup(r, p.ActorID, endpoint, key, now); ok {
-				replay(w, cached)
-				return
-			}
-			m.Log.Warn("idempotency store failed", "err", err)
+			// 跨实例并发同键（进程内互斥管不到的窗口）：主键冲突 = 首到者
+			// 已在别处落档。此时**本响应已完整流式写给客户端**，再 replay 会
+			// 追加第二份 body 且 WriteHeader 失效——只记日志，本响应照常收尾。
+			m.Log.Warn("idempotency store failed (response already streamed)", "err", err)
 		}
 	})
 }
