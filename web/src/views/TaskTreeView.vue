@@ -2,6 +2,9 @@
 // 任务树视图（v2 容器语义，TODO.md D15；round 25 起为双栏设计）：
 // - 逐容器懒加载：根层 = workspace children 集合；展开节点 = 该任务 children
 //   集合（只回传直接子层，行内带 tags/children_count）；不再全量平铺拉取；
+// - 翻页（S7-1）：容器集合与搜索都消费 next_cursor，超页不再静默丢弃——
+//   容器自动续拉至 TREE_AUTO_PAGES 页，仍有剩余时渲染「加载更多」行；
+//   搜索首批之后手动续拉（沿用发起时的查询参数），不再硬编码截断 50 条；
 // - 过滤（status/tag）服务端生效：变更后重载所有可见集合；
 // - 搜索模式：task-search 平面查询（regex/fuzzy/tag/status/assignee 至少其一）；
 // - SSE 实时刷新：task.* 防抖重载可见集合，snapshot.required 立即全量重拉
@@ -14,8 +17,16 @@ import { ListTree, Plus } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { notifyApiError } from '../api/client'
 import { taskApi } from '../api/taskSource'
-import type { TaskCreatePayload } from '../api/modules/task'
-import type { EventEnvelope, Member, Tag, Task, TaskSearchHit, TaskStatus } from '../api/types'
+import type { TaskCreatePayload, TaskSearchParams } from '../api/modules/task'
+import type {
+  EventEnvelope,
+  Member,
+  Page,
+  Tag,
+  Task,
+  TaskSearchHit,
+  TaskStatus,
+} from '../api/types'
 import { TASKS_MOCK } from '../lib/mockMode'
 import { useTaskLiveEvents } from '../composables/useTaskLiveEvents'
 import type { SseState } from '../composables/useEventStream'
@@ -26,6 +37,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/ui/spinner'
 import EventSimulator from '@/components/tasks/EventSimulator.vue'
 import TaskCreateDialog from '@/components/tasks/TaskCreateDialog.vue'
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel.vue'
@@ -39,11 +51,21 @@ const route = useRoute()
 const workspaceId = computed(() => route.params.workspaceId as string)
 
 const PAGE_LIMIT = 200
+const SEARCH_PAGE_LIMIT = 50
+
+// 容器分页（S7-1）：根容器在游标映射中的键——task id 均为非空字符串，'' 不会被占用。
+const ROOT_KEY = ''
+const TREE_AUTO_PAGES = 5 // 单容器单次操作自动续拉页数（5×200=1000 行），超出走「加载更多」
+const TREE_MAX_PAGES = 25 // 单容器单次操作硬上限（防病态容器拖垮前端；重载按已载入量放宽）
 
 const roots = ref<Task[]>([])
 // 已加载的 task 容器集合（直接子层），按容器 id 缓存。
 const childrenByContainer = ref<Map<string, Task[]>>(new Map())
+// 各容器（含根）的剩余翻页游标：值 null = 已到尾页；键缺失 = 尚未拉取过。
+const cursorsByContainer = ref<Map<string, string | null>>(new Map())
 const expanded = ref<Set<string>>(new Set())
+// 「加载更多」进行中的容器 id（同时只允许一处续拉，避免重复追加）。
+const loadingMoreContainer = ref<string | null>(null)
 
 const mode = ref<'tree' | 'search'>('tree')
 const statusFilter = ref<TaskStatus | ''>('')
@@ -57,6 +79,10 @@ const tagDict = ref<Tag[]>([])
 const selected = ref<Task | null>(null)
 const loading = ref(false)
 const hits = ref<TaskSearchHit[]>([])
+// 搜索分页（S7-1）：剩余游标 null = 无更多；lastSearchParams 为发起查询的快照。
+const searchCursor = ref<string | null>(null)
+const searchLoadingMore = ref(false)
+let lastSearchParams: TaskSearchParams | null = null
 
 // 加载态细化：展开容器的子层骨架 / 详情面板骨架 / 行更新闪烁
 const expandingIds = ref<Set<string>>(new Set())
@@ -94,36 +120,98 @@ function filterParams(): { status?: string; tag?: string; limit: number } {
   return params
 }
 
-async function fetchRoots(): Promise<Task[]> {
-  const page = await taskApi.listWorkspaceChildren(workspaceId.value, filterParams())
-  return page.items
+// ---- 容器分页拉取（S7-1：消费 next_cursor，超页不再静默丢弃）----
+
+function fetchContainerPage(containerId: string, cursor?: string): Promise<Page<Task>> {
+  const params = { ...filterParams(), cursor }
+  return containerId === ROOT_KEY
+    ? taskApi.listWorkspaceChildren(workspaceId.value, params)
+    : taskApi.listTaskChildren(containerId, params)
 }
 
-async function fetchChildren(taskId: string): Promise<Task[]> {
-  const page = await taskApi.listTaskChildren(taskId, filterParams())
-  return page.items
+// 从 startCursor 起续拉：游标耗尽或再拉满 maxPages 页即止（页间游标依赖，
+// 只能串行）；返回累积行 + 剩余游标（null = 已到尾页）。
+async function fetchContainerPages(
+  containerId: string,
+  startCursor: string | undefined,
+  maxPages: number,
+): Promise<{ items: Task[]; nextCursor: string | null }> {
+  const items: Task[] = []
+  let cursor = startCursor
+  for (let page = 0; page < maxPages; page++) {
+    const result = await fetchContainerPage(containerId, cursor)
+    items.push(...result.items)
+    cursor = result.next_cursor ?? undefined
+    if (!cursor) break
+  }
+  return { items, nextCursor: cursor ?? null }
+}
+
+// 首载/替换一个容器的行集并回写剩余游标。
+async function loadContainer(containerId: string, maxPages: number): Promise<Task[]> {
+  const batch = await fetchContainerPages(containerId, undefined, maxPages)
+  cursorsByContainer.value.set(containerId, batch.nextCursor)
+  return batch.items
 }
 
 // 重载所有可见集合：根层 + 每个「已展开且有缓存」的容器。集合数量只随展开的
-// 节点数增长，与树规模解耦。
+// 节点数增长，与树规模解耦。重载页数目标 ≥ 该容器当前已载入量（SSE/过滤触发的
+// 重载不把已翻页内容缩水回首页）；按 limit 估算页数即可，偏少时「加载更多」兜底。
 async function reloadVisible(): Promise<void> {
   loading.value = true
   try {
     const containers = [...childrenByContainer.value.keys()].filter((id) =>
       expanded.value.has(id),
     )
-    const [freshRoots, ...freshChildren] = await Promise.all([
-      fetchRoots(),
-      ...containers.map((id) => fetchChildren(id)),
-    ])
-    roots.value = freshRoots
-    containers.forEach((id, i) => childrenByContainer.value.set(id, freshChildren[i]!))
+    const pagesFor = (id: string): number =>
+      Math.min(
+        TREE_MAX_PAGES,
+        Math.max(
+          TREE_AUTO_PAGES,
+          Math.ceil((id === ROOT_KEY ? roots.value : childrenByContainer.value.get(id) ?? []).length / PAGE_LIMIT),
+        ),
+      )
+    const ids = [ROOT_KEY, ...containers]
+    const batches = await Promise.all(ids.map((id) => fetchContainerPages(id, undefined, pagesFor(id))))
+    ids.forEach((id, i) => {
+      const batch = batches[i]!
+      if (id === ROOT_KEY) roots.value = batch.items
+      else childrenByContainer.value.set(id, batch.items)
+      cursorsByContainer.value.set(id, batch.nextCursor)
+    })
     if (selected.value) await refreshDetail()
   } catch {
     // 失败已由全局拦截器 toast（mock 模式列表不抛错）。
   } finally {
     loading.value = false
   }
+}
+
+// 「加载更多」（树模式）：从剩余游标续拉一批，追加到该容器行尾。
+async function loadTreeMore(containerId: string): Promise<void> {
+  const cursor = cursorsByContainer.value.get(containerId)
+  if (!cursor || loadingMoreContainer.value) return
+  loadingMoreContainer.value = containerId
+  try {
+    const batch = await fetchContainerPages(containerId, cursor, TREE_AUTO_PAGES)
+    if (containerId === ROOT_KEY) {
+      roots.value = [...roots.value, ...batch.items]
+    } else {
+      const current = childrenByContainer.value.get(containerId) ?? []
+      childrenByContainer.value.set(containerId, [...current, ...batch.items])
+    }
+    cursorsByContainer.value.set(containerId, batch.nextCursor)
+  } catch {
+    // 失败已由全局拦截器 toast；游标未消费，可重试。
+  } finally {
+    loadingMoreContainer.value = null
+  }
+}
+
+function containerCount(containerId: string): number {
+  return containerId === ROOT_KEY
+    ? roots.value.length
+    : (childrenByContainer.value.get(containerId)?.length ?? 0)
 }
 
 // task.* 事件高频场景（lease 清扫器批量过期等）防抖合并为一次重载。
@@ -178,7 +266,7 @@ async function toggle(task: Task): Promise<void> {
       expandingIds.value = new Set([...expandingIds.value, task.id])
       loading.value = true
       try {
-        childrenByContainer.value.set(task.id, await fetchChildren(task.id))
+        childrenByContainer.value.set(task.id, await loadContainer(task.id, TREE_AUTO_PAGES))
       } catch {
         // 失败已由全局拦截器 toast；回退展开态。
         next.delete(task.id)
@@ -193,27 +281,35 @@ async function toggle(task: Task): Promise<void> {
   expanded.value = next
 }
 
-interface FlatRow {
-  task: Task
-  depth: number
-  hasChildren: boolean
-  expanded: boolean
+type FlatRow =
+  | { kind: 'task'; task: Task; depth: number; hasChildren: boolean; expanded: boolean }
+  | { kind: 'more'; containerId: string; depth: number }
+
+function rowKey(row: FlatRow): string {
+  return row.kind === 'task' ? row.task.id : `more:${row.containerId}`
 }
 
 const rows = computed<FlatRow[]>(() => {
   const out: FlatRow[] = []
-  const walk = (list: Task[], depth: number): void => {
+  const walk = (containerId: string, list: Task[], depth: number): void => {
     for (const task of list) {
-      out.push({ task, depth, hasChildren: task.children_count > 0, expanded: expanded.value.has(task.id) })
+      out.push({ kind: 'task', task, depth, hasChildren: task.children_count > 0, expanded: expanded.value.has(task.id) })
       if (expanded.value.has(task.id)) {
         const kids = childrenByContainer.value.get(task.id)
-        if (kids) walk(kids, depth + 1)
+        if (kids) walk(task.id, kids, depth + 1)
       }
     }
+    // 该容器仍有剩余页：在子层末尾渲染「加载更多」行（缩进的容器不出现在行集）。
+    if (cursorsByContainer.value.get(containerId)) {
+      out.push({ kind: 'more', containerId, depth })
+    }
   }
-  walk(roots.value, 0)
+  walk(ROOT_KEY, roots.value, 0)
   return out
 })
+
+// 树模式下是否还有任何容器存在未加载的剩余页（页脚提示用）。
+const hasTreeMore = computed(() => [...cursorsByContainer.value.values()].some(Boolean))
 
 // ---- 搜索模式（task-search 平面查询）----
 
@@ -227,6 +323,17 @@ const canSearch = computed(() =>
   ),
 )
 
+function searchParamsFromInputs(): TaskSearchParams {
+  return {
+    regex: regexInput.value || undefined,
+    fuzzy: fuzzyInput.value || undefined,
+    tag: tagFilter.value || undefined,
+    status: statusFilter.value || undefined,
+    assignee: assigneeInput.value || undefined,
+    limit: SEARCH_PAGE_LIMIT,
+  }
+}
+
 async function runSearch(): Promise<void> {
   if (!canSearch.value) {
     toast.error('搜索至少需要一个条件（regex / fuzzy / tag / status / assignee）')
@@ -234,20 +341,36 @@ async function runSearch(): Promise<void> {
   }
   loading.value = true
   try {
-    const page = await taskApi.searchTasks(workspaceId.value, {
-      regex: regexInput.value || undefined,
-      fuzzy: fuzzyInput.value || undefined,
-      tag: tagFilter.value || undefined,
-      status: statusFilter.value || undefined,
-      assignee: assigneeInput.value || undefined,
-      limit: 50,
-    })
+    const params = searchParamsFromInputs()
+    const page = await taskApi.searchTasks(workspaceId.value, params)
     hits.value = page.items
+    searchCursor.value = page.next_cursor
+    lastSearchParams = params
     mode.value = 'search'
   } catch {
     // 失败已由全局拦截器 toast。
   } finally {
     loading.value = false
+  }
+}
+
+// 续拉搜索结果（S7-1）：沿用发起搜索时的参数快照——输入框后续改动不影响
+// 已展示的查询（要变更条件需重新搜索）。
+async function loadSearchMore(): Promise<void> {
+  const params = lastSearchParams
+  if (!params || !searchCursor.value || searchLoadingMore.value) return
+  searchLoadingMore.value = true
+  try {
+    const page = await taskApi.searchTasks(workspaceId.value, {
+      ...params,
+      cursor: searchCursor.value,
+    })
+    hits.value = [...hits.value, ...page.items]
+    searchCursor.value = page.next_cursor
+  } catch {
+    // 失败已由全局拦截器 toast；游标未消费，可重试。
+  } finally {
+    searchLoadingMore.value = false
   }
 }
 
@@ -258,6 +381,9 @@ function resetToTree(): void {
   tagFilter.value = ''
   statusFilter.value = ''
   mode.value = 'tree'
+  searchCursor.value = null
+  searchLoadingMore.value = false
+  lastSearchParams = null
   void reloadVisible()
 }
 
@@ -284,7 +410,7 @@ async function load(): Promise<void> {
 async function expandContainer(taskId: string): Promise<void> {
   expanded.value = new Set([...expanded.value, taskId])
   if (!childrenByContainer.value.has(taskId)) {
-    childrenByContainer.value.set(taskId, await fetchChildren(taskId))
+    childrenByContainer.value.set(taskId, await loadContainer(taskId, TREE_AUTO_PAGES))
   }
 }
 
@@ -327,6 +453,7 @@ function onStale(): void {
 watch(rows, (next) => {
   let flashed = false
   for (const row of next) {
+    if (row.kind !== 'task') continue
     const prev = seenRevisions.value.get(row.task.id)
     if (prev !== undefined && prev !== row.task.revision) {
       flashIds.value = new Set([...flashIds.value, row.task.id])
@@ -346,8 +473,13 @@ onMounted(load)
 watch(workspaceId, () => {
   roots.value = []
   childrenByContainer.value = new Map()
+  cursorsByContainer.value = new Map()
   expanded.value = new Set()
   hits.value = []
+  searchCursor.value = null
+  searchLoadingMore.value = false
+  lastSearchParams = null
+  loadingMoreContainer.value = null
   selected.value = null
   mode.value = 'tree'
   seenRevisions.value = new Map()
@@ -418,7 +550,7 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
           <!-- 搜索结果模式 -->
           <template v-else-if="mode === 'search'">
             <p class="text-muted-foreground px-2 py-1 text-xs">
-              查询结果（{{ hits.length }} 条）——「返回树」恢复树模式。
+              查询结果（{{ hits.length }} 条<template v-if="searchCursor">，尚有更多</template>）——「返回树」恢复树模式。
             </p>
             <TransitionGroup v-if="hits.length" tag="div" name="tree-row" class="relative flex flex-col">
               <button
@@ -453,6 +585,19 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
                 </Badge>
               </button>
             </TransitionGroup>
+            <!-- 搜索续拉（S7-1）：还有剩余页时出现 -->
+            <div v-if="searchCursor" class="px-2 py-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                class="w-full"
+                :disabled="searchLoadingMore"
+                @click="loadSearchMore"
+              >
+                <Spinner v-if="searchLoadingMore" data-icon="inline-start" />
+                {{ searchLoadingMore ? '加载中…' : `加载更多（已显示 ${hits.length} 条）` }}
+              </Button>
+            </div>
             <Empty v-if="!loading && !hits.length">
               <EmptyHeader>
                 <EmptyTitle>没有匹配的任务。</EmptyTitle>
@@ -464,25 +609,40 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
           <!-- 树模式 -->
           <template v-else>
             <TransitionGroup v-if="rows.length" tag="div" name="tree-row" class="relative flex flex-col">
-              <template v-for="row in rows" :key="row.task.id">
-                <TaskTreeRow
-                  :row="row"
-                  :selected="selected?.id === row.task.id"
-                  :assignee="membersById.get(row.task.assignee_actor_id ?? '') ?? null"
-                  :flash="flashIds.has(row.task.id)"
-                  @select="openDetail(row.task)"
-                  @toggle="toggle(row.task)"
-                />
-                <!-- 展开容器的子层懒加载骨架 -->
-                <div
-                  v-if="expandingIds.has(row.task.id)"
-                  :key="`${row.task.id}:skeleton`"
-                  class="mb-1 flex flex-col gap-1 py-1"
-                  :style="{ paddingLeft: `${(row.depth + 1) * 18 + 6}px` }"
+              <template v-for="row in rows" :key="rowKey(row)">
+                <template v-if="row.kind === 'task'">
+                  <TaskTreeRow
+                    :row="row"
+                    :selected="selected?.id === row.task.id"
+                    :assignee="membersById.get(row.task.assignee_actor_id ?? '') ?? null"
+                    :flash="flashIds.has(row.task.id)"
+                    @select="openDetail(row.task)"
+                    @toggle="toggle(row.task)"
+                  />
+                  <!-- 展开容器的子层懒加载骨架 -->
+                  <div
+                    v-if="expandingIds.has(row.task.id)"
+                    class="mb-1 flex flex-col gap-1 py-1"
+                    :style="{ paddingLeft: `${(row.depth + 1) * 18 + 6}px` }"
+                  >
+                    <Skeleton class="h-7 w-1/2" />
+                    <Skeleton class="h-7 w-1/3" />
+                  </div>
+                </template>
+                <!-- 容器剩余页（S7-1）：出现在该容器子层末尾 -->
+                <button
+                  v-else
+                  type="button"
+                  class="hover:bg-muted/60 text-muted-foreground flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                  :style="{ paddingLeft: `${row.depth * 18 + 24}px` }"
+                  :disabled="loadingMoreContainer !== null"
+                  @click="loadTreeMore(row.containerId)"
                 >
-                  <Skeleton class="h-7 w-1/2" />
-                  <Skeleton class="h-7 w-1/3" />
-                </div>
+                  <Spinner v-if="loadingMoreContainer === row.containerId" class="size-3.5" />
+                  {{ loadingMoreContainer === row.containerId
+                    ? '加载中…'
+                    : `加载更多（该层已显示 ${containerCount(row.containerId)} 项）` }}
+                </button>
               </template>
             </TransitionGroup>
             <Empty v-if="!loading && !rows.length">
@@ -496,8 +656,8 @@ const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
         <div class="text-muted-foreground border-t px-3 py-1.5 text-xs">
           {{
             mode === 'search'
-              ? `搜索 ${hits.length} 条`
-              : `${rows.length} 行可见（展开 ${expanded.size} 个容器）`
+              ? `搜索 ${hits.length} 条${searchCursor ? '（有更多）' : ''}`
+              : `${rows.length} 行可见（展开 ${expanded.size} 个容器${hasTreeMore ? '，部分层级还有更多未加载' : ''}）`
           }}
           <template v-if="statusFilter || tagFilter"> · 过滤中</template>
         </div>
