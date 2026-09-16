@@ -40,6 +40,11 @@ Workspace config 定义 include/exclude：
 
 服务端必须再次校验路径；不能信任客户端 glob。
 
+> 归属（round 38 R3 裁决，TODO.md §3）：Workspace config 的 include/exclude 是
+> **客户端约定**（astral-cli 仓持有），服务端不存储、不解析该配置；服务端侧
+> 的路径防线 = 固定保留前缀黑名单（`.git/`、`.astral/`、`secrets/`、`.env*`
+> 等，实现见 server `document/paths.go`）+ push 时的大小写冲突检测（R1）。
+
 ## 4. 路径安全
 
 拒绝：

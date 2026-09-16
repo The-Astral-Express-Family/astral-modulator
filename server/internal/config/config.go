@@ -27,8 +27,8 @@ type Config struct {
 	// 否则 CLI 拉起的链接会落到 API 端口上没有页面。
 	WebBaseURL string
 	// DatabaseDSN PostgreSQL 连接串。为空表示“无数据库的开发模式”：
-	// 服务可启动、healthz 可用，但一切依赖存储的端点返回 NOT_IMPLEMENTED/INTERNAL_ERROR，
-	// readyz 返回 503。
+	// 服务可启动、healthz 可用，但依赖存储的端点不可用（鉴权依赖缺失，
+	// 受保护端点 401），readyz 返回 503。
 	DatabaseDSN string
 	// ServerID 稳定服务器身份。为空时首启生成新 ID；首启后固化进
 	// server_meta 表，之后以库中值为准（store.EnsureServerID），

@@ -53,8 +53,8 @@ FOR EACH ROW EXECUTE FUNCTION assert_task_parent_same_workspace();
 CREATE TABLE task_leases (
     task_id        TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     holder_actor_id TEXT NOT NULL REFERENCES actors(id),
-    -- TODO(phase-3): 后台清扫器把过期 lease 置为 expired 并发出 task.lease.expired 事件；
-    -- 读路径必须把 expires_at < now() 视为无主。
+    -- 过期 lease：后台清扫器已实装（task 模块 StartSweeper，发 task.lease.expired）；
+    -- 读路径仍把 expires_at < now() 视为无主（清扫间隙的双保险）。
     expires_at     TIMESTAMPTZ NOT NULL,
     renewed_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()

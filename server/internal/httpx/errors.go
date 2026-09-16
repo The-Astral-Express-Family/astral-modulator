@@ -61,10 +61,6 @@ const (
 	// （要求持有效码才可探测，泄露面可接受，docs/registration.md §3）。
 	CodeEmailTaken = "EMAIL_TAKEN"
 
-	// CodeNotImplemented 仅用于脚手架阶段的未实现端点（HTTP 501）。
-	// 它不属于稳定公网错误码集合；各 Phase 完成后对应端点必须移除此响应。
-	// CLI/GUI 不得依赖此 code 做正式逻辑。
-	CodeNotImplemented = "NOT_IMPLEMENTED"
 )
 
 // Error 是公网错误 envelope，契约见 api/schemas/error.json（语义见 docs/protocol.md §3）。

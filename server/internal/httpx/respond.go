@@ -36,24 +36,6 @@ func TimeString(t *time.Time) *string {
 	return &s
 }
 
-// NotImplemented 是脚手架阶段的占位响应：HTTP 501 + NOT_IMPLEMENTED envelope。
-// feature 用于日志定位，docRef 指向实现依据的文档章节。
-//
-// 每个使用此函数的 handler 都必须在 TODO.md 中有对应条目，
-// 并在该功能所属 Phase 完成时删除。
-func NotImplemented(w http.ResponseWriter, r *http.Request, feature, phase, docRef string) {
-	WriteError(w, r, &APIError{
-		Status:  http.StatusNotImplemented,
-		Code:    CodeNotImplemented,
-		Message: "endpoint not implemented yet (scaffold stub): " + feature,
-		Details: map[string]any{
-			"feature": feature,
-			"phase":   phase,
-			"doc":     docRef,
-		},
-	})
-}
-
 // DecodeJSON 解析请求体到 dst。空 body 视为合法（全可选字段的端点）；
 // 语法错误 → VALIDATION_FAILED。
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

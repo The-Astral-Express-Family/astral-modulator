@@ -202,6 +202,12 @@ CLI 必须支持：
 
 公网 API、事件 envelope 与 CLI JSON 输出必须版本化。服务端必须能拒绝不兼容的客户端，而不是产生未定义行为。
 
+> 闭合方式（round 38，TODO.md §1.2 R2）：`/.well-known/astral` 公布
+> `min_cli_protocol_version`（客户端首发自查，protocol.md §7）；服务端
+> `ClientVersionMiddleware` 对携带低于下限的 `X-Astral-Client-Version` 头的
+> `/api/v1` 请求直接 400 `CLIENT_VERSION_UNSUPPORTED`（头缺失放行，浏览器
+> 不受影响）。
+
 ### NFR-005 安全
 
 - TLS 默认开启；

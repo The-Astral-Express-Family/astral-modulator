@@ -1,9 +1,9 @@
 # Astral Modulator 实施总纲（TODO v2）
 
-> **本文件当前的角色**（round 37 重写）：交付给自动化实现者的**一次性完整实施计划**。
-> 截至 round 37：Phase 0-4 已全部落地验收；剩余工作 = Phase 5（Memory/Document
-> Sync）+ Phase 6（GUI/Hardening）全部余量，已拆成按依赖排序的阶段 S1-S8，
-> 每项自带决策依据与验收标准。相关契约与 501 桩已由 round 37 先行铺好。
+> **本文件当前的角色**（round 38 收尾更新）：S1-S8 已于 round 38 全部落地
+> 验收（501 桩清零、NOT_IMPLEMENTED 错误码移除、四道 repo-hygiene 卫生门通过），
+> 本文件回到人工维护模式；后续工作按 §3 触发条件重启。轮次详录见
+> [TODO-archive.md](TODO-archive.md)。
 >
 > **执行模式**：按 §2 阶段顺序一次性完整实现；每阶段收尾跑 §0.2 验证命令
 > + §0.4 卫生门，全绿才进入下一阶段；所有设计问题已有结论（§1），
@@ -136,7 +136,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 - org workspace 种子不能放 migration（workspaces.created_by NOT NULL，届时无
   actor），放 bootstrap 注册事务内（S1-4）。
 - httpx 已有：`ParseLimit`（缺省 50 上限 200）、`NewPage(items, nextCursor)`、
-  `NotFound/Invalid/Conflict` 错误构造、`NotImplemented` 501 桩。
+  `NotFound/Invalid/Conflict` 错误构造（round 38 起 501 桩与 NOT_IMPLEMENTED 已全部移除）。
 
 ## 2. 实施计划（S1-S8 按序执行）
 
@@ -148,24 +148,24 @@ docs/                               architecture/protocol/sync-semantics/registr
 
 ### S1 Phase 5 · document 模块实装（最大阶段）
 
-- [ ] **S1-0 模型与 migration**：model.go 增 `Document`/`DocumentConflict`
+- [x] **S1-0 模型与 migration**：model.go 增 `Document`/`DocumentConflict`
   （列对应 00005 + 新增 deleted_at）；testsupport AutoMigrate 清单补两模型；
   新 migration `00015_documents_tombstone.sql`（documents 加
   `deleted_at TIMESTAMPTZ NULL`）。
   验收：build/test 绿；本地 `docker compose up -d` + `make serve-db` goose up 通过。
-- [ ] **S1-1 路径 canonicalize**（新文件 `document/paths.go`，单点 helper）：
+- [x] **S1-1 路径 canonicalize**（新文件 `document/paths.go`，单点 helper）：
   URL 解码后按 `/` 切分；拒绝空路径、前导 `/`（绝对路径）、`..` 与 `.` 段、
   反斜杠、NUL/控制字符、空段（连续斜杠）、任一段 >255 字节、总长 >512 字节、
   保留前缀 `.git/`、`.astral/`、`secrets/`、`.env` 开头文件名；非法一律
   400 VALIDATION_FAILED（details.field=path）。表驱动单测覆盖
   sync-semantics §19 的 path 项（traversal / 绝对路径 / 空段 / 保留前缀）。
-- [ ] **S1-2 manifest + get**：manifest 按 path 升序游标（游标=末行 path），
+- [x] **S1-2 manifest + get**：manifest 按 path 升序游标（游标=末行 path），
   limit 缺省 200 上限 1000（不用共享 Limit 参数，契约即如此）；默认排除
   tombstone，`include_deleted=true` 含之（deleted=true）；get 返回 Document
   DTO，不存在 404 NOT_FOUND，tombstone 也返回（deleted=true，同步端侦测远端
   删除的依据）。scope 按 S1-4 前缀规则。
   验收：分页/过滤/scope 前缀两轴/404 单测。
-- [ ] **S1-3 push + delete**（事务与冲突核心）：
+- [x] **S1-3 push + delete**（事务与冲突核心）：
   push（PUT，支持 Idempotency-Key）：服务端重算 sha256，与请求 content_hash
   （若带）不符 → 400；路径不存在且 base_revision=0 → 创建 revision=1
   （audit `document.push` details.created=true）；存在且 revision==base_revision
@@ -181,7 +181,7 @@ docs/                               architecture/protocol/sync-semantics/registr
   已删且 base 匹配 → 幂等 204；不匹配 → 冲突路径（delete-vs-edit）。
   验收：单测覆盖 sync-semantics §19 前八项（local-only / remote-only / dual /
   edit-vs-delete / delete-vs-edit / 重复删 / 复活 / hash 不符）。
-- [ ] **S1-4 scope 前缀单点 + org workspace 种子**：helper
+- [x] **S1-4 scope 前缀单点 + org workspace 种子**：helper
   `requireDocScope(r, svc, wsID, path, read bool)`——`memory/` 前缀 →
   ScopeMemoryRead/Write，否则 ScopeDocumentRead/Write；S1-2/S1-3 端点统一走它。
   bootstrap 注册分支（无 invite_code）同事务：若 slug=`org-memory` 的
@@ -190,7 +190,7 @@ docs/                               architecture/protocol/sync-semantics/registr
   验收：前缀 scope 单测（viewer 可读 memory/ 路径但无 document:read 的
   agent 不可读其他路径等，按 RoleToScopes 实际 bundle 设计断言）；bootstrap
   单测断言 org workspace + owner membership 落地。
-- [ ] **S1-5 conflicts 列表/详情/resolve**：列表 status=open|resolved|all
+- [x] **S1-5 conflicts 列表/详情/resolve**：列表 status=open|resolved|all
   （open = resolved_at IS NULL），created_at DESC + id 游标，共享 Limit；
   详情 404 NOT_FOUND，返回 DocumentConflictDetail（列表形状 + 双方全文）；
   resolve：非 open → 409 VALIDATION_FAILED（details.reason=already_resolved）；
@@ -199,34 +199,34 @@ docs/                               architecture/protocol/sync-semantics/registr
   落新 revision；全部同事务写 resolution/resolved_by/resolved_at +
   audit `document.resolve` + `document.updated`（theirs 分支除外）。
   验收：四种 resolution 各一测 + 已解决 409 + 详情 404。
-- [ ] **S1-6 契约收口**：删除 openapi documents 段全部 "501" 响应行；
+- [x] **S1-6 契约收口**：删除 openapi documents 段全部 "501" 响应行；
   契约门 + redocly 绿；`grep -rn "TODO(phase-5" server` 仅剩已处置项。
-- [ ] **S1 收尾**：完整档卫生门（§0.4；首次含 skill §0 校准，落
+- [x] **S1 收尾**：完整档卫生门（§0.4；首次含 skill §0 校准，落
   `.hygiene.config.json` + `.hygiene-baseline.json` 并提交）。
 
 ### S2 Phase 5 收口：capabilities
 
-- [ ] `GET /api/v1/meta/capabilities` 的 features 开放 `document_sync`
+- [x] `GET /api/v1/meta/capabilities` 的 features 开放 `document_sync`
   （task_lease 既有先例）；memory 不开 feature（复用 documents，无独立能力面）。
   验收：capabilities 测试断言 features 含 task_lease + document_sync。
 
 ### S3 行为小项
 
-- [ ] **S3-1 fuzzy 0 分行剔除**（task/search.go）：fuzzy 非空且无 regex 时过滤
+- [x] **S3-1 fuzzy 0 分行剔除**（task/search.go）：fuzzy 非空且无 regex 时过滤
   score==0 行；有 regex 不过滤。验收：单测两分支。
-- [ ] **S3-2 长度口径登记**：docs/protocol.md §3 补一句「长度上限按 UTF-8
+- [x] **S3-2 长度口径登记**：docs/protocol.md §3 补一句「长度上限按 UTF-8
   字节数计，openapi maxLength 仅参考」；巡检新端点（S1）校验均为字节口径。
   既有端点不动（L1）。
 
 ### S4 audit 闭环
 
-- [ ] **S4-1 workspace 审计实装**：`GET /workspaces/{id}/audit`（audit:read）：
+- [x] **S4-1 workspace 审计实装**：`GET /workspaces/{id}/audit`（audit:read）：
   actor_id/action/outcome 过滤 + 共享 Limit/Cursor，created_at DESC + id 游标；
   AuditEntry DTO 含 request_id；删 openapi 501 行。
-- [ ] **S4-2 平台审计实装**：`GET /admin/audit`（RequireGlobal +
+- [x] **S4-2 平台审计实装**：`GET /admin/audit`（RequireGlobal +
   ScopePlatformAuditRead，常量与 admin bundle round 37 已加）：workspace_id/
   actor_id/action/outcome 过滤，**含 workspace_id IS NULL 的服务器级记录**。
-- [ ] **S4-3 认证失败写 audit**（原 §3.2，集中登记处注释在 audit/module.go）：
+- [x] **S4-3 认证失败写 audit**（原 §3.2，集中登记处注释在 audit/module.go）：
   auth.Service 注入 audit recorder（构造器加参，app 装配处传入，参照 message
   模块注入模式）；覆盖 login 失败、refresh 重放、device token denied/expired、
   Authenticate 中间件 401（actor 可辨时填 actor_id，否则 NULL；action 用
@@ -234,16 +234,16 @@ docs/                               architecture/protocol/sync-semantics/registr
   中间件路径无事务用 Record（非 RecordInTx）；量由 S5 限流兜住。完成后移除
   audit/module.go 与 app/router.go 对应 TODO 注释。
   验收：各失败路径单测断言 audit 行 + outcome=denied。
-- [ ] **S4-4 MeResponse 增 session.expires_at**：Principal 已带 SessionID，
+- [x] **S4-4 MeResponse 增 session.expires_at**：Principal 已带 SessionID，
   补过期时间输出；openapi Me schema 同步（auth/module.go 的 TODO(phase-6) 就此关闭）。
 
 ### S5 rate limit（§1.2 X1 之外全量实装；protocol.md §6 形状已定）
 
-- [ ] **S5-1 限流器**（新包 `internal/ratelimit`，仅标准库）：进程内 token
+- [x] **S5-1 限流器**（新包 `internal/ratelimit`，仅标准库）：进程内 token
   bucket，map[key]*bucket + mutex + 惰性清理（最后访问超 10 分钟删除）；
   key：未认证 = 客户端 IP（`X-Forwarded-For` 仅当 `ASTRAL_TRUSTED_PROXY=true`
   采信首跳，默认 false 直连），认证后 = actor_id。
-- [ ] **S5-2 桶配置与挂载**（env 可覆盖，config.go 增配置 + 部署文档登记）：
+- [x] **S5-2 桶配置与挂载**（env 可覆盖，config.go 增配置 + 部署文档登记）：
   敏感桶 10/min/IP：`/auth/login`、`/auth/register`、
   `POST /auth/device/authorizations`、`GET /auth/device/authorizations`（user_code
   防枚举）、approve/deny、`/auth/token/refresh`；
@@ -259,14 +259,14 @@ docs/                               architecture/protocol/sync-semantics/registr
 
 ### S6 工程化与部署
 
-- [ ] **S6-1 生产托管 web/dist**（同源去 CORS）：新包 `server/webdist`，
+- [x] **S6-1 生产托管 web/dist**（同源去 CORS）：新包 `server/webdist`，
   `//go:embed all:dist`（仓库内 `webdist/dist/.gitkeep` 占位保证 embed 可编译）；
   router：dist/index.html 存在时，非 `/api`、`/.well-known`、`/healthz|readyz`
   的 GET 走静态 + SPA fallback（任何未命中路径回 index.html）；Makefile 增
   `web-dist`（npm run build → 拷贝 web/dist → server/webdist/dist）；
   httpx/middleware.go 与 web/vite.config.ts 的 CORS TODO 注释随之更新。
   验收：make web-dist 后启动，`curl /` 返回 index.html；API 路由不受影响。
-- [ ] **S6-2 类型生成与契约 CI**：web devDependency 加 `openapi-typescript`；
+- [x] **S6-2 类型生成与契约 CI**：web devDependency 加 `openapi-typescript`；
   package.json script `gen:api` = `npx openapi-typescript ../api/openapi.yaml -o
   src/api/schema.d.ts`；S7 各视图迁移时改用生成类型（types.ts 保留导出别名，
   手工重复类型逐步删除）；CI 增 web job：npm ci → gen:api →
@@ -279,27 +279,27 @@ docs/                               architecture/protocol/sync-semantics/registr
 每个视图的通用验收：`npm run build` 绿；新类型走 schema.d.ts；写清一段
 手动验收步骤（登录 → 操作 → 断言）作为任务产出。
 
-- [ ] **S7-1 任务树翻页**：TaskTreeView 搜索/树模式消费 next_cursor
+- [x] **S7-1 任务树翻页**：TaskTreeView 搜索/树模式消费 next_cursor
   （当前超页静默丢弃，原 §11 #11 尾巴）。
-- [ ] **S7-2 Tag 管理**：列表 / proposal+confirm / rename / delete / 任务挂载入口。
-- [ ] **S7-3 Presence 总览**：WorkspaceOverviewView 的 TODO(phase-4) 位。
-- [ ] **S7-4 消息视图**：workspace 广播 + task thread 聚合展示（原 §6 树形聚合
+- [x] **S7-2 Tag 管理**：列表 / proposal+confirm / rename / delete / 任务挂载入口。
+- [x] **S7-3 Presence 总览**：WorkspaceOverviewView 的 TODO(phase-4) 位。
+- [x] **S7-4 消息视图**：workspace 广播 + task thread 聚合展示（原 §6 树形聚合
   项），目标过滤 + 发消息。
-- [ ] **S7-5 文档与记忆浏览**：manifest 列表 + 内容查看；`memory/` 前缀标注
+- [x] **S7-5 文档与记忆浏览**：manifest 列表 + 内容查看；`memory/` 前缀标注
   （含 org-memory workspace 入口）。
-- [ ] **S7-6 冲突解决**：conflicts 列表 / 详情双栏对比（ours|theirs）/
+- [x] **S7-6 冲突解决**：conflicts 列表 / 详情双栏对比（ours|theirs）/
   resolve 四选一（merged/manual 需填内容）。
-- [ ] **S7-7 成员与凭证管理**：成员列表/角色变更/邀请管理（已有）之外补
+- [x] **S7-7 成员与凭证管理**：成员列表/角色变更/邀请管理（已有）之外补
   agent 凭证签发（明文仅一次展示）/ 撤销卡。
-- [ ] **S7-8 审计时间线**：workspace audit + admin audit（platform:audit:read
+- [x] **S7-8 审计时间线**：workspace audit + admin audit（platform:audit:read
   可见）两入口，actor/action/outcome 过滤。
 
 ### S8 收尾与登记
 
-- [ ] 逐项勾选本文件 §2；轮次详录写 TODO-archive.md §A 卷末（格式照既有轮次）。
-- [ ] NOT_IMPLEMENTED 此时应无任何端点返回：从 httpx/errors.go、openapi
+- [x] 逐项勾选本文件 §2；轮次详录写 TODO-archive.md §A 卷末（格式照既有轮次）。
+- [x] NOT_IMPLEMENTED 此时应无任何端点返回：从 httpx/errors.go、openapi
   ErrorCode enum、api/schemas/error.json 三处移除（契约门强制同步）。
-- [ ] 最后一道完整档卫生门（§0.4，含 D 段文档卫生）+ §0.2 全量验证命令绿；
+- [x] 最后一道完整档卫生门（§0.4，含 D 段文档卫生）+ §0.2 全量验证命令绿；
   `.hygiene-baseline.json` 刷新提交；`git status` 干净。
 
 ## 3. 明确不做 / 延期清单（不要顺手实现）
@@ -317,6 +317,10 @@ docs/                               architecture/protocol/sync-semantics/registr
 | metrics/tracing、慢订阅者断开、多实例 migration 门 | 触发式 | hub.go / store.go 内 TODO 注释即触发条件 |
 | workspace 默认策略/repo metadata 字段 | 延期 | model.go TODO(phase-2)，无消费方 |
 | presence upsert ON CONFLICT 化 | 延期 | 现实现正确，无性能触发 |
+| managed path config（workspace include/exclude） | 移交 | round 38 R3：客户端约定，astral-cli 仓持有；服务端只保留固定黑名单（sync-semantics §3 已标注归属） |
+| 审批面扩展（workspace.delete / credential.create_privileged 等 §22 候选） | 触发式 | round 38 R5：architecture §22 本标"候选"；出现真实高风险操作再启 |
+| CLI/发行需求（FR-010/014/015、NFR-001/002/003/008、Distribution MVP） | 移交 | round 38 R6：整体归属 astral-cli 仓，本仓不登记其实现 |
+| admin/users 分页 | 契约明示不做 | round 38 R9：契约即注明"平台用户量小，暂不分页"；规模触发再改契约 |
 | 开放注册 / 邮箱验证 / 服务器级邀请 / 邀请授 owner | 永不（MVP） | docs/registration.md §8 |
 
 ## 4. 代码内 TODO(phase-x) 处置映射
@@ -350,6 +354,11 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 2026-09-16 | 第 37 轮：新增端点 `GET /admin/audit`（服务器级审计查询）；新增全局 scope `platform:audit:read`（scopes.go 常量 + admin bundle） | 补充 | Web |
 | 2026-09-16 | 第 37 轮：列表信封统一（G1）——documents manifest（limit 上限 1000 + include_deleted）/conflicts（status 过滤）/workspace audit（outcome 过滤）补 `{items,next_cursor}`；presence 补 next_cursor（恒 null）；DocumentConflict 扩展（status/base_hash/双方摘要/resolution 三件）并新增 DocumentConflictDetail；Document/ManifestItem 增 deleted；AuditEntry 增 request_id | 契约文档+补充 | CLI/Web |
 | 2026-09-16 | 第 37 轮：裁决落档（无新增 wire）——M1 memory 无独立 API（`memory/` 前缀 + org-memory 保留 workspace）；T1 无 task DELETE；push 双改不做自动合并；message.send 豁免 audit；长度口径=字节（既有端点不动）；fuzzy-only 剔除 0 分行 | 行为登记 | CLI/Web |
+| 2026-09-16 | 第 38 轮：documents 七端点 + workspace/admin audit 双端点实装（9 处 501 桩全部替换）；**R1 行为**：push 时同 workspace 存在仅大小写不同路径 → 400 VALIDATION_FAILED（details.reason=path_case_collision） | 实装+行为 | CLI/Web |
+| 2026-09-16 | 第 38 轮：**R2 版本协商**——/api/v1 携带 `X-Astral-Client-Version` 且低于 `min_cli_protocol_version` → 400 CLIENT_VERSION_UNSUPPORTED（头缺失放行，protocol.md §2/§7）；ErrorCode enum **移除 NOT_IMPLEMENTED**（error.json 同步，501 清零） | 契约变更 | CLI/Web |
+| 2026-09-16 | 第 38 轮：**R7/R8 行为登记**——login 成功不写 audit（sessions 表即事实，与 A1' 同精神）；Idempotency-Key 并发同键进程内互斥（单实例 MVP，多实例边界同 store/db.go 触发条件） | 行为登记 | CLI |
+| 2026-09-16 | 第 38 轮：workspace audit 补 401/403 响应文档行；capabilities features += document_sync；S6-2 类型生成入库（web gen:api + CI drift 门）；S6-1 同源托管（webdist go:embed） | 契约文档 | CLI/Web |
+| 2026-09-16 | 第 38 轮 G4 补录：`CredentialCreate` 补声明可选 `workspace_id`（授权分流字段——服务端行为本就如此，契约补齐文档；Web MembersView 传当前 ws） | 契约文档 | CLI/Web |
 
 ## 附录 A. 稳定锚点（原 §2 裁决表 / 原 §11 编号清单，编号不变）
 

@@ -1391,3 +1391,91 @@ CLI 仓库开工时按此清单对表，顺序即依赖顺序：
 快速档 = 阶段内每 3-4 任务/单个大任务后；S1 收尾做 skill §0 校准落
 .hygiene.config.json + .hygiene-baseline.json；skill 不可达时的降级清单；
 修复纪律遵循 skill §E）；§2 序言与 S1/S8 收尾项同步挂钩。无契约变更。
+
+## A（续）. 第 38 轮（2026-09-16，ZCode）：S1-S8 一次性完整实施——审计缺口闭合轮
+
+用户指令：先审计当前代码找出未做功能，随后"实现当前审计的所有内容"，开子代理
+控制上下文，正式开工前写计划书交接。计划书落 `.zcode/plans/r38-master-plan.md`
+（任务卡 T1-T15 / 波次 W1-W7 / 卫生门 G1-G4 / 裁决 R1-R11），本记录为其收账。
+
+### 裁决（R1-R11，审计六缺口 + 四项杂项）
+
+R1 大小写冲突：push 时同 workspace 仅大小写不同路径 → 400 path_case_collision；
+R2 版本协商（NFR-004 闭合）：ClientVersionMiddleware，头缺失放行，min 与
+well-known 同源常量 httpx.MinCLIProtocolVersion；R3 managed path config 定为
+客户端约定移交 astral-cli；R4 GUI 文档活动流并入 S7-5（SSE 活动栏）；R5 审批面
+扩展登记触发式；R6 CLI/发行需求整体移交 astral-cli；R7 login 成功不写 audit
+（sessions 表即事实）；R8 幂等并发同键进程内互斥（sync.Map per-key 锁）；
+R9 admin/users 不分页（契约明示）；R10 陈旧注释清理（00003 SQL / 过时视图
+TODO）；R11 web 不加测试框架（§0.1-9 约束）。
+
+### 实施波次（commit 815e681..本轮）
+
+- W1（并行）：T1 模型+00015 tombstone migration；T2 paths.go canonicalize
+  （traversal/保留前缀/字节长度/case collision 纯函数）；T3 requireDocScope
+  memory/ 前缀单点 + bootstrap 注册惰性种子 org-memory workspace（M1）。
+- W2：T4 document 七端点实装（manifest/get/push/delete/conflicts×3；sha256
+  重算、base 校验、tombstone 复活、resolve 四分支、三件套同事务、1MiB 上限、
+  R1 SQL 侧）+ capabilities document_sync + 契约 501 删行 + 16 集成测试。
+- W3（并行）：T5 audit/admin-audit 双端点（过滤+id 游标+服务器级行）；
+  T6 认证失败写 audit（login/refresh/device/bearer denied）+ me session
+  expires_at；T7 fuzzy 0 分剔除 + 幂等互斥 + 版本中间件 + protocol.md。
+- W4：T8 ratelimit 包（token bucket+惰性清理+时钟注入；敏感 10/轮询 60/
+  通用 300/SSE 30 per min，env 五变量，XFF 信任开关）。
+- W5（并行）：T9 webdist go:embed 同源托管（SPA fallback+逃逸防护）+
+  Makefile（web-dist/openapi-lint/serve-db）；T10 openapi-typescript 类型
+  生成（schema.d.ts 入库 + CI drift 门）。
+- W6（两批并行 + 主代理布线路由）：T11 任务树翻页（树/搜索两模式消费
+  next_cursor）+ presence 在线卡（SSE 事件驱动+轮询兜底）；T12 TagManager
+  （proposal+confirm 两步流）+ Messages（动态流/线程双视角）；T13 Documents
+  （manifest/记忆标注/org-memory 入口/SSE 活动栏 R4）+ Conflicts（双栏对比/
+  resolve 四选一）；T14 Members（角色变更/owner 晋升审批/agent 凭证一次性
+  明文签发/撤销）+ Audit（workspace/admin 双轴）。
+- W7：T15 收尾——NOT_IMPLEMENTED 四处清零（errors.go 常量/respond.go helper/
+  openapi enum/error.json）+ config 注释、TODO.md §2 全勾+§3/§9 登记、
+  requirements NFR-004 闭合注记、sync-semantics §3 归属行、本记录。
+
+### 卫生门（repo-hygiene skill 四道）
+
+G1（S1+S2，含首次校准）：.hygiene.config.json（阈值+allowlist：TODO-archive/
+architecture.md）+ .hygiene-baseline.json（markers=240）；P2×4 修复（pushDoc/
+resolveCore 拆函数、ParseLimit 双实现删除、ours_json 损坏 500、hash 单次）。
+G2（S3+S4+S5）：P1×1（幂等 DB 冲突分支流式后二次 replay 删除）；P3×10 登记。
+G3（S6）：P2×1（types.ts 过时 TODO）；P3×2（Makefile 钉版本已修、SPA 挂载
+CI 不可测登记）；schema.d.ts 入 ignore（生成产物）。G4：本轮末尾（见后）。
+
+### 关键发现与修复（跨卡交叉验证产出）
+
+1. round 37 脚手架 chi `{path:.*}` 为单段正则，多段文档路径从未命中——改
+   尾通配 `/*` + 契约门归一（openapi_contract_test.go +5 行，T4 发现）。
+2. main.go 有库分支从未补挂 mods.Document/mods.Audit——生产 nil-DB panic
+   （集成测试直接构造 Module 故未暴露；T5 发现，W3 布线 commit 修复）。
+3. 幂等中间件 DB 冲突分支在响应已流式写出后 replay——响应体拼接损坏（G2
+   §B P1，删除该分支只记日志）。
+4. glebarez sqlite 异步 last_used_at 写与业务事务 SQLITE_BUSY——testsupport
+   DSN 加 busy_timeout(5000) + 集成 fixture 单连接收口（G1）。
+5. auth clientIP 无条件采信 XFF 与 ratelimit 信任开关语义分叉——单源化为
+   ratelimit.ClientIP + auth.Module.TrustedProxy（W4 主代理修复）。
+6. web X-Astral-Client-Version 头 0.1.0 会被 R2 中间件 400——改发协议版本
+   整数 '2'（语义与 package.json 版本解耦，T7 发现）。
+
+### S7 手动验收（摘要，全文见 r38-master-plan 与各任务卡返回）
+
+任务树：搜索 >50 条出现「加载更多」，改词不点搜索续拉旧查询；树模式 >1000
+子任务出现层内加载更多，SSE 事件后已载行数不缩水。Presence：PUT 心跳后
+≤60s 轮询或 SSE 即时刷新；TTL 后 offline。Tag：重名提案即 toast；提案后
+确认码面 → 确认落地；2 分钟后确认 → TAG_PROPOSAL_EXPIRED。消息：SSE open
+徽章下他端发消息 ≤1s 出现；三目标发送；线程正序；加载更早/更新翻页。
+文档：CLI push 后活动栏实时出条目；含已删除开关见 tombstone；memory/ 徽章
+与仅看记忆；org-memory 入口跳转。冲突：双栏对比；四分支 resolve；delete
+意图工件显示「删除意图」；重复 resolve 409 already_resolved。成员与凭证：
+owner 改角色即时生效；owner 晋升走审批队列；agent 凭证签发一次性明文
+（关闭不可再见）；撤销后 token 401。审计：三过滤组合；加载更早；平台
+admin 见服务器级行（auth.login denied），非 admin 无平台 tab。
+
+### 验证基线
+
+`go vet ./... && go test ./... -count=1` 17 包全绿（含三契约门）；
+`npx @redocly/cli lint openapi.yaml` valid；`web npm run build`（vue-tsc+
+vite）绿；`NOT_IMPLEMENTED` 在 server/api 源码与契约中 grep 归零（§9/本卷历史行中的字样为登记记录）；`TODO(phase-5|6` 仅剩 §3 登记
+的延期项（metrics/tracing、多实例、ON CONFLICT、model metadata、CI PG 差异）。

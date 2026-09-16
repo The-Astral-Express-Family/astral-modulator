@@ -1383,7 +1383,6 @@ components:
         - AUTHORIZATION_PENDING   # device flow 轮询（A1/RFC 8628），HTTP 400 + retryable
         - SLOW_DOWN               # device flow 轮询过快（A1），HTTP 400 + retryable
         - INTERNAL_ERROR
-        - NOT_IMPLEMENTED   # 仅脚手架阶段（HTTP 501），正式端点不得返回
 
     ErrorEnvelope:
       type: object
@@ -1851,6 +1850,12 @@ components:
           items: { type: string }
           description: 见 docs/architecture.md §10 scope 词表
         expires_at: { $ref: "#/components/schemas/DateTimeOrNull" }
+        workspace_id:
+          type: string
+          description: |
+            授权分流（round 38 补录）：非空 = 在该 workspace 内以 agent:manage
+            签发（owner/maintainer）；空/缺省 = 平台级，要求 platform:credentials:manage。
+            workspace 轴的管理界面（MembersView）应传当前 workspace_id。
 
     CredentialIssued:
       type: object
