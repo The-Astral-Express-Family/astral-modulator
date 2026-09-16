@@ -863,7 +863,6 @@ paths:
           schema: { type: boolean, default: false }
           description: true 时包含 tombstone 行（deleted=true），供同步端侦测远端删除
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-5 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: manifest
           content:
@@ -895,7 +894,6 @@ paths:
       summary: 读取文档
       operationId: getDocument
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-5 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: 文档内容与 revision
           content:
@@ -912,7 +910,6 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/DocumentPush" }
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-5 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: 已落地（可能为合并结果）
           content:
@@ -930,7 +927,6 @@ paths:
           schema: { type: integer, format: int64, minimum: 1 }
           description: 调用方所见版本；与当前版本不一致（远端已变更/已删除）时不盲删
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-5 脚手架桩（NOT_IMPLEMENTED）
         "204": { description: 已打 tombstone（revision+1，deleted=true，事件 document.updated data.deleted=true） }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -949,7 +945,6 @@ paths:
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-5 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: 冲突列表
           content:
@@ -971,7 +966,6 @@ paths:
         - { $ref: "#/components/parameters/WorkspaceId" }
         - { name: conflict_id, in: path, required: true, schema: { type: string } }
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-5 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: 冲突双方内容与 base 指针
           content:
@@ -993,7 +987,6 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/ConflictResolve" }
       responses:
-        "501": { $ref: "#/components/responses/Error" }   # phase-5 脚手架桩（NOT_IMPLEMENTED）
         "200":
           description: 已解决并产生新 revision
           content:

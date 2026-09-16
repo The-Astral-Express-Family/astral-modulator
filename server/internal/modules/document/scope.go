@@ -49,3 +49,31 @@ func requireDocScope(r *http.Request, svc *auth.Service, workspaceID, path strin
 	}
 	return p, nil
 }
+
+// requireAnyDocScope 用于无具体 path 的 workspace 级端点（manifest、conflicts
+// 列表）：document 轴或 memory 轴任一命中即通过——memory-only 的同步端也要
+// 能拉清单/冲突列表发现工作。内容级端点（get/push/delete、冲突详情/resolve）
+// 仍走 requireDocScope 的路径轴。非成员 / 未绑定 → 404 不泄露存在性，
+// 两轴皆缺 → 403，语义与 requireDocScope 一致。
+func requireAnyDocScope(r *http.Request, svc *auth.Service, workspaceID string, read bool) (*auth.Principal, *httpx.APIError) {
+	p := auth.PrincipalFrom(r.Context())
+	scopes, err := svc.WorkspaceScopes(r.Context(), p, workspaceID)
+	if err != nil {
+		return nil, httpx.Internal("scope resolution failed")
+	}
+	if len(scopes) == 0 {
+		return nil, &httpx.APIError{
+			Status:  http.StatusNotFound,
+			Code:    httpx.CodeWorkspaceNotFound,
+			Message: "workspace not found",
+		}
+	}
+	primary, secondary := auth.ScopeDocumentRead, auth.ScopeMemoryRead
+	if !read {
+		primary, secondary = auth.ScopeDocumentWrite, auth.ScopeMemoryWrite
+	}
+	if primaryErr, secondaryErr := auth.HasScope(scopes, primary), auth.HasScope(scopes, secondary); primaryErr != nil && secondaryErr != nil {
+		return nil, primaryErr
+	}
+	return p, nil
+}

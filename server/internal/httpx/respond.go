@@ -101,4 +101,7 @@ func RespondError(w http.ResponseWriter, r *http.Request, err error) {
 	})
 }
 
-const maxBodyBytes = 8 << 20 // TODO(phase-4): 文档同步可能需要更大上限，届时按端点细化。
+// maxBodyBytes 是全部 JSON body 的全局兜底上限（8MiB）。文档 push 的内容
+// 上限更紧：1MiB（UTF-8 字节数），在 document 模块 handler 内校验、超限
+// 400 VALIDATION_FAILED（TODO.md §4 映射，round 38 T4 落地；sync-semantics §16）。
+const maxBodyBytes = 8 << 20

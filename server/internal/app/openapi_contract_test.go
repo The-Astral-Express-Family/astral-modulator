@@ -103,6 +103,11 @@ func collectChiRoutes(t *testing.T) map[string]bool {
 		}
 		// chi 的 {path:.*} 正则后缀在 openapi 中写作 {path}。
 		route = strings.ReplaceAll(route, ":.*}", "}")
+		// chi 的尾通配 /*（catch-all，document 多段路径的唯一可匹配形态，
+		// round 38 T4 落地：{path:.*} 是单段正则节点）同样写作 {path}。
+		if strings.HasSuffix(route, "/*") {
+			route = strings.TrimSuffix(route, "/*") + "/{path}"
+		}
 		// openapi paths 相对 servers.url=/api/v1；well-known 在规范里写绝对路径。
 		if strings.HasPrefix(route, "/api/v1") {
 			route = strings.TrimPrefix(route, "/api/v1")
