@@ -6,9 +6,9 @@
 //   - 挂载在鉴权之后：actor 身份来自 Principal，公共端点天然不受影响；
 //   - 只缓存 2xx 响应（4xx/5xx 可安全重试执行）；超过 bodyCacheLimit 的
 //     成功响应不缓存（执行照常）；
-//   - 并发同键：仅做响应级去重（后到者重读首到者已存响应重放），不做
-//     执行互斥——并发双方都会完整执行业务，副作用不重复消除依赖端点
-//     自身的天然幂等（事务内唯一约束/条件更新）。
+//   - 并发同键（R8）：进程内 per-key 互斥——同一 Actor + endpoint + key 的
+//     并发请求串行化，业务 handler 只执行一次，后到者重放首到者的已存
+//     响应。跨实例（多进程）窗口不在此保护范围（见 Handler 内注释）。
 package idempotency
 
 import (
@@ -17,6 +17,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -40,6 +41,11 @@ const (
 type Middleware struct {
 	DB  *gorm.DB
 	Log *slog.Logger
+
+	// locks 进程内并发同键互斥表（R8）：lockKey -> *sync.Mutex。
+	// 零值可用；锁表只增不减——键空间 = actor × endpoint × 客户端 key，
+	// 单个互斥锁对象极小，泄漏上界可接受（按引用计数清理得不偿失）。
+	locks sync.Map
 }
 
 // wrappingResponseWriter 捕获状态码与响应体。
@@ -90,6 +96,16 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		endpoint := r.Method + " " + chiRoutePattern(r)
 		now := time.Now()
 
+		// R8：进程内同键互斥。进 handler 前拿锁、defer 释放（panic 路径
+		// 同样经 defer 解锁，交由外层 Recover 归一 500）；拿锁后先查已存
+		// 响应——并发同键只有首到者执行业务，后到者重放其 2xx 响应。
+		// 边界：互斥仅在单进程内生效；多实例部署下跨进程同键并发仍会
+		// 双执行，触发条件与迁移口径同 store/db.go:62 的既有
+		// TODO(phase-6)（单实例 MVP）。
+		mu := m.lockFor(p.ActorID + "\x00" + endpoint + "\x00" + key)
+		mu.Lock()
+		defer mu.Unlock()
+
 		// 命中窗口内的已有响应 → 重放。
 		if cached, ok := m.lookup(r, p.ActorID, endpoint, key, now); ok {
 			replay(w, cached)
@@ -113,7 +129,8 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			CreatedAt:   now,
 		}
 		if err := m.DB.Create(&row).Error; err != nil {
-			// 并发同键：主键冲突 → 重读首到者的响应重放；读不到则放行本响应。
+			// 跨实例并发同键（进程内互斥管不到的窗口）：主键冲突 →
+			// 重读首到者的响应重放；读不到则放行本响应。
 			if cached, ok := m.lookup(r, p.ActorID, endpoint, key, now); ok {
 				replay(w, cached)
 				return
@@ -121,6 +138,13 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			m.Log.Warn("idempotency store failed", "err", err)
 		}
 	})
+}
+
+// lockFor 取（或惰性创建）进程内 per-key 互斥锁。键用 \x00 分隔，避免
+// actor/endpoint/key 三段内容拼接产生歧义碰撞。
+func (m *Middleware) lockFor(lockKey string) *sync.Mutex {
+	v, _ := m.locks.LoadOrStore(lockKey, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // replay 写回缓存的 2xx 响应并标记重放头。

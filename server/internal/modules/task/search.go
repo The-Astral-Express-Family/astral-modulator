@@ -97,12 +97,29 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 	// 3. fuzzy 排序（title 权重高于 description）。
 	var scores map[string]float64
 	if params.Fuzzy != "" {
-		scores = make(map[string]float64, len(pool))
 		fuzzy := strings.ToLower(params.Fuzzy)
-		for i := range pool {
-			t := &pool[i]
-			score := 0.85*trigramSimilarity(fuzzy, t.Title) + 0.15*trigramSimilarity(fuzzy, t.Description)
-			scores[t.ID] = score
+		scoreOf := func(t *model.Task) float64 {
+			return 0.85*trigramSimilarity(fuzzy, t.Title) + 0.15*trigramSimilarity(fuzzy, t.Description)
+		}
+		scores = make(map[string]float64, len(pool))
+		// S3-1：纯 fuzzy 查询（无 regex）剔除 score==0 行——与查询词无任何
+		// 共享 trigram 即无语义相关性，留在结果里只是排序噪声。带 regex 时
+		// 不过滤：regex 已表达匹配意图，fuzzy 只负责在命中集内重排。
+		if re == nil {
+			kept := pool[:0]
+			for i := range pool {
+				s := scoreOf(&pool[i])
+				if s == 0 {
+					continue
+				}
+				scores[pool[i].ID] = s
+				kept = append(kept, pool[i])
+			}
+			pool = kept
+		} else {
+			for i := range pool {
+				scores[pool[i].ID] = scoreOf(&pool[i])
+			}
 		}
 		sort.SliceStable(pool, func(i, j int) bool { return scores[pool[i].ID] > scores[pool[j].ID] })
 	}

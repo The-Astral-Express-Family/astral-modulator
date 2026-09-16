@@ -80,6 +80,68 @@ func TestSearchFuzzyRanking(t *testing.T) {
 	}
 }
 
+func seedFuzzyTasks(t *testing.T, f *fixture) {
+	t.Helper()
+	// 描述留空以隔离 title 相似度；tsk_f1 与 "payment" 有共享 trigram，
+	// f2/f3 与查询词零重叠（score==0）。
+	rows := []model.Task{
+		{ID: "tsk_f1", WorkspaceID: f.wsID, Title: "Payment retry logic", Status: "open", Priority: "normal", Revision: 1, CreatedBy: f.human.ID},
+		{ID: "tsk_f2", WorkspaceID: f.wsID, Title: "Database migration", Status: "open", Priority: "normal", Revision: 1, CreatedBy: f.human.ID},
+		{ID: "tsk_f3", WorkspaceID: f.wsID, Title: "Cache invalidation", Status: "in_progress", Priority: "low", Revision: 1, CreatedBy: f.human.ID},
+	}
+	for i := range rows {
+		if err := f.db.Create(&rows[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestSearchFuzzyZeroScoreFiltering 锁定 S3-1 两分支：
+// 纯 fuzzy 查询剔除 score==0 行；带 regex 时 0 分行保留（regex 已表达
+// 匹配意图，fuzzy 只在命中集内重排）。结构化过滤不改变剔除条件
+// （TODO S3-1 口径：条件只看 regex 是否存在）。
+func TestSearchFuzzyZeroScoreFiltering(t *testing.T) {
+	f := setup(t)
+	seedFuzzyTasks(t, f)
+
+	// 分支一：纯 fuzzy——零重叠行（f2/f3）被剔除，只返回 f1。
+	results, _, apiErr := f.m.Search(context.Background(), f.wsID, SearchParams{Fuzzy: "payment"})
+	if apiErr != nil {
+		t.Fatalf("fuzzy search: %v", apiErr)
+	}
+	if len(results) != 1 || results[0].ID != "tsk_f1" {
+		t.Fatalf("pure fuzzy: want only tsk_f1, got %+v", results)
+	}
+	if results[0].Score == nil || *results[0].Score <= 0 {
+		t.Fatalf("surviving row must have positive score: %+v", results[0].Score)
+	}
+
+	// 结构化过滤 + fuzzy（无 regex）：剔除条件不变，open 的 f2 仍因 0 分出局。
+	results, _, apiErr = f.m.Search(context.Background(), f.wsID, SearchParams{Fuzzy: "payment", Status: "open"})
+	if apiErr != nil {
+		t.Fatalf("fuzzy+status search: %v", apiErr)
+	}
+	if len(results) != 1 || results[0].ID != "tsk_f1" {
+		t.Fatalf("fuzzy+status: want only tsk_f1, got %+v", results)
+	}
+
+	// 分支二：regex + fuzzy——regex 命中 f1/f2，f2 虽 0 分仍保留参与排序。
+	results, _, apiErr = f.m.Search(context.Background(), f.wsID,
+		SearchParams{Regex: "(?i)retry|migration", Fuzzy: "payment"})
+	if apiErr != nil {
+		t.Fatalf("regex+fuzzy search: %v", apiErr)
+	}
+	if len(results) != 2 {
+		t.Fatalf("regex+fuzzy: want 2 results (0 分行保留), got %+v", results)
+	}
+	if results[0].ID != "tsk_f1" {
+		t.Fatalf("regex+fuzzy: top hit = %s, want tsk_f1", results[0].ID)
+	}
+	if results[1].ID != "tsk_f2" || results[1].Score == nil || *results[1].Score != 0 {
+		t.Fatalf("regex+fuzzy: second row should be kept tsk_f2 with score 0: %+v", results[1])
+	}
+}
+
 func TestSearchTagFilter(t *testing.T) {
 	f := setup(t)
 	seedSearchTasks(t, f)

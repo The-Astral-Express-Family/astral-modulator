@@ -24,7 +24,7 @@ Authorization: Bearer <token>
 Accept: application/json
 Content-Type: application/json
 X-Astral-Client: cli
-X-Astral-Client-Version: 0.1.0
+X-Astral-Client-Version: 2   # 客户端协议大版本（正整数，语义见 §7）
 X-Astral-Request-Id: <uuid/ulid>
 Idempotency-Key: <opaque-key>   # 对可重试写操作
 ```
@@ -98,6 +98,11 @@ JSON `error.retryable = true`。Heartbeat 与 SSE 重连应有独立限制，
 
 - 服务端在 `GET /.well-known/astral` 公布 `protocol_version` 与
   `min_cli_protocol_version`（登录前可匿名访问）；
+- 版本协商下限（NFR-004）：`/api/v1` 请求携带 `X-Astral-Client-Version`
+  头时，值必须是不小于 `min_cli_protocol_version` 的正整数，否则整个请求
+  被拒绝为 `400 CLIENT_VERSION_UNSUPPORTED`；头缺失一律放行（契约是
+  "支持协商"而非"要求携带"）。客户端应在首次连接前读取
+  `/.well-known/astral` 自查版本，避免盲发被拒；
 - 服务端在 `GET /api/v1/meta/capabilities` 公布 feature 开关清单；
   客户端按 feature 判断能力，不猜测 server 实现版本；
 - 兼容改动不要求两仓库同时发布；breaking protocol change 必须先设计服务端
