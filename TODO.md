@@ -71,8 +71,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 
 ### 0.4 卫生门（repo-hygiene skill，定期执行）
 
-实现全程按固定节奏调用 **`repo-hygiene`** skill（直接按名调用即可，无需
-路径；已验证可达，自包含、不在本仓安装任何脚本）：
+实现全程按固定节奏调用 **`repo-hygiene`** skill：
 
 - **完整档**：每个 S 阶段收尾时，在 §0.2 验证全绿后追加（skill 的 A+B+C+D
   全部；B 段必须派发只读 subagent 独立复核；P1/P2 当场修复后重跑 A）。
@@ -107,7 +106,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | A1-A5 | device pending 按 RFC 8628；access token 每请求查库；审批三端点；ASTRAL_TOKEN=`astral_<43字符>`；邀请码注册 |
 | S1 | SSE outbox 保留窗口 24h；超窗 `snapshot.required` 断流 |
 
-### 1.2 本轮裁决（round 37，Lidozs55；实现按此执行）
+### 1.2 本轮裁决（round 37，实现按此执行）
 
 | # | 问题 | 结论 |
 |---|------|------|
