@@ -70,6 +70,18 @@ export const router = createRouter({
           meta: { auth: 'required' },
         },
         {
+          path: 'workspaces/:workspaceId/tags',
+          name: 'workspace-tags',
+          component: () => import('../views/TagManagerView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
+          path: 'workspaces/:workspaceId/messages',
+          name: 'workspace-messages',
+          component: () => import('../views/MessagesView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
           path: ':pathMatch(.*)*',
           name: 'not-found',
           component: () => import('../views/NotFoundView.vue'),
