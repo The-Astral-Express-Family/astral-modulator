@@ -59,6 +59,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm run gen:api
+      # 契约漂移门：lockfile 安装的 openapi-typescript 版本重新生成的类型
+      # 必须与库中提交的 src/api/schema.d.ts 逐字节一致（改 openapi.yaml 后
+      # 忘跑 gen:api 或本地版本不同，在此失败）。
+      - name: schema.d.ts drift gate
+        run: git diff --exit-code src/api/schema.d.ts
       - run: npm run build
 
   openapi:
@@ -70,6 +76,8 @@ jobs:
           node-version: 24
       - name: lint openapi
         run: npx --yes @redocly/cli@1.34.2 lint
-      # TODO(phase-2): 错误码/事件类型双源一致性检查
-      #   （openapi.yaml enum vs server/internal/httpx/errors.go vs api/schemas/*.json）。
-      # TODO(phase-3): 从 openapi 生成 web/src/api/types（openapi-typescript），删除手写版。
+      # 错误码/事件类型双源一致性检查已由 server 契约门落地（server job 的
+      # go test ./... 覆盖，均以 openapi.yaml / api/schemas 为基准双向比对）：
+      #   - TestOpenapiErrorCodesMatchHttpx：openapi ErrorCode enum ↔ httpx/errors.go；
+      #   - TestEventTypesSync：outbox/types.go ↔ api/schemas/event.json ↔ web/src/api/sse.ts。
+      # web 类型生成契约门见 web job 的 schema.d.ts drift gate。
