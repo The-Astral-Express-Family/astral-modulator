@@ -18,7 +18,9 @@ import (
 // NewTestDB 返回独立文件型 sqlite 库（每测试隔离），已完成 AutoMigrate。
 func NewTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := filepath.Join(t.TempDir(), "test.db")
+	// busy_timeout：auth 的异步 last_used_at UPDATE 与业务事务会短暂抢写锁，
+	// 让等待方排队而非报 SQLITE_BUSY（与生产 PG 的锁等待语义对齐）。
+	dsn := "file:" + filepath.ToSlash(filepath.Join(t.TempDir(), "test.db")) + "?_pragma=busy_timeout(5000)"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})

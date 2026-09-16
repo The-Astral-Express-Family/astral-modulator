@@ -56,9 +56,10 @@ func newDocFixture(t *testing.T) *docFixture {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db := testsupport.NewTestDB(t)
 	// 单连接收口：credential 认证会异步 UPDATE last_used_at（auth/service.go
-	// authenticateCredential 的 go func），glebarez sqlite 无 busy_timeout 时，
-	// 该后台写在另一条池连接上与本测试的业务事务抢写锁 → SQLITE_BUSY。
-	// 收敛到单连接后所有语句串行（异步写排队等待），确定性消除竞争。
+	// authenticateCredential 的 go func）。testsupport 已带 busy_timeout(5000)，
+	// 但 glebarez sqlite 在「连接 A 持写事务、连接 B 开写事务」的部分交错下
+	// 仍返回 SQLITE_BUSY（busy_timeout 只覆盖锁等待，不覆盖事务升级冲突）；
+	// 收敛到单连接让所有语句串行，确定性消除竞争。
 	if sqlDB, err := db.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(1)
 	}
