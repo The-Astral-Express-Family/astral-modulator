@@ -10,6 +10,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ratelimit"
 )
 
 // Module 是 HTTP 层：路由注册 + 请求/响应编解码。业务在 Service。
@@ -20,6 +21,10 @@ type Module struct {
 	// WebBaseURL 是 device flow 链接的 web 控制台基址（dev 期 web 与 API
 	// 端口分离时必填）；优先级高于 PublicURL，见 deviceBaseURL。
 	WebBaseURL string
+	// TrustedProxy：仅当部署在可信反代之后时置 true，session 元数据的
+	// 客户端 IP 才采信 X-Forwarded-For 首跳（与 ratelimit 同一信任规则，
+	// env ASTRAL_TRUSTED_PROXY）。
+	TrustedProxy bool
 }
 
 // RegisterPublic 挂载免鉴权的 /auth/* 端点（由 app.router 在 Authenticate 之前装配）。
@@ -50,7 +55,7 @@ func (m *Module) register(w http.ResponseWriter, r *http.Request) {
 	}
 	// 注册成功即建会话（A5）：两分支（bootstrap/邀请兑换）同形状，
 	// refresh 进 HttpOnly Cookie，响应 = Me + session（与 login 一致）。
-	actor, refresh, err := m.Svc.Register(r.Context(), in, clientIP(r), r.UserAgent())
+	actor, refresh, err := m.Svc.Register(r.Context(), in, m.clientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
@@ -69,7 +74,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	refresh, actor, err := m.Svc.Login(r.Context(), in.Email, in.Password, clientIP(r), r.UserAgent())
+	refresh, actor, err := m.Svc.Login(r.Context(), in.Email, in.Password, m.clientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
@@ -81,7 +86,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) refreshToken(w http.ResponseWriter, r *http.Request) {
-	pair, err := m.Svc.Refresh(r.Context(), refreshTargetFrom(r), clientIP(r), r.UserAgent())
+	pair, err := m.Svc.Refresh(r.Context(), refreshTargetFrom(r), m.clientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
@@ -202,7 +207,7 @@ func ResolveWebBaseURL(webBaseURL, publicURL string, r *http.Request) string {
 
 func (m *Module) exchangeDeviceToken(w http.ResponseWriter, r *http.Request) {
 	deviceCode := chi.URLParam(r, "device_code")
-	pair, err := m.Svc.ExchangeDeviceToken(r.Context(), deviceCode, clientIP(r), r.UserAgent())
+	pair, err := m.Svc.ExchangeDeviceToken(r.Context(), deviceCode, m.clientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
@@ -277,21 +282,12 @@ func isHTTPS(r *http.Request) bool {
 		return true
 	}
 	// 反向代理场景：信任 X-Forwarded-Proto（部署基线即 TLS 反代）。
-	// TODO(phase-6): 只信任可配置的可信代理列表。
+	// XFF 采信开关（ASTRAL_TRUSTED_PROXY）已随 S5 落地，作用于限流 key
+	// 解析（internal/ratelimit）；本函数的 Proto 头信任沿用部署基线。
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-func clientIP(r *http.Request) string {
-	// MVP：直连地址 + 常见代理头；多级代理信任链留待 phase-6。
-	if v := r.Header.Get("X-Real-IP"); v != "" {
-		return v
-	}
-	if v := r.Header.Get("X-Forwarded-For"); v != "" {
-		return strings.TrimSpace(strings.Split(v, ",")[0])
-	}
-	host := r.RemoteAddr
-	if i := strings.LastIndex(host, ":"); i > 0 {
-		host = host[:i]
-	}
-	return host
+func (m *Module) clientIP(r *http.Request) string {
+	// 单一来源：与限流共用 ratelimit.ClientIP 的信任规则（默认直连）。
+	return ratelimit.ClientIP(r, m.TrustedProxy)
 }

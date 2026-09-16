@@ -48,7 +48,19 @@ ASTRAL_PUBLIC_URL=https://astral.example.com   # canonical URL，写入 /.well-k
 ASTRAL_SERVER_ID=srv_...                        # 首启后固化进 server_meta，库中值优先
 ASTRAL_HTTP_ADDR=:8080
 ASTRAL_LOG_LEVEL=info                           # 可选
+
+# 限流（TODO.md S5 / docs/protocol.md §6；进程内 token bucket，单实例 MVP）
+ASTRAL_RATELIMIT_SENSITIVE_PER_MIN=10           # 敏感桶/min/IP：login/register/refresh/device 授权面（含 user_code 防枚举与 approve/deny）
+ASTRAL_RATELIMIT_POLL_PER_MIN=60                # 轮询桶/min/IP：device token 交换（CLI interval=3s 轮询必须容纳）
+ASTRAL_RATELIMIT_API_PER_MIN=300                # 通用桶/min/actor：其余 /api/v1
+ASTRAL_RATELIMIT_SSE_PER_MIN=30                 # SSE 桶/min/actor：events 连接建立（独立于通用桶，重连风暴不占额度）
+ASTRAL_TRUSTED_PROXY=false                      # true=限流 key 采信 X-Forwarded-For 首跳；仅反代已清洗 XFF 的部署开启
 ```
+
+限流说明：超限返回 `429 RATE_LIMITED` + `Retry-After` 秒头；显式设某桶额度为 `0`
+即禁用该桶。实现为进程内状态（`server/internal/ratelimit`），多实例部署时各实例
+独立计数，达到 scale-out 形态后需换集中式计数器（architecture §19）。默认值与
+语义以 `server/internal/config/config.go` 为准。
 
 （非全集；完整说明以 `server/internal/config/config.go` 为准。）
 

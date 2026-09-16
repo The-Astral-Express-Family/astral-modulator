@@ -25,6 +25,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/tag"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/task"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/workspace"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ratelimit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
@@ -87,6 +88,26 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		// 版本协商（R2/NFR-004）：带 X-Astral-Client-Version 头且低于
 		// min_cli_protocol_version 的请求直接 400；头缺失放行（浏览器/测试）。
 		api.Use(httpx.ClientVersionMiddleware)
+
+		// S5 限流（docs/protocol.md §6）：进程内 token bucket，两段式挂载
+		//（语义详表见 internal/ratelimit 包注释；auth 公共/私有路由由
+		// RegisterPublic/RegisterPrivate 整体注册，按路由分组挂会拆散模块
+		// 装配，故路径分类收在中间件内做）：
+		//   Public（此处，鉴权前）——敏感/轮询桶按客户端 IP；logout 与
+		//   capabilities 按 IP 记入通用桶；受保护路径放行不记账。
+		//   Private（Authenticate 之后，见下方 priv 组）——设备审批三端点
+		//   入敏感桶（IP key）、events 入 SSE 桶、其余入通用桶（actor key）。
+		// 两段互斥分工，单个请求只进一个桶，不双计。
+		// 零值 cfg.RateLimit = 四桶全禁用（既有集成测试直接构造 Config{}
+		// 即免限流自伤；生产默认值由 config.Load 填充，env 可覆盖）。
+		rl := ratelimit.New(ratelimit.Config{
+			SensitivePerMin: cfg.RateLimit.SensitivePerMin,
+			PollPerMin:      cfg.RateLimit.PollPerMin,
+			APIPerMin:       cfg.RateLimit.APIPerMin,
+			SSEPerMin:       cfg.RateLimit.SSEPerMin,
+			TrustedProxy:    cfg.TrustedProxy,
+		}, actorLimitKey)
+		api.Use(rl.Public)
 		api.NotFound(func(w http.ResponseWriter, req *http.Request) {
 			httpx.WriteError(w, req, httpx.NotFound("no such endpoint under /api/v1"))
 		})
@@ -117,6 +138,10 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		// action=auth.bearer 等；成功路径不写——R7，sessions 表自身即事实）。
 		api.Group(func(priv chi.Router) {
 			priv.Use(mods.Auth.Svc.Authenticate)
+			// 限流 Private 段：Authenticate 之后 key 才能取到 actor_id
+			//（通用/SSE 桶按 actor 记账；与 Public 段互斥分工，不双计）。
+			// 挂在幂等之前：被 429 的请求不应消耗幂等键的互斥窗口。
+			priv.Use(rl.Private)
 			// 幂等：挂载于鉴权后（actor 身份参与键空间）；仅当客户端携带
 			// Idempotency-Key 头时激活。contract 列出的写端点全部受益。
 			if mods.Idempotency != nil {
@@ -138,6 +163,16 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 
 	// TODO(phase-6): 生产模式把 web/dist 挂到根路径（同源部署，去 CORS）。
 	return r
+}
+
+// actorLimitKey 提取限流记账用的主体标识（S5：认证后 = actor_id）。
+// 挂在 priv 组（Authenticate 之后）调用，理论上必有 principal；
+// 返回空串时 ratelimit 回退客户端 IP（防御路径）。
+func actorLimitKey(r *http.Request) string {
+	if p := auth.PrincipalFrom(r.Context()); p != nil {
+		return p.ActorID
+	}
+	return ""
 }
 
 func wellKnownHandler(cfg config.Config, log *slog.Logger) http.HandlerFunc {

@@ -71,7 +71,8 @@ func randomFromAlphabet(alphabet string, n int) (string, error) {
 func NewRandomCode(n int) (string, error) { return randomFromAlphabet(humanCodeAlphabet, n) }
 
 // NewUserCode 生成 XXXX-XXXX 形式的人类比对码（security.md：强度要求低于
-// device secret，但需限流防枚举——限流在 HTTP 层做，TODO(phase-6)）。
+// device secret；枚举防护由 HTTP 层敏感桶承担——GET /auth/device/authorizations
+// 10/min/IP，internal/ratelimit，TODO.md S5）。
 func NewUserCode() (string, error) {
 	half, err := NewRandomCode(4)
 	if err != nil {

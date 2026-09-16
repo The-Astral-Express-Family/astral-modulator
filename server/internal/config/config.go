@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -41,6 +42,29 @@ type Config struct {
 	DevCORSOrigins []string
 	// LogLevel slog 级别，默认 info。
 	LogLevel slog.Level
+	// RateLimit 进程内限流桶配置（TODO.md S5 / docs/protocol.md §6）。
+	// Load 填充生产默认值；直接构造 Config 零值 = 四桶全禁用（集成测试
+	// 装配零值即整体免限流，避免打敏感端点被 10/min 桶限死）。
+	RateLimit RateLimitConfig
+	// TrustedProxy 为 true 时机限流 key 采信 X-Forwarded-For 首跳
+	//（ASTRAL_TRUSTED_PROXY，默认 false = 直连 RemoteAddr）。仅作用于
+	// 限流 key 解析；见 docs/deployment.md §1。
+	TrustedProxy bool
+}
+
+// RateLimitConfig 是四类限流桶的每分钟令牌数（internal/ratelimit：
+// 容量 = 每分钟令牌数，匀速回填；某项 <=0 表示禁用对应桶——显式设
+// ASTRAL_RATELIMIT_*=0 或零值构造）。
+type RateLimitConfig struct {
+	// SensitivePerMin 敏感桶/min/IP：login、register、token/refresh、
+	// device 授权面（含 GET authorizations 的 user_code 防枚举与 approve/deny）。
+	SensitivePerMin int
+	// PollPerMin 轮询桶/min/IP：device token 交换（CLI interval=3s 轮询必须容纳）。
+	PollPerMin int
+	// APIPerMin 通用桶/min/actor：其余 /api/v1。
+	APIPerMin int
+	// SSEPerMin SSE 桶/min/actor：events 连接建立（独立，重连风暴不占通用桶）。
+	SSEPerMin int
 }
 
 // Load 从环境变量读取配置。ASTRAL_DATABASE_DSN 缺省时回退读 DATABASE_URL
@@ -54,6 +78,13 @@ func Load() Config {
 		ServerID:       os.Getenv("ASTRAL_SERVER_ID"),
 		AutoMigrate:    envBool("ASTRAL_AUTO_MIGRATE", true),
 		DevCORSOrigins: splitCSV(os.Getenv("ASTRAL_DEV_CORS_ORIGINS")),
+		RateLimit: RateLimitConfig{
+			SensitivePerMin: envInt("ASTRAL_RATELIMIT_SENSITIVE_PER_MIN", 10),
+			PollPerMin:      envInt("ASTRAL_RATELIMIT_POLL_PER_MIN", 60),
+			APIPerMin:       envInt("ASTRAL_RATELIMIT_API_PER_MIN", 300),
+			SSEPerMin:       envInt("ASTRAL_RATELIMIT_SSE_PER_MIN", 30),
+		},
+		TrustedProxy: envBool("ASTRAL_TRUSTED_PROXY", false),
 	}
 	switch strings.ToLower(os.Getenv("ASTRAL_LOG_LEVEL")) {
 	case "debug":
@@ -74,8 +105,9 @@ func (c Config) Describe() string {
 	if c.DatabaseDSN != "" {
 		db = "postgres"
 	}
-	return fmt.Sprintf("addr=%s public_url=%s web_base_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v",
-		c.HTTPAddr, c.PublicURL, c.WebBaseURL, db, c.ServerID, c.AutoMigrate, c.DevCORSOrigins)
+	return fmt.Sprintf("addr=%s public_url=%s web_base_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v ratelimit=sensitive:%d/poll:%d/api:%d/sse:%d trusted_proxy=%v",
+		c.HTTPAddr, c.PublicURL, c.WebBaseURL, db, c.ServerID, c.AutoMigrate, c.DevCORSOrigins,
+		c.RateLimit.SensitivePerMin, c.RateLimit.PollPerMin, c.RateLimit.APIPerMin, c.RateLimit.SSEPerMin, c.TrustedProxy)
 }
 
 func env(key, def string) string {
@@ -101,6 +133,17 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// envInt 读整数 env；缺失或非法值回退默认（限流桶额度等数值开关）。
+// 显式设 "0" 生效（= 禁用对应桶），与 env 字符串非空判断一致。
+func envInt(key string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 func splitCSV(s string) []string {
