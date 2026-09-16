@@ -149,6 +149,8 @@ func (m *Module) resolveConflict(w http.ResponseWriter, r *http.Request) {
 //   - merged|manual：以请求 content（服务端重算 hash）落新 revision；
 //   - 全部分支同事务写 resolution/resolved_by/resolved_at + audit
 //     document.resolve(details.resolution)；document.updated 事件 theirs 除外。
+//
+// 裁决 switch 下沉 applyResolutionTx，关闭工件 + audit 下沉 closeConflictTx。
 func (m *Module) resolveCore(ctx context.Context, p *auth.Principal, wsID, conflictID, resolution string, content *string) (*model.Document, *httpx.APIError) {
 	var out *model.Document
 	err := m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -168,7 +170,12 @@ func (m *Module) resolveCore(ctx context.Context, p *auth.Principal, wsID, confl
 				Details: map[string]any{"reason": "already_resolved"},
 			}
 		}
-		ours, _ := decodeSides(*row)
+		// 写路径对 ours 侧严格判错：ours_json 一旦损坏即 500（数据损坏语义），
+		// 不得以零值空侧把空内容写进 document 行（读端点仍宽容展示空侧）。
+		ours, err := decodeSide(row.OursJSON)
+		if err != nil {
+			return httpx.Internal("conflict ours_json is corrupted")
+		}
 		doc, exists, err := loadDocumentTx(tx, wsID, row.Path)
 		if err != nil {
 			return err
@@ -178,54 +185,11 @@ func (m *Module) resolveCore(ctx context.Context, p *auth.Principal, wsID, confl
 			return httpx.Internal("document row missing for conflict")
 		}
 
-		var fresh *model.Document
-		emit := false
-		switch resolution {
-		case "ours":
-			if ours.Delete {
-				fresh, err = applyTombstoneTx(tx, doc, p.ActorID)
-				// 行原本已是 tombstone 时为无操作（不 bump 不发事件）。
-				if doc.DeletedAt == nil {
-					emit = true
-				}
-			} else {
-				fresh, err = applyContentTx(tx, doc, ours.Content, ours.ContentHash, p.ActorID)
-				emit = true
-			}
-		case "theirs":
-			fresh = doc // 远端版本即裁决：不动行、不发事件
-		default: // merged | manual
-			hash := contentHash(*content)
-			fresh, err = applyContentTx(tx, doc, *content, hash, p.ActorID)
-			emit = true
-		}
+		fresh, emit, err := applyResolutionTx(tx, p, doc, ours, resolution, content)
 		if err != nil {
 			return err
 		}
-		// 关闭冲突行（条件更新防并发双 resolve）。
-		now := time.Now()
-		res := tx.Model(&model.DocumentConflict{}).
-			Where("id = ? AND resolved_at IS NULL", row.ID).
-			Updates(map[string]any{
-				"resolution": resolution, "resolved_by": p.ActorID, "resolved_at": now,
-			})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return &httpx.APIError{
-				Status:  http.StatusConflict,
-				Code:    httpx.CodeValidationFailed,
-				Message: "conflict is already resolved",
-				Details: map[string]any{"reason": "already_resolved"},
-			}
-		}
-		if err := audit.RecordInTx(tx, audit.Entry{
-			WorkspaceID: wsID, ActorID: p.ActorID,
-			Action: actionDocumentResolve, Outcome: "allowed",
-			TargetType: "document", TargetID: doc.ID,
-			Details: map[string]any{"path": row.Path, "resolution": resolution},
-		}); err != nil {
+		if err := closeConflictTx(tx, p, wsID, row, doc, resolution); err != nil {
 			return err
 		}
 		if emit {
@@ -244,4 +208,69 @@ func (m *Module) resolveCore(ctx context.Context, p *auth.Principal, wsID, confl
 		return nil, httpx.Internal("resolve failed")
 	}
 	return out, nil
+}
+
+// applyResolutionTx 是 resolve 的裁决 switch：按 resolution 把文档行落到裁决
+// 结果，返回最新行与是否发 document.updated（theirs 不动行不发事件）。
+func applyResolutionTx(tx *gorm.DB, p *auth.Principal, doc *model.Document, ours conflictSide, resolution string, content *string) (*model.Document, bool, error) {
+	var fresh *model.Document
+	var err error
+	emit := false
+	switch resolution {
+	case "ours":
+		if ours.Delete {
+			fresh, err = applyTombstoneTx(tx, doc, p.ActorID)
+			if err != nil {
+				return nil, false, err
+			}
+			// 行原本已是 tombstone 时为无操作（不 bump 不发事件）。
+			if doc.DeletedAt == nil {
+				emit = true
+			}
+		} else {
+			fresh, err = applyContentTx(tx, doc, ours.Content, ours.ContentHash, p.ActorID)
+			if err != nil {
+				return nil, false, err
+			}
+			emit = true
+		}
+	case "theirs":
+		fresh = doc // 远端版本即裁决：不动行、不发事件
+	default: // merged | manual
+		hash := contentHash(*content)
+		fresh, err = applyContentTx(tx, doc, *content, hash, p.ActorID)
+		if err != nil {
+			return nil, false, err
+		}
+		emit = true
+	}
+	return fresh, emit, nil
+}
+
+// closeConflictTx 关闭冲突工件（条件更新防并发双 resolve）+ audit
+// document.resolve。已被并发 resolve（RowsAffected=0）时返回 409 already_resolved。
+func closeConflictTx(tx *gorm.DB, p *auth.Principal, wsID string, row *model.DocumentConflict, doc *model.Document, resolution string) error {
+	now := time.Now()
+	res := tx.Model(&model.DocumentConflict{}).
+		Where("id = ? AND resolved_at IS NULL", row.ID).
+		Updates(map[string]any{
+			"resolution": resolution, "resolved_by": p.ActorID, "resolved_at": now,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return &httpx.APIError{
+			Status:  http.StatusConflict,
+			Code:    httpx.CodeValidationFailed,
+			Message: "conflict is already resolved",
+			Details: map[string]any{"reason": "already_resolved"},
+		}
+	}
+	return audit.RecordInTx(tx, audit.Entry{
+		WorkspaceID: wsID, ActorID: p.ActorID,
+		Action: actionDocumentResolve, Outcome: "allowed",
+		TargetType: "document", TargetID: doc.ID,
+		Details: map[string]any{"path": row.Path, "resolution": resolution},
+	})
 }

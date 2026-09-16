@@ -16,10 +16,8 @@
 package document
 
 import (
-	"errors"
 	"net/http"
 	"net/url"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
@@ -75,39 +73,21 @@ func decodePath(w http.ResponseWriter, r *http.Request) (string, bool) {
 	}
 	path, err := CanonicalizePath(raw)
 	if err != nil {
-		var apiErr *httpx.APIError
-		if errors.As(err, &apiErr) {
-			httpx.WriteError(w, r, apiErr)
-			return "", false
-		}
-		httpx.WriteError(w, r, httpx.Internal("path validation failed"))
+		// CanonicalizePath 的全部失败返回都是 *httpx.APIError（invalidPath 构造
+		// 的 400），直接断言透传即可，无需 errors.As 兜底分支。
+		httpx.WriteError(w, r, err.(*httpx.APIError))
 		return "", false
 	}
 	return path, true
 }
 
-// manifestLimitMax/manifestLimitDef：manifest 的 limit 缺省 200、上限 1000
-// （openapi 契约即如此，与共享 Limit 参数的 50/200 不同，故本地解析）。
+// manifestLimitDef/manifestLimitMax：manifest 的 limit 缺省 200、上限 1000
+// （openapi 契约即如此，与共享 Limit 参数的 50/200 不同，经 httpx.ParseLimit
+// 传入自成一档的数值）。
 const (
 	manifestLimitDef = 200
 	manifestLimitMax = 1000
 )
-
-// parseManifestLimit 解析 manifest 的 limit 参数（语义对齐 httpx.ParseLimit：
-// 缺省/非法/越界回落，不报错），数值按契约自成一档。
-func parseManifestLimit(raw string) int {
-	if raw == "" {
-		return manifestLimitDef
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
-		return manifestLimitDef
-	}
-	if n > manifestLimitMax {
-		return manifestLimitMax
-	}
-	return n
-}
 
 // manifest 是同步基准清单（sync-semantics §10）：path 升序、游标 = 末行 path
 // （查询 path > cursor），默认排除 tombstone，include_deleted=true 含之。
@@ -118,7 +98,7 @@ func (m *Module) manifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	limit := parseManifestLimit(q.Get("limit"))
+	limit := httpx.ParseLimit(q.Get("limit"), manifestLimitDef, manifestLimitMax)
 	query := m.DB.WithContext(r.Context()).Model(&model.Document{}).
 		Where("workspace_id = ?", wsID)
 	if q.Get("include_deleted") != "true" {
@@ -147,7 +127,7 @@ func (m *Module) manifest(w http.ResponseWriter, r *http.Request) {
 // get 按 (workspace_id, path) 精确查；tombstone 也返回（deleted=true、content
 // 照常返回）——同步端侦测远端删除的依据（sync-semantics §14）。
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "workspace_id")
+	wsID := chiWorkspaceID(r)
 	path, ok := decodePath(w, r)
 	if !ok {
 		return

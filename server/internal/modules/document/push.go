@@ -33,7 +33,6 @@ type pushInput struct {
 	BaseRevision int64
 	BaseHash     string
 	Content      string
-	ContentHash  string // 可选；空 = 请求未携带
 }
 
 // conflictOutcome 承载「事务内已落冲突工件、事务提交后转 409」的业务结果：
@@ -99,6 +98,7 @@ func (m *Module) push(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, invalidField("content", "content exceeds 1MiB limit"))
 		return
 	}
+	// hash 只算一次：校验 content_hash 与落库全程复用（1MiB 内容避免二次 sha256）。
 	hash := contentHash(*in.Content)
 	if in.ContentHash != nil && *in.ContentHash != hash {
 		httpx.WriteError(w, r, &httpx.APIError{
@@ -114,8 +114,7 @@ func (m *Module) push(w http.ResponseWriter, r *http.Request) {
 		BaseRevision: *in.BaseRevision,
 		BaseHash:     *in.BaseHash,
 		Content:      *in.Content,
-		ContentHash:  derefOrEmpty(in.ContentHash),
-	})
+	}, hash)
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
@@ -124,10 +123,11 @@ func (m *Module) push(w http.ResponseWriter, r *http.Request) {
 }
 
 // pushDoc 是 push 的事务核心：单事务内完成 R1 大小写检查 → 行分类 →
-// 创建/快进/复活/落冲突 → audit + outbox 三件套。冲突分支经 conflictOutcome
-// 在事务提交后转 409（工件必须落地）；400/500 分支无写入，回滚无害。
-func (m *Module) pushDoc(ctx context.Context, p *auth.Principal, wsID, path string, in pushInput) (*model.Document, *httpx.APIError) {
-	hash := contentHash(in.Content)
+// 创建/快进/复活/落冲突 → audit + outbox 三件套。分类骨架与冲突分支留在
+// 本函数，三类成功路径下沉到 createDocTx / reviveDocTx / fastForwardTx。
+// 冲突分支经 conflictOutcome 在事务提交后转 409（工件必须落地）；
+// 400/500 分支无写入，回滚无害。hash 由 handler 一次算好传入复用。
+func (m *Module) pushDoc(ctx context.Context, p *auth.Principal, wsID, path string, in pushInput, hash string) (*model.Document, *httpx.APIError) {
 	ours := conflictSide{Content: in.Content, ContentHash: hash, ActorID: p.ActorID}
 	var out *model.Document
 	var pending *conflictOutcome
@@ -164,39 +164,12 @@ func (m *Module) pushDoc(ctx context.Context, p *auth.Principal, wsID, path stri
 			return invalidField("base_revision", "base_revision refers to a document that does not exist")
 		case !exists:
 			// 创建 revision=1（local-only 创建路径，sync-semantics §6 情况 2）。
-			now := time.Now()
-			created := &model.Document{
-				ID: ids.New(ids.Document), WorkspaceID: wsID, Path: path,
-				Revision: 1, ContentHash: hash, Content: in.Content,
-				UpdatedBy: p.ActorID, CreatedAt: now, UpdatedAt: now,
-			}
-			if err := tx.Create(created).Error; err != nil {
-				if store.IsUniqueViolation(err) {
-					// 并发同路径创建 = 双改：重读行，按失配落冲突工件。
-					fresh, ok, e := loadDocumentTx(tx, wsID, path)
-					if e != nil || !ok {
-						return err
-					}
-					return recordConflict(tx, fresh)
-				}
-				return err
-			}
-			if err := auditPushTx(tx, wsID, p, created, map[string]any{"created": true}); err != nil {
-				return err
-			}
-			out = created
-			return emitUpdatedTx(tx, wsID, p.ActorID, created, false)
+			out, err = createDocTx(tx, p, wsID, path, in.Content, hash, recordConflict)
+			return err
 		case row.DeletedAt != nil && in.BaseRevision == 0:
 			// 复活（P2）：tombstone + base_revision=0 → 写入新内容、revision 续增。
-			fresh, err := applyContentTx(tx, row, in.Content, hash, p.ActorID)
-			if err != nil {
-				return err
-			}
-			if err := auditPushTx(tx, wsID, p, fresh, map[string]any{"revived": true}); err != nil {
-				return err
-			}
-			out = fresh
-			return emitUpdatedTx(tx, wsID, p.ActorID, fresh, false)
+			out, err = reviveDocTx(tx, p, wsID, row, in.Content, hash)
+			return err
 		case row.DeletedAt != nil:
 			// tombstone 且 base 不匹配：同冲突路径，theirs 标记远端已删除。
 			return recordConflict(tx, row)
@@ -216,31 +189,8 @@ func (m *Module) pushDoc(ctx context.Context, p *auth.Principal, wsID, path stri
 			}
 			// 快进：条件更新（id+revision+hash+未删）防并发覆盖；失配即并发推进，
 			// 重读后按失配落冲突工件（sync-semantics §13「合并过程中 remote 再变化」）。
-			now := time.Now()
-			res := tx.Model(&model.Document{}).
-				Where("id = ? AND revision = ? AND content_hash = ? AND deleted_at IS NULL",
-					row.ID, row.Revision, row.ContentHash).
-				Updates(map[string]any{
-					"content": in.Content, "content_hash": hash,
-					"revision": row.Revision + 1, "updated_by": p.ActorID, "updated_at": now,
-				})
-			if res.Error != nil {
-				return res.Error
-			}
-			if res.RowsAffected == 0 {
-				fresh, ok, e := loadDocumentTx(tx, wsID, path)
-				if e != nil || !ok {
-					return e
-				}
-				return recordConflict(tx, fresh)
-			}
-			row.Content, row.ContentHash, row.UpdatedBy, row.UpdatedAt = in.Content, hash, p.ActorID, now
-			row.Revision++
-			if err := auditPushTx(tx, wsID, p, row, nil); err != nil {
-				return err
-			}
-			out = row
-			return emitUpdatedTx(tx, wsID, p.ActorID, row, false)
+			out, err = fastForwardTx(tx, p, wsID, path, row, in.Content, hash, recordConflict)
+			return err
 		default:
 			// revision 不匹配：双改（dual overlap）→ 落工件 + 409（P1）。
 			return recordConflict(tx, row)
@@ -257,6 +207,76 @@ func (m *Module) pushDoc(ctx context.Context, p *auth.Principal, wsID, path stri
 		return nil, pending.apiError()
 	}
 	return out, nil
+}
+
+// createDocTx 是 push 的创建分支：落 revision=1 新行 + audit + document.updated
+// 收尾。并发同路径双建触发唯一键冲突时，重读行转落冲突工件（onConflict，
+// 由 pushDoc 注入——pending 生命周期在事务外）。
+func createDocTx(tx *gorm.DB, p *auth.Principal, wsID, path, content, hash string, onConflict func(tx *gorm.DB, doc *model.Document) error) (*model.Document, error) {
+	now := time.Now()
+	created := &model.Document{
+		ID: ids.New(ids.Document), WorkspaceID: wsID, Path: path,
+		Revision: 1, ContentHash: hash, Content: content,
+		UpdatedBy: p.ActorID, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := tx.Create(created).Error; err != nil {
+		if store.IsUniqueViolation(err) {
+			// 并发同路径创建 = 双改：重读行，按失配落冲突工件。
+			fresh, ok, e := loadDocumentTx(tx, wsID, path)
+			if e != nil || !ok {
+				return nil, err
+			}
+			return nil, onConflict(tx, fresh)
+		}
+		return nil, err
+	}
+	if err := auditPushTx(tx, wsID, p, created, map[string]any{"created": true}); err != nil {
+		return nil, err
+	}
+	return created, emitUpdatedTx(tx, wsID, p.ActorID, created, false)
+}
+
+// reviveDocTx 是 push 的复活分支：tombstone + base_revision=0 → 写入新内容
+// （revision 续增、deleted_at=NULL）+ audit + document.updated 收尾。
+func reviveDocTx(tx *gorm.DB, p *auth.Principal, wsID string, row *model.Document, content, hash string) (*model.Document, error) {
+	fresh, err := applyContentTx(tx, row, content, hash, p.ActorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := auditPushTx(tx, wsID, p, fresh, map[string]any{"revived": true}); err != nil {
+		return nil, err
+	}
+	return fresh, emitUpdatedTx(tx, wsID, p.ActorID, fresh, false)
+}
+
+// fastForwardTx 是 push 的快进分支：条件更新（id+revision+hash+未删）防并发
+// 覆盖 + audit + document.updated 收尾。RowsAffected=0 即行被并发推进，重读后
+// 按失配落冲突工件（onConflict，由 pushDoc 注入）。
+func fastForwardTx(tx *gorm.DB, p *auth.Principal, wsID, path string, row *model.Document, content, hash string, onConflict func(tx *gorm.DB, doc *model.Document) error) (*model.Document, error) {
+	now := time.Now()
+	res := tx.Model(&model.Document{}).
+		Where("id = ? AND revision = ? AND content_hash = ? AND deleted_at IS NULL",
+			row.ID, row.Revision, row.ContentHash).
+		Updates(map[string]any{
+			"content": content, "content_hash": hash,
+			"revision": row.Revision + 1, "updated_by": p.ActorID, "updated_at": now,
+		})
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		fresh, ok, e := loadDocumentTx(tx, wsID, path)
+		if e != nil || !ok {
+			return nil, e
+		}
+		return nil, onConflict(tx, fresh)
+	}
+	row.Content, row.ContentHash, row.UpdatedBy, row.UpdatedAt = content, hash, p.ActorID, now
+	row.Revision++
+	if err := auditPushTx(tx, wsID, p, row, nil); err != nil {
+		return nil, err
+	}
+	return row, emitUpdatedTx(tx, wsID, p.ActorID, row, false)
 }
 
 // delete 是版本化删除（DELETE ?base_revision=，禁止盲删）：
@@ -488,11 +508,4 @@ func invalidField(field, message string) *httpx.APIError {
 		Message: message,
 		Details: map[string]any{"field": field},
 	}
-}
-
-func derefOrEmpty(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

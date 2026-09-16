@@ -101,10 +101,9 @@ func collectChiRoutes(t *testing.T) map[string]bool {
 		if route == "/healthz" || route == "/readyz" {
 			return nil
 		}
-		// chi 的 {path:.*} 正则后缀在 openapi 中写作 {path}。
-		route = strings.ReplaceAll(route, ":.*}", "}")
 		// chi 的尾通配 /*（catch-all，document 多段路径的唯一可匹配形态，
-		// round 38 T4 落地：{path:.*} 是单段正则节点）同样写作 {path}。
+		// round 38 T4 落地：{path:.*} 是单段正则节点）写作 openapi 的 {path}。
+		// （仓内路由已无 {param:.*} 正则节点，无需再归一该形态。）
 		if strings.HasSuffix(route, "/*") {
 			route = strings.TrimSuffix(route, "/*") + "/{path}"
 		}

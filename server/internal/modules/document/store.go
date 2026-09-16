@@ -51,10 +51,19 @@ func loadConflictTx(tx *gorm.DB, conflictID, workspaceID string) (*model.Documen
 	return &row, nil
 }
 
-// decodeSides 还原 ours_json / theirs_json。落库 JSON 由本模块单一构造，
-// 损坏数据按空侧处理（详情端点仍可返回骨架）而非 500。
+// decodeSides 还原 ours_json / theirs_json（宽容版）。落库 JSON 由本模块单一
+// 构造，读端点（列表/详情）对损坏数据按空侧处理（仍可返回骨架）而非 500。
 func decodeSides(row model.DocumentConflict) (ours, theirs conflictSide) {
-	_ = json.Unmarshal(row.OursJSON, &ours)
-	_ = json.Unmarshal(row.TheirsJSON, &theirs)
+	ours, _ = decodeSide(row.OursJSON)
+	theirs, _ = decodeSide(row.TheirsJSON)
 	return ours, theirs
+}
+
+// decodeSide 还原单侧 JSON，严格带出 unmarshal 错误。写路径（resolveCore）
+// 经此对 ours 侧显式判错 → 500 INTERNAL_ERROR（数据损坏语义）：吞错会让
+// 零值空侧以「裁决 ours 内容」身份把空串写进 document 行。
+func decodeSide(raw []byte) (conflictSide, error) {
+	var s conflictSide
+	err := json.Unmarshal(raw, &s)
+	return s, err
 }
