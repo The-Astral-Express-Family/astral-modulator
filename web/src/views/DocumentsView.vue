@@ -20,11 +20,13 @@ import { getDocument, getDocumentManifest } from '@/api/modules/documents'
 import type { DocumentDto, ManifestItemDto } from '@/api/modules/documents'
 import { listWorkspaces } from '@/api/modules/core'
 import type { Workspace } from '@/api/types'
+import { useCursorList } from '@/composables/useCursorList'
 import { useEventStream } from '@/composables/useEventStream'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
+import { fmtTime } from '@/lib/format'
+import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Badge } from '@/components/ui/badge'
-import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
@@ -66,45 +68,39 @@ const orgMemoryLink = computed(() =>
 
 // ---- 清单（path 升序游标 + include_deleted 开关 + 仅看记忆过滤）----
 
-const items = ref<ManifestItemDto[]>([])
-const nextCursor = ref<string | null>(null)
-const loading = ref(false)
-const loaded = ref(false)
 const includeDeleted = ref(false)
 const memoryOnly = ref(route.query.memory === '1')
 
 const isMemory = (path: string): boolean => path.startsWith('memory/')
 
+// 清单分页：失败由全局拦截器 toast（silent 时为 SSE 防抖刷新，不打扰）。
+const {
+  items,
+  cursor: nextCursor,
+  loaded,
+  loading,
+  load: loadManifest,
+  loadMore,
+  reset: resetManifest,
+} = useCursorList<ManifestItemDto>((cursor, opts) =>
+  getDocumentManifest(
+    workspaceId.value,
+    {
+      limit: PAGE_LIMIT,
+      include_deleted: includeDeleted.value,
+      ...(cursor ? { cursor } : {}),
+    },
+    { silent: opts.silent },
+  ),
+)
+
 const visibleItems = computed(() =>
   memoryOnly.value ? items.value.filter((it) => isMemory(it.path)) : items.value,
 )
 
-async function loadManifest(opts: { append?: boolean; silent?: boolean } = {}): Promise<void> {
-  loading.value = true
-  try {
-    const page = await getDocumentManifest(
-      workspaceId.value,
-      {
-        limit: PAGE_LIMIT,
-        include_deleted: includeDeleted.value,
-        ...(opts.append && nextCursor.value ? { cursor: nextCursor.value } : {}),
-      },
-      { silent: opts.silent },
-    )
-    const fresh = page.items ?? [] // 生成类型 items 可选
-    items.value = opts.append ? [...items.value, ...fresh] : fresh
-    nextCursor.value = page.next_cursor ?? null
-  } catch {
-    // 失败已由全局拦截器 toast（silent 时为 SSE 防抖刷新，不打扰）。
-  } finally {
-    loading.value = false
-    loaded.value = true
-  }
-}
-
 function toggleIncludeDeleted(): void {
   includeDeleted.value = !includeDeleted.value
-  nextCursor.value = null
+  nextCursor.value = null // 切换后旧游标失效；失败时不残留「加载更多」
   void loadManifest()
 }
 
@@ -148,12 +144,6 @@ interface DocActivity {
 
 const { state: sseState } = useEventStream(workspaceId, { onEvent: onSseEvent })
 const activity = ref<DocActivity[]>([])
-
-const SSE_VARIANTS: Record<string, BadgeVariants['variant']> = {
-  connecting: 'secondary',
-  open: 'default',
-  closed: 'outline',
-}
 
 // 事件 data payload 的事实定义在服务端 document/push.go（emitUpdatedTx /
 // recordConflictTx）：updated{path,revision,content_hash,deleted}、
@@ -214,7 +204,6 @@ function openActivity(entry: DocActivity): void {
 
 // ---- 展示辅助 ----
 
-const fmtTime = (iso: string): string => new Date(iso).toLocaleString()
 const fmtClock = (iso: string): string => new Date(iso).toLocaleTimeString()
 const shortHash = (hash: string): string => (hash ? `${hash.slice(0, 14)}…` : '—')
 const fmtSize = (bytes: number): string =>
@@ -228,9 +217,7 @@ onMounted(() => {
 })
 
 watch([workspaceId], () => {
-  items.value = []
-  nextCursor.value = null
-  loaded.value = false
+  resetManifest()
   includeDeleted.value = false
   selectedPath.value = ''
   doc.value = null
@@ -348,7 +335,7 @@ watch([workspaceId], () => {
               size="sm"
               class="self-start"
               :disabled="loading"
-              @click="loadManifest({ append: true })"
+              @click="loadMore"
             >
               加载更多
             </Button>

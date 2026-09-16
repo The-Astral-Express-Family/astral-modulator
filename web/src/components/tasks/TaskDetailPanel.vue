@@ -26,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { apiErrorCode, TASK_PRIORITIES, TASK_PRIORITY_META, TASK_STATUSES, TASK_STATUS_META } from './taskMeta'
 import TaskLeaseBadge from './TaskLeaseBadge.vue'
 import TaskStatusBadge from './TaskStatusBadge.vue'
+import { fmtTime, shortId } from '../../lib/format'
 
 const props = defineProps<{
   task: Task
@@ -191,9 +192,7 @@ function detachTag(tagId: string): void {
   }, '已移除标签。')
 }
 
-const fmtTime = (iso: string): string => new Date(iso).toLocaleString()
 const actorLabel = (actor: Actor | null): string => actor?.display_name ?? '（未知成员）'
-const shortId = (id: string): string => id.slice(0, 12) + '…'
 </script>
 
 <template>

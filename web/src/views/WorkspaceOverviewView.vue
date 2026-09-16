@@ -17,10 +17,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { useEventStream } from '@/composables/useEventStream'
-import type { SseState } from '@/composables/useEventStream'
 import { usePolling } from '@/composables/usePolling'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { fmtTime } from '@/lib/format'
+import { SSE_VARIANTS } from '../lib/sse'
 
 // 路由参数保持响应式：/workspaces/a → /workspaces/b 组件复用时正确重载。
 const workspaceId = useWorkspaceId()
@@ -33,11 +33,6 @@ const { events, state: sseState } = useEventStream(workspaceId, {
   },
 })
 
-const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
-  connecting: 'secondary',
-  open: 'default',
-  closed: 'outline',
-}
 
 // ---- Presence 总览（S7-3；授权 = workspace:read，任何成员可读）----
 

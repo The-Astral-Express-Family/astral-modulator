@@ -29,10 +29,8 @@ import type {
 } from '../api/types'
 import { TASKS_MOCK } from '../lib/mockMode'
 import { useTaskLiveEvents } from '../composables/useTaskLiveEvents'
-import type { SseState } from '../composables/useEventStream'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Badge } from '@/components/ui/badge'
-import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
@@ -45,6 +43,7 @@ import TaskFilters from '@/components/tasks/TaskFilters.vue'
 import TaskPriorityIcon from '@/components/tasks/TaskPriorityIcon.vue'
 import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
 import TaskTreeRow from '@/components/tasks/TaskTreeRow.vue'
+import { SSE_VARIANTS } from '../lib/sse'
 
 const route = useRoute()
 // 路由参数保持响应式：组件复用（/workspaces/a/tasks → /workspaces/b/tasks）时正确重载。
@@ -491,11 +490,6 @@ onUnmounted(() => {
   if (flashTimer) clearTimeout(flashTimer)
 })
 
-const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
-  connecting: 'secondary',
-  open: 'default',
-  closed: 'outline',
-}
 </script>
 
 <template>

@@ -16,6 +16,7 @@ import { confirmTagProposal, listTags, proposeTag } from '@/api/modules/tag'
 import type { TagDto, TagProposal } from '@/api/modules/tag'
 import { searchTasks } from '@/api/modules/task'
 import type { TaskSearchHit } from '@/api/types'
+import { useCursorList } from '@/composables/useCursorList'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
@@ -52,29 +53,23 @@ const workspaceId = useWorkspaceId()
 const PAGE_LIMIT = 200
 const TASK_PAGE_LIMIT = 50
 
-const tags = ref<TagDto[]>([])
-const nextCursor = ref<string | null>(null)
-const loading = ref(false)
-const loaded = ref(false)
-
-async function load(opts: { append?: boolean; silent?: boolean } = {}): Promise<void> {
-  loading.value = true
-  try {
-    const page = await listTags(
-      workspaceId.value,
-      opts.append && nextCursor.value ? { limit: PAGE_LIMIT, cursor: nextCursor.value } : { limit: PAGE_LIMIT },
-      { silent: opts.silent },
-    )
-    const items = page.items ?? [] // 生成类型 items 可选（allOf 合并形态）
-    tags.value = opts.append ? [...tags.value, ...items] : items
-    nextCursor.value = page.next_cursor
-  } catch {
-    // 失败已由全局拦截器 toast（silent 时为后台刷新，不打扰）。
-  } finally {
-    loading.value = false
-    loaded.value = true
-  }
-}
+// 游标分页状态机：fetcher 决定 silent（失败由全局拦截器 toast，静默刷新
+// 不打扰）。服务端按成员规模有界一次返回（next_cursor 恒空），信封照常消费。
+const {
+  items: tags,
+  cursor: nextCursor,
+  loaded,
+  loading,
+  load,
+  loadMore,
+  reset: resetTags,
+} = useCursorList<TagDto>((cursor, opts) =>
+  listTags(
+    workspaceId.value,
+    { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+    { silent: opts.silent },
+  ),
+)
 
 // ---- 两步确认流：发起（create/rename 收集名字；delete 直接发起到 tag 现名）----
 
@@ -250,9 +245,7 @@ onMounted(() => {
 })
 
 watch(workspaceId, () => {
-  tags.value = []
-  nextCursor.value = null
-  loaded.value = false
+  resetTags()
   taskLists.value = new Map()
   expandedTagIds.value = new Set()
   proposal.value = null
@@ -370,7 +363,7 @@ watch(workspaceId, () => {
             size="sm"
             class="self-start"
             :disabled="loading"
-            @click="load({ append: true })"
+            @click="loadMore"
           >
             加载更多
           </Button>

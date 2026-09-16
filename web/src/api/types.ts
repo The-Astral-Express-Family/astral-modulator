@@ -34,7 +34,6 @@ export type ErrorCode =
   | 'AUTHORIZATION_PENDING'
   | 'SLOW_DOWN'
   | 'INTERNAL_ERROR'
-  | 'NOT_IMPLEMENTED'
 
 export interface ApiErrorBody {
   code: ErrorCode

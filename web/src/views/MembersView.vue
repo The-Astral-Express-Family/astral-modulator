@@ -29,6 +29,7 @@ import type { AgentDto, MemberDto, Role } from '@/api/modules/credentials'
 import { formatApiError } from '@/api/client'
 import { useApiAction } from '@/composables/useApiAction'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
+import { shortId } from '@/lib/format'
 import { useSessionStore } from '@/stores/session'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import {
@@ -128,7 +129,6 @@ const myMember = computed(
 const canManageMembers = computed(() => myMember.value?.role === 'owner')
 
 const isSelf = (m: MemberDto): boolean => m.actor.id === session.actor?.id
-const shortId = (id: string): string => id.slice(0, 12) + '…'
 
 // ---- 角色变更（owner 除外）+ owner 晋升审批 ----
 

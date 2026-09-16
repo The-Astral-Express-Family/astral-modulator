@@ -17,9 +17,10 @@ import { listAdminAudit, listAudit } from '@/api/modules/audit'
 import type { AuditEntry, AuditOutcome } from '@/api/modules/audit'
 import type { Member } from '@/api/types'
 import { formatApiError } from '@/api/client'
+import { useCursorList } from '@/composables/useCursorList'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { useSessionStore } from '@/stores/session'
-import { fmtTime } from '@/lib/format'
+import { fmtTime, shortId } from '@/lib/format'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
@@ -64,7 +65,6 @@ const memberNames = computed(() => {
   return m
 })
 
-const shortId = (id: string): string => id.slice(0, 12) + '…'
 function actorLabel(id: string | null | undefined): string {
   if (!id) return '—'
   return memberNames.value.get(id) ?? shortId(id)
@@ -100,60 +100,54 @@ const OUTCOME_OPTIONS = [
 
 // ---- 工作区轴状态 ----
 
-const wsItems = ref<AuditEntry[]>([])
-const wsCursor = ref<string | null>(null)
-const wsLoading = ref(false)
-const wsLoaded = ref(false)
-const wsError = ref<string | null>(null)
-
-async function loadWorkspace(opts: { append?: boolean } = {}): Promise<void> {
-  wsLoading.value = true
-  try {
-    const page = await listAudit(workspaceId.value, {
-      ...draftParams(wsDraft.value),
-      ...(opts.append && wsCursor.value ? { cursor: wsCursor.value } : {}),
-    })
-    const items = page.items ?? [] // 生成类型 items 可选（内联响应形状）
-    wsItems.value = opts.append ? [...wsItems.value, ...items] : items
-    wsCursor.value = page.next_cursor ?? null
-    wsError.value = null
-  } catch (e) {
-    wsError.value = formatApiError(e)
-  } finally {
-    wsLoading.value = false
-    wsLoaded.value = true
-  }
-}
+// 内联错误形态（与全局 toast 形态的差异）：fetcher 恒 silent——错误由下方
+// error ref 接住呈现（成功即清空），不再触发全局 toast 双弹。
+const {
+  items: wsItems,
+  cursor: wsCursor,
+  loaded: wsLoaded,
+  loading: wsLoading,
+  error: wsErrorRaw,
+  load: loadWorkspace,
+  loadMore: loadMoreWorkspace,
+  reset: resetWorkspace,
+} = useCursorList<AuditEntry>((cursor) =>
+  listAudit(
+    workspaceId.value,
+    { ...draftParams(wsDraft.value), ...(cursor ? { cursor } : {}) },
+    { silent: true },
+  ),
+)
+const wsError = computed(() =>
+  wsErrorRaw.value == null ? null : formatApiError(wsErrorRaw.value),
+)
 
 // ---- 平台轴状态（首次切入懒加载）----
 
-const adminItems = ref<AuditEntry[]>([])
-const adminCursor = ref<string | null>(null)
-const adminLoading = ref(false)
-const adminLoaded = ref(false)
-const adminError = ref<string | null>(null)
-
-async function loadAdmin(opts: { append?: boolean } = {}): Promise<void> {
-  adminLoading.value = true
-  try {
-    const page = await listAdminAudit({
+const {
+  items: adminItems,
+  cursor: adminCursor,
+  loaded: adminLoaded,
+  loading: adminLoading,
+  error: adminErrorRaw,
+  load: loadAdmin,
+  loadMore: loadMoreAdmin,
+  reset: resetAdmin,
+} = useCursorList<AuditEntry>((cursor) =>
+  listAdminAudit(
+    {
       ...draftParams(adminDraft.value),
       ...(adminDraft.value.workspaceId.trim()
         ? { workspace_id: adminDraft.value.workspaceId.trim() }
         : {}),
-      ...(opts.append && adminCursor.value ? { cursor: adminCursor.value } : {}),
-    })
-    const items = page.items ?? []
-    adminItems.value = opts.append ? [...adminItems.value, ...items] : items
-    adminCursor.value = page.next_cursor ?? null
-    adminError.value = null
-  } catch (e) {
-    adminError.value = formatApiError(e)
-  } finally {
-    adminLoading.value = false
-    adminLoaded.value = true
-  }
-}
+      ...(cursor ? { cursor } : {}),
+    },
+    { silent: true },
+  ),
+)
+const adminError = computed(() =>
+  adminErrorRaw.value == null ? null : formatApiError(adminErrorRaw.value),
+)
 
 watch(mode, (next) => {
   if (next === 'admin' && !adminLoaded.value && adminVisible.value) void loadAdmin()
@@ -200,15 +194,9 @@ onMounted(() => {
 })
 
 watch(workspaceId, () => {
-  wsItems.value = []
-  wsCursor.value = null
-  wsLoaded.value = false
-  wsError.value = null
+  resetWorkspace()
   wsDraft.value = emptyDraft()
-  adminItems.value = []
-  adminCursor.value = null
-  adminLoaded.value = false
-  adminError.value = null
+  resetAdmin()
   adminDraft.value = emptyDraft()
   members.value = []
   expandedIds.value = new Set()
@@ -347,7 +335,7 @@ watch(workspaceId, () => {
             size="sm"
             class="self-start"
             :disabled="wsLoading"
-            @click="loadWorkspace({ append: true })"
+            @click="loadMoreWorkspace"
           >
             加载更早的记录
           </Button>
@@ -480,7 +468,7 @@ watch(workspaceId, () => {
             size="sm"
             class="self-start"
             :disabled="adminLoading"
-            @click="loadAdmin({ append: true })"
+            @click="loadMoreAdmin"
           >
             加载更早的记录
           </Button>

@@ -22,8 +22,11 @@ import type {
   DocumentConflictDetailDto,
   DocumentConflictDto,
 } from '@/api/modules/documents'
+import { useCursorList } from '@/composables/useCursorList'
 import { useEventStream } from '@/composables/useEventStream'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
+import { fmtTime } from '@/lib/format'
+import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
@@ -52,12 +55,6 @@ const PAGE_LIMIT = 50
 const { state: sseState } = useEventStream(workspaceId, { onEvent: onSseEvent })
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 
-const SSE_VARIANTS: Record<string, BadgeVariants['variant']> = {
-  connecting: 'secondary',
-  open: 'default',
-  closed: 'outline',
-}
-
 function onSseEvent(env: { type: string }): void {
   if (env.type !== 'document.conflict' && env.type !== 'document.updated') return
   if (reloadTimer) clearTimeout(reloadTimer)
@@ -83,38 +80,31 @@ const STATUS_CHIPS = [
   { value: 'all', label: '全部' },
 ] as const
 
-const conflicts = ref<DocumentConflictDto[]>([])
-const nextCursor = ref<string | null>(null)
-const loading = ref(false)
-const loaded = ref(false)
-
-async function loadList(opts: { append?: boolean; silent?: boolean } = {}): Promise<void> {
-  loading.value = true
-  try {
-    const page = await listConflicts(
-      workspaceId.value,
-      {
-        limit: PAGE_LIMIT,
-        status: statusFilter.value,
-        ...(opts.append && nextCursor.value ? { cursor: nextCursor.value } : {}),
-      },
-      { silent: opts.silent },
-    )
-    const fresh = page.items ?? [] // 生成类型 items 可选
-    conflicts.value = opts.append ? [...conflicts.value, ...fresh] : fresh
-    nextCursor.value = page.next_cursor ?? null
-  } catch {
-    // 失败已由全局拦截器 toast（silent 时为 SSE 防抖刷新，不打扰）。
-  } finally {
-    loading.value = false
-    loaded.value = true
-  }
-}
+// 列表分页：失败由全局拦截器 toast（silent 时为 SSE 防抖刷新，不打扰）。
+const {
+  items: conflicts,
+  cursor: nextCursor,
+  loaded,
+  loading,
+  load: loadList,
+  loadMore,
+  reset: resetList,
+} = useCursorList<DocumentConflictDto>((cursor, opts) =>
+  listConflicts(
+    workspaceId.value,
+    {
+      limit: PAGE_LIMIT,
+      status: statusFilter.value,
+      ...(cursor ? { cursor } : {}),
+    },
+    { silent: opts.silent },
+  ),
+)
 
 function setStatus(next: StatusFilter): void {
   if (statusFilter.value === next) return
   statusFilter.value = next
-  nextCursor.value = null
+  nextCursor.value = null // 切换后旧游标失效；失败时不残留「加载更多」
   void loadList()
 }
 
@@ -147,9 +137,7 @@ async function loadDetail(opts: { silent?: boolean } = {}): Promise<void> {
 // delete 意图工件（delete-vs-edit 的 ours 侧）：服务端 ours_hash omitted、
 // base_hash 为空串（T4 定义，document/dto.go 注释），ours_content 为空串。
 // schema 侧两类字段均可选/可空，判据 = ours_hash 缺失。
-const isDeleteIntent = computed(
-  () => !!detail.value && (detail.value.ours_hash === undefined || detail.value.ours_hash === ''),
-)
+const isDeleteIntent = computed(() => !!detail.value && detail.value.ours_hash === undefined)
 
 const isOpen = computed(() => detail.value?.status === 'open')
 
@@ -166,7 +154,8 @@ const resolving = ref<ConflictResolution | null>(null)
 const resolveDialog = ref<{ mode: 'merged' | 'manual' } | null>(null)
 const resolveDraft = ref('')
 
-const draftValid = computed(() => resolveDraft.value.length > 0)
+// trim 口径：纯空白视为空内容（服务端 content 必填；空文档应走删除流程）。
+const draftValid = computed(() => resolveDraft.value.trim().length > 0)
 
 // merged 预填推送方内容（ours 为删除意图时退服务端当前——合并的起点是待落地
 // 一侧）；manual 预填服务端当前（人工定稿从现状出发）。均可自由改写。
@@ -202,7 +191,6 @@ async function doResolve(resolution: ConflictResolution, content?: string): Prom
 
 // ---- 展示辅助 ----
 
-const fmtTime = (iso: string): string => new Date(iso).toLocaleString()
 // theirs_hash / ours_hash 在生成类型中可选（ours 对 delete 意图省略）。
 const shortHash = (hash: string | null | undefined): string => (hash ? `${hash.slice(0, 14)}…` : '—')
 
@@ -223,9 +211,7 @@ onMounted(() => {
 })
 
 watch(workspaceId, () => {
-  conflicts.value = []
-  nextCursor.value = null
-  loaded.value = false
+  resetList()
   statusFilter.value = 'open'
   selectedId.value = ''
   detail.value = null
@@ -321,7 +307,7 @@ watch(
               size="sm"
               class="self-start"
               :disabled="loading"
-              @click="loadList({ append: true })"
+              @click="loadMore"
             >
               加载更多
             </Button>

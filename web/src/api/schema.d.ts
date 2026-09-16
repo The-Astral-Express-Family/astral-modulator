@@ -926,7 +926,7 @@ export interface components {
         DateTimeOrNull: string | null;
         LeaseOrNull: components["schemas"]["Lease"] | null;
         /** @enum {string} */
-        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TASK_LEASE_EXPIRED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR" | "NOT_IMPLEMENTED";
+        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TASK_LEASE_EXPIRED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
         ErrorEnvelope: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1341,6 +1341,12 @@ export interface components {
             /** @description 见 docs/architecture.md §10 scope 词表 */
             scopes: string[];
             expires_at?: components["schemas"]["DateTimeOrNull"];
+            /**
+             * @description 授权分流（round 38 补录）：非空 = 在该 workspace 内以 agent:manage
+             *     签发（owner/maintainer）；空/缺省 = 平台级，要求 platform:credentials:manage。
+             *     workspace 轴的管理界面（MembersView）应传当前 workspace_id。
+             */
+            workspace_id?: string;
         };
         CredentialIssued: {
             credential_id: components["schemas"]["Id"];

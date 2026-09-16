@@ -19,13 +19,14 @@ import { getTask, searchTasks } from '@/api/modules/task'
 import { listMembers } from '@/api/modules/workspace'
 import type { Member, TaskSearchHit } from '@/api/types'
 import { useSessionStore } from '@/stores/session'
+import { useCursorList } from '@/composables/useCursorList'
 import { useEventStream } from '@/composables/useEventStream'
-import type { SseState } from '@/composables/useEventStream'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
+import { fmtTime, shortId } from '@/lib/format'
+import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
 import { Badge } from '@/components/ui/badge'
-import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
@@ -44,12 +45,6 @@ const PAGE_LIMIT = 50
 
 const { state: sseState } = useEventStream(workspaceId, { onEvent: onSseEvent })
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
-
-const SSE_VARIANTS: Record<SseState, BadgeVariants['variant']> = {
-  connecting: 'secondary',
-  open: 'default',
-  closed: 'outline',
-}
 
 function onSseEvent(env: { type: string }): void {
   if (env.type !== 'message.created') return
@@ -74,7 +69,6 @@ const memberNames = computed(() => {
   return m
 })
 
-const shortId = (id: string): string => id.slice(0, 12) + '…'
 function memberName(id: string | null | undefined): string {
   if (!id) return '—'
   return memberNames.value.get(id) ?? shortId(id)
@@ -90,10 +84,6 @@ const MODES = [
 
 // ---- 视角一：动态流（最新在前；target_id 服务端过滤 + 类型客户端分拣）----
 
-const feedItems = ref<MessageDto[]>([])
-const feedCursor = ref<string | null>(null)
-const feedLoading = ref(false)
-const feedLoaded = ref(false)
 const typeFilter = ref<'all' | MessageTargetType>('all')
 const actorFilter = ref('') // '' = 全部对象
 
@@ -104,28 +94,27 @@ const TYPE_CHIPS = [
   { value: 'task', label: '任务' },
 ] as const
 
-async function loadFeed(opts: { append?: boolean; silent?: boolean } = {}): Promise<void> {
-  feedLoading.value = true
-  try {
-    const page = await listMessages(
-      workspaceId.value,
-      {
-        limit: PAGE_LIMIT,
-        ...(actorFilter.value ? { target_id: actorFilter.value } : {}),
-        ...(opts.append && feedCursor.value ? { cursor: feedCursor.value } : {}),
-      },
-      { silent: opts.silent },
-    )
-    const items = page.items ?? [] // 生成类型 items 可选（allOf 合并形态）
-    feedItems.value = opts.append ? [...feedItems.value, ...items] : items
-    feedCursor.value = page.next_cursor
-  } catch {
-    // 失败已由全局拦截器 toast（silent 时为 SSE 防抖刷新，不打扰）。
-  } finally {
-    feedLoading.value = false
-    feedLoaded.value = true
-  }
-}
+// 动态流分页：最新在前，append 追加更早；失败由全局拦截器 toast（silent
+// 时为 SSE 防抖刷新，不打扰）。
+const {
+  items: feedItems,
+  cursor: feedCursor,
+  loaded: feedLoaded,
+  loading: feedLoading,
+  load: loadFeed,
+  loadMore: loadMoreFeed,
+  reset: resetFeed,
+} = useCursorList<MessageDto>((cursor, opts) =>
+  listMessages(
+    workspaceId.value,
+    {
+      limit: PAGE_LIMIT,
+      ...(actorFilter.value ? { target_id: actorFilter.value } : {}),
+      ...(cursor ? { cursor } : {}),
+    },
+    { silent: opts.silent },
+  ),
+)
 
 const visibleFeedItems = computed(() =>
   typeFilter.value === 'all'
@@ -136,33 +125,31 @@ const visibleFeedItems = computed(() =>
 // ---- 视角二：任务线程（时间正序阅读序）----
 
 const threadTask = ref<TaskSearchHit | null>(null)
-const threadItems = ref<MessageDto[]>([])
-const threadCursor = ref<string | null>(null)
-const threadLoading = ref(false)
-const threadLoaded = ref(false)
 
-async function loadThread(opts: { append?: boolean; silent?: boolean } = {}): Promise<void> {
+// 线程分页：时间正序阅读序，append 追加更新（服务端排序方向与 feed 相反）。
+const {
+  items: threadItems,
+  cursor: threadCursor,
+  loaded: threadLoaded,
+  loading: threadLoading,
+  load: loadThreadPage,
+  loadMore: loadMoreThread,
+  reset: resetThread,
+} = useCursorList<MessageDto>((cursor, opts) => {
   const task = threadTask.value
-  if (!task) return
-  threadLoading.value = true
-  try {
-    const page = await listTaskMessages(
-      task.id,
-      {
-        limit: PAGE_LIMIT,
-        ...(opts.append && threadCursor.value ? { cursor: threadCursor.value } : {}),
-      },
-      { silent: opts.silent },
-    )
-    const items = page.items ?? [] // 生成类型 items 可选（allOf 合并形态）
-    threadItems.value = opts.append ? [...threadItems.value, ...items] : items
-    threadCursor.value = page.next_cursor
-  } catch {
-    // 失败已由全局拦截器 toast。
-  } finally {
-    threadLoading.value = false
-    threadLoaded.value = true
-  }
+  return task
+    ? listTaskMessages(
+        task.id,
+        { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+        { silent: opts.silent },
+      )
+    : Promise.resolve({ items: [], next_cursor: null })
+})
+
+// 线程视角前置：未选任务时不动状态机（loaded 不置位、不发请求）。
+async function loadThread(opts: { append?: boolean; silent?: boolean } = {}): Promise<void> {
+  if (!threadTask.value) return
+  await loadThreadPage(opts)
 }
 
 // 任务搜索选择器（线程视角与发送表单各一份实例，共用实现）。
@@ -195,9 +182,7 @@ function selectThreadTask(hit: TaskSearchHit): void {
   threadPicker.query.value = ''
   threadPicker.hits.value = []
   threadTask.value = hit
-  threadItems.value = []
-  threadCursor.value = null
-  threadLoaded.value = false
+  resetThread()
   // 发送面顺势对准该任务（仍可改发广播/私信）。
   sendTarget.value = 'task'
   sendTaskId.value = hit.id
@@ -210,9 +195,7 @@ function openThreadFromFeed(msg: MessageDto): void {
   if (msg.target_type !== 'task') return
   mode.value = 'thread'
   threadTask.value = { ...emptyTask(), id: msg.target_id, title: '加载中…' }
-  threadItems.value = []
-  threadCursor.value = null
-  threadLoaded.value = false
+  resetThread()
   void loadThread()
   getTask(msg.target_id, { silent: true })
     .then((t) => {
@@ -323,7 +306,6 @@ function targetLabel(msg: MessageDto): string {
 }
 
 const isOwn = (msg: MessageDto): boolean => msg.sender_id === session.actor?.id
-const fmtTime = (iso: string): string => new Date(iso).toLocaleString()
 
 // ---- 生命周期 ----
 
@@ -348,15 +330,11 @@ watch(actorFilter, () => {
 })
 
 watch(workspaceId, () => {
-  feedItems.value = []
-  feedCursor.value = null
-  feedLoaded.value = false
+  resetFeed()
   typeFilter.value = 'all'
   actorFilter.value = ''
   threadTask.value = null
-  threadItems.value = []
-  threadCursor.value = null
-  threadLoaded.value = false
+  resetThread()
   sendTarget.value = 'workspace'
   sendActorId.value = ''
   sendTaskId.value = ''
@@ -461,7 +439,7 @@ watch(workspaceId, () => {
             size="sm"
             class="self-start"
             :disabled="feedLoading"
-            @click="loadFeed({ append: true })"
+            @click="loadMoreFeed"
           >
             加载更早的消息
           </Button>
@@ -557,7 +535,7 @@ watch(workspaceId, () => {
               size="sm"
               class="self-start"
               :disabled="threadLoading"
-              @click="loadThread({ append: true })"
+              @click="loadMoreThread"
             >
               加载更新的消息
             </Button>
