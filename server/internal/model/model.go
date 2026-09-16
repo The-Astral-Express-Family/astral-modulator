@@ -19,8 +19,8 @@ type Actor struct {
 	PlatformRole string `gorm:"size:16"`
 	// DisabledAt 非 nil = 被平台管理员停用（round 34）；认证管线据此拒绝。
 	DisabledAt *time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 	// Human 本地登录凭证在 human_auth 表（D6）；OIDC subject 字段后续迁移再加。
 }
 
@@ -190,6 +190,48 @@ type TaskTag struct {
 }
 
 func (TaskTag) TableName() string { return "task_tags" }
+
+// Document 见 00005_documents.sql / architecture §16、docs/sync-semantics.md。
+// (workspace_id, path) 唯一；revision 由应用层在写路径显式 +1（同 Task 的 D5 约定）。
+// DeletedAt 见 00015_documents_tombstone.sql：非 nil = tombstone，manifest 默认
+// 排除、include_deleted=true 才返回。tombstone 语义由应用层手动控制，刻意不用
+// gorm.DeletedAt（其隐式过滤与自动写入会和 get/manifest 的显式取舍、复活路径冲突）。
+type Document struct {
+	ID          string `gorm:"primaryKey;size:40"` // doc_ 前缀
+	WorkspaceID string `gorm:"uniqueIndex:uq_documents_ws_path;index:idx_documents_workspace;size:40"`
+	// Path 服务端 canonicalize（document/paths.go），存储精确原文；大小写冲突
+	// 由 push 前置检查拒绝（round 38 R1），库层不做 LOWER 唯一索引。
+	Path        string `gorm:"uniqueIndex:uq_documents_ws_path"`
+	Revision    int64
+	ContentHash string // 'sha256:<hex>' 小写，服务端对原始 UTF-8 bytes 重算
+	Content     string // UTF-8 only；MVP 直接入库，不引对象存储
+	UpdatedBy   string `gorm:"size:40"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time `gorm:"index:idx_documents_workspace"`
+	DeletedAt   *time.Time
+}
+
+func (Document) TableName() string { return "documents" }
+
+// DocumentConflict 见 00005_documents.sql：push 的 base_revision 与服务端当前
+// revision 不一致时落冲突工件；resolution/resolved_by/resolved_at 由 resolve
+// 端点同事务写入（open = resolved_at IS NULL，读路径派生，不落 status 列）。
+type DocumentConflict struct {
+	ID           string `gorm:"primaryKey;size:40"` // cfl_ 前缀
+	WorkspaceID  string `gorm:"index:idx_conflicts_workspace;size:40"`
+	Path         string
+	BaseRevision int64
+	BaseHash     string
+	OursJSON     []byte `gorm:"type:jsonb"` // push 方内容
+	TheirsJSON   []byte `gorm:"type:jsonb"` // 服务端当前内容
+	// Resolution ∈ ours|theirs|merged|manual（PG CHECK 钉死）；NULL = 未解决。
+	Resolution *string
+	ResolvedBy *string    `gorm:"size:40"`
+	ResolvedAt *time.Time `gorm:"index:idx_conflicts_workspace"`
+	CreatedAt  time.Time
+}
+
+func (DocumentConflict) TableName() string { return "document_conflicts" }
 
 // OutboxEvent 见 00006_outbox.sql / architecture §19。
 // 业务事务内 INSERT；dispatcher 读取后置 sent_at 并推给 SSE hub。
