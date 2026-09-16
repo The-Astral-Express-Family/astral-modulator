@@ -1,0 +1,12 @@
+{
+  "limits": {
+    "source": { "warn": 600, "fail": 900 },
+    "test":   { "warn": 1000, "fail": 1500 },
+    "doc":    { "warn": 600, "fail": 900 }
+  },
+  "allowlist": {
+    "TODO-archive.md": "历史归档卷，TODO.md 规定只增不改；拆分即违反归档约定（清偿：不适用）",
+    "docs/architecture.md": "架构总册，被代码注释大量章节锚引（§16/§22/§6.10 等），拆分会破坏锚点（清偿：G4 时若超过 1500 行再评估拆分）"
+  },
+  "ignore": []
+}
