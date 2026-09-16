@@ -6,6 +6,7 @@ package app
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/workspace"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ratelimit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/webdist"
 )
 
 // WellKnown 是 GET /.well-known/astral 的响应（architecture §7）。
@@ -161,8 +163,35 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 		})
 	})
 
-	// TODO(phase-6): 生产模式把 web/dist 挂到根路径（同源部署，去 CORS）。
+	// 生产同源托管（S6-1）：`make web-dist` 把 web/dist 构建产物拷入
+	// server/webdist/dist（go:embed 编译期嵌入，见 webdist 包）后，根级
+	// 未匹配的 GET 交给静态文件服务 + SPA fallback（未命中回 index.html，
+	// 供前端路由刷新/深链）。挂在根 NotFound 兜底而非注册 /* 通配路由：
+	// 上方 /api/v1、/.well-known/astral、/healthz、/readyz 等具体路由必然
+	// 先行命中（/api/v1 子树内未知路径由其自身 404 envelope 兜底），且
+	// 契约门（openapi_contract_test 的 chi.Walk）只见具体路由，静态托管
+	// 对公网契约不可见。保留前缀与非 GET 维持 404——它们不属于前端。
+	// dist 仅 .gitkeep 占位（未执行 web-dist）时不挂载，行为与本特性之前一致。
+	if webdist.Available() {
+		spa := webdist.Handler()
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == http.MethodGet && !reservedPath(req.URL.Path) {
+				spa.ServeHTTP(w, req)
+				return
+			}
+			http.NotFound(w, req)
+		})
+	}
+
 	return r
+}
+
+// reservedPath 判定服务保留前缀：/api、/.well-known、/healthz、/readyz。
+// 具体端点已在 NewRouter 注册、先于 NotFound 命中；此处兜底其未知子路径
+// （如 /api/v2、/.well-known/other），不把 SPA 壳喂给接口探测。
+func reservedPath(p string) bool {
+	return p == "/healthz" || p == "/readyz" || p == "/api" || p == "/.well-known" ||
+		strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/.well-known/")
 }
 
 // actorLimitKey 提取限流记账用的主体标识（S5：认证后 = actor_id）。

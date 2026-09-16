@@ -52,6 +52,8 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
+# server/Makefile 是手写构建辅助（round 38 S6-1），非 CMake 生成物，需入库
+!server/Makefile
 install_manifest.txt
 compile_commands.json
 
@@ -76,6 +78,9 @@ server/astral-server
 server/astral-server.exe
 server/*.test
 server/coverage.out
+# webdist 构建产物（make web-dist 拷入；.gitkeep 占位必须入库，勿删）
+server/webdist/dist/*
+!server/webdist/dist/.gitkeep
 
 # ---- Web ----
 web/node_modules/

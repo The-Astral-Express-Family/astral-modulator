@@ -104,8 +104,9 @@ func Logger(log *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // CORS 仅供 Web GUI 开发期使用（Vite dev server 跨域直连后端）。
-// 生产环境 Web 与 API 同源部署时不应配置任何允许来源。
-// TODO(phase-6): 生产默认关闭；按部署文档确认是否需要凭据跨域。
+// S6-1 已落地同源托管（server/webdist 嵌入 web/dist，根路径静态服务），
+// 生产 Web 与 API 同源、无任何跨域；关闭路径 = 不设 ASTRAL_DEV_CORS_ORIGINS
+// （config.Load 解析为空列表时 NewRouter 不挂本中间件，见 app/router.go 装配处）。
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(allowedOrigins))
 	for _, o := range allowedOrigins {
