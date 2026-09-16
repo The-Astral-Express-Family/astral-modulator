@@ -46,9 +46,13 @@ security 定义与 auth 模块实现。
 - 所有非 2xx JSON 响应使用统一错误 envelope，稳定 `error.code` 枚举
   见 `api/schemas/error.json`；`message` 面向人类，客户端基于 `code` 处理；
 - 分页使用不透明 cursor（`{items, next_cursor}`），不暴露 offset 语义。
-  例外：presence、documents manifest、conflicts、audit 四个列表端点当前
-  返回内联 `{items}`（无 next_cursor，服务端不分页）；openapi 契约与此一致，
-  统一分页化登记为待办（TODO.md §11）。
+  第 37 轮起全部列表端点信封统一（documents manifest / conflicts / audit
+  均带真实游标；presence 成员规模有界，`next_cursor` 恒 null 不做翻页），
+  契约见 openapi 各列表端点；
+- 错误码配对规则（第 37 轮裁决）：400 VALIDATION_FAILED=形状/约束；
+  403 INSUFFICIENT_SCOPE=权限；409+专用码=状态/唯一性冲突；
+- 长度上限一律按 **UTF-8 字节数**计；openapi `maxLength` 仅参考展示，
+  不作精确边界。
 
 ## 4. 乐观并发与幂等
 

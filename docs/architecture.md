@@ -217,6 +217,12 @@ projects/<workspace-id>/
 
 组织记忆包含跨项目通用信息与开发约定；项目记忆包含当前 Workspace 约定、现状、决策与待办背景。
 
+**M1 裁决（2026-09-16，round 37）**：Memory 不设独立公网 API——
+
+- 项目记忆 = documents 的保留路径前缀 `memory/**`，经既有 `/workspaces/{id}/documents/*` 端点读写，前缀内改用 `memory:read`/`memory:write` scope（其余路径用 `document:*`）；
+- 组织记忆 = 保留 workspace `org-memory`（bootstrap 注册惰性种子 + owner membership，此后经邀请/加成员进入），同样走 documents 端点；
+- 两层共用同一张 documents 表（migration 00005 原设计），不开第二套文档协议。
+
 Memory Agent 只能根据服务端授予 scope 工作，不拥有数据库超级权限，也不能绕开 audit。
 
 ### 6.6 Document Sync
@@ -441,7 +447,7 @@ owner
 上述 Role/Scope 是 workspace 轴；平台全局轴由 `actors.platform_role` 表达：
 
 ```text
-admin   — 平台管理员（GlobalScopesFor → platform:users:read|manage、platform:credentials:manage）
+admin   — 平台管理员（GlobalScopesFor → platform:users:read|manage、platform:credentials:manage、platform:audit:read）
 user    — 普通 human（无平台 scope；workspace 内能力仍按成员角色计算）
 agent   — 固化 actors.kind='agent'（永无平台 scope；能力只由 credential scopes 决定）
 service — 固化 actors.kind='service'
@@ -684,6 +690,10 @@ event/activity window
 
 可设置人工 review policy，尤其是组织记忆。
 
+MVP 裁决（round 37）：上述工作流是**客户端行为**——Memory Agent 只是一个持有
+`memory:write` credential 的 agent actor，经 documents 端点读写；服务端不提供
+整理触发/审阅接口（audit + 事件流已覆盖可审计性），真实整理 Agent 出现后再评估。
+
 ## 16. Document Sync
 
 受管文件只支持 UTF-8 text/Markdown。
@@ -707,6 +717,14 @@ updated_at
 - 能安全三方合并：生成新 revision；
 - 无法安全合并：返回 conflict artifact；
 - 禁止 last-write-wins 静默覆盖。
+
+**round 37 裁决（MVP 收紧）**：服务端**不做自动三方合并**——push 时 base 与
+当前版本不匹配一律落 `document_conflicts` 并返回 `409 DOCUMENT_CONFLICT`
+（含 conflict_id 与当前 revision/hash）；客户端可在本地合并后经
+`resolve(resolution=merged|manual, content=…)` 提交最终内容。删除为版本化
+tombstone（`DELETE ?base_revision=`，远端已变更同样落冲突工件）；不建文档
+revision 历史表（冲突行保存双方全文，audit 记录每次 push 的 hash）。
+语义细则见 [sync-semantics.md](sync-semantics.md)。
 
 服务端 path 必须 canonicalize 并阻止：
 
@@ -1053,6 +1071,9 @@ breaking change 直接升 protocol_version + 发布新快照，两仓库锁步�
 - Markdown sync；
 - conflict。
 
+> 状态（round 37）：契约与 501 桩已定稿（M1 已裁决，见 §6.5/§16 与
+> sync-semantics.md），实施计划见 TODO.md §2 S1-S2。
+
 ### Phase 6：Web GUI / hardening
 
 - GUI；
@@ -1061,6 +1082,10 @@ breaking change 直接升 protocol_version + 发布新快照，两仓库锁步�
 - rate limit；
 - deployment；
 - cross-version contract test。
+
+> 状态（round 37）：登录/审批/任务树/裁决队列/admin 用户管理等视图已落地；
+> 余量（audit、rate limit、dist 托管、类型生成、其余 GUI 视图）实施计划见
+> TODO.md §2 S4-S7。config TOML 已裁决裁剪（环境变量唯一通道）。
 
 ## 28. 明确不做
 

@@ -9,10 +9,9 @@
 > 4 Presence/Event → 5 Memory/Sync → 6 GUI/Hardening）。本文是同一工作的
 > **里程碑视图**，用里程碑名而非编号，避免与实施 Phase 混淆。
 >
-> **当前进度**以根目录 [TODO.md](../TODO.md) 为准（实施 Phase 0-4 已落地，
-> 含协议 v2 容器化任务树与 CLI 的 auth/todo/tags/msg 命令族；Phase 5
-> Memory/Sync 未开工（待裁决 M1）；Phase 6 已有登录/审批/任务树/裁决队列
-> 等视图，rate limit 与 audit.list 等硬化项未做）。
+> **当前进度**以根目录 [TODO.md](../TODO.md) 为准（round 37 起 TODO.md 为
+> 一次性实施总纲：Phase 0-4 已落地；Phase 5 契约已定稿（M1 已裁决）待实施；
+> Phase 6 部分视图已落地，余量与实施顺序见 TODO.md §2 S1-S8）。
 
 ## 里程碑：Design Baseline（已完成）
 

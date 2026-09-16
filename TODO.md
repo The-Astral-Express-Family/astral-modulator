@@ -1,247 +1,374 @@
-# 脚手架 TODO 登记簿
+# Astral Modulator 实施总纲（TODO v2）
 
-> 本文件是脚手架阶段的**任务与契约登记中心**，只保留「现在需要看」的内容：
-> 裁决、各 Phase 剩余项、契约台账、待办。历史（轮次详录、已完成实施清单、
-> CLI 联调清单）在 [TODO-archive.md](TODO-archive.md)，只增不改。
-> 代码内 `TODO(phase-x)` 注释负责局部上下文，本文件负责全局视图
-> （实施 Phase 划分见 docs/architecture.md §27；roadmap.md 是里程碑视图）。
+> **本文件当前的角色**（round 37 重写）：交付给自动化实现者的**一次性完整实施计划**。
+> 截至 round 37：Phase 0-4 已全部落地验收；剩余工作 = Phase 5（Memory/Document
+> Sync）+ Phase 6（GUI/Hardening）全部余量，已拆成按依赖排序的阶段 S1-S8，
+> 每项自带决策依据与验收标准。相关契约与 501 桩已由 round 37 先行铺好。
 >
-> 维护规则：
-> - 完成一项就划掉并注明轮次，不要静默删除（保留裁决痕迹）；
-> - 轮次详录写进 [TODO-archive.md](TODO-archive.md) §A 卷末，本文件 §0 只加一行索引；
-> - §11 条目编号是稳定引用 ID（代码注释与 docs 会以「§11 第 N 项」引用）：
->   完成后压缩为单行保留编号，不删除、不重排；
-> - 新增契约（路径/错误码/事件/ID 前缀/env 变量）必须同步登记到「契约变更登记」（§9）；
-> - `grep -rn "TODO(phase" server web` 可找到全部代码内待办。
+> **执行模式**：按 §2 阶段顺序一次性完整实现；每阶段收尾跑 §0.2 验证命令，
+> 全绿才进入下一阶段；所有设计问题已有结论（§1），**不再讨论、不改裁决**；
+> 遇本文件与代码/openapi/docs 冲突时以 `api/openapi.yaml` 为准，并把冲突
+> 记到 §9 表末备注行。
+>
+> 实现完成后回到人工维护：勾选 §2 各项，轮次详录写入
+> [TODO-archive.md](TODO-archive.md) §A 卷末。历史卷（轮次详录、已完成实施
+> 清单、CLI 联调清单、旧登记簿全文）都在 TODO-archive.md，**只增不改**。
 
-## 0. 已完成（轮次索引）
+## 0. 硬约束与验证命令
 
-> 详录（实施明细、撞车裁决、commit 对照）见 [TODO-archive.md](TODO-archive.md) §A；
-> 归档不删史，只移不改。
+### 0.1 不可破坏的约定（违反任何一条即返工）
 
-- 第 1 轮（脚手架，2026-09-07 上午）
-- 第 2 轮（2026-09-07 下午）：Phase 1 Auth + Phase 2 Workspace + Phase 3 spike 核心 全量实装
-- 第 3 轮（2026-09-07 晚）：astral-cli 对接轮
-- 第 4 轮（2026-09-07 深夜）：代码/逻辑/文档 卫生清理
-- 第 5 轮（2026-09-07 深夜）：Phase 3 收尾 —— 搜索 / Tags / 事件统一
-- 第 6 轮（2026-09-09）：SSE 断线重放 + 幂等 + 一致性检查
-- 第 7 轮（2026-09-09）：代码 / 逻辑 / 文档 卫生轮（双仓库）
-- 第 8 轮（2026-09-09）：T-ws-6 approvals 状态机（promote_owner）
-- 第 9 轮（2026-09-09）：设计复审落地 —— D9/D10/D11 + 撤销断流
-- 第 10 轮（2026-09-09）：CI 修复 + 代码/逻辑卫生轮（双仓库）
-- 第 11 轮（2026-09-10）：astral-cli auth 链路实装（消费协议快照 v1）
-- 第 12 轮（2026-09-10）：Web approval 裁决视图 + device 审批页联调收尾
-- 第 13 轮（2026-09-10）：Web 任务树视图（§11 第 4 项）
-- 第 14 轮（2026-09-10）：astral-cli todo 命令族实装（§11 第 8 项）
-- 第 15 轮（2026-09-10）：v2 server 轮 —— 容器化任务树（D15，破坏性）
-- 第 16 轮（2026-09-10）：v2 CLI 轮 —— 快照 v2 + todo 适配（astral-cli）
-- 第 17 轮（2026-09-10）：v2 web 轮 —— 任务树逐容器懒加载
-- 第 18 轮（2026-09-10）：API 冗余清理（外部 agent 实施，本端验收）
-- 第 19 轮（2026-09-10）：CLI tags/msg 命令实装（astral-cli，基于 v2）
-- 第 20 轮（2026-09-12）：server task thread messages + actor DTO 修正
-- 第 21 轮（2026-09-12）：双仓库卫生轮 —— 冗余清理 + 补丁化收敛 + 文档重写
-- 第 22 轮（2026-09-12）：SSE workspace 级授权（安全）+ CLI event listen 端到端落地
-- 第 23 轮（2026-09-13）：双线并行开发整合（merge origin/main）+ 全栈 E2E 回归
-- 第 24 轮（2026-09-13）：三仓逻辑拉直轮 —— 单一抽象收编、深嵌套拆平
-- 第 25 轮（2026-09-13）：任务树视图 UI 重设计（双栏，round13 分支移植）
-- 第 26 轮（2026-09-13）：任务树 UX 打磨 —— 骨架屏 + 过渡动画 + 事件闪烁
-- 第 27 轮（2026-09-13）：设备审批页独立布局 + Device Flow 全链路真机验收
-- 第 28 轮（2026-09-13）：设备登录 VS Code 式直达 —— 验证链接绝对化 + 审批页单步确认
-- 第 29 轮 B 线（2026-09-13，modenicheng）：CLI 同步轮 —— actor profile 消费 + 协议快照 v2.1 刷新
-- 第 30 轮（2026-09-13，Lidozs55）：邀请注册 P2（web）—— /register 页 + 邀请管理卡
-- 第 31 轮（2026-09-13，Lidozs55）：server 样板收敛 —— store.First 单一出口
-- 第 32 轮（2026-09-13，modenicheng）：侧栏上下文升级 + 演示身份守卫修复
-- 第 32 轮 B 线（2026-09-13，Lidozs55）：卫生轮 —— 死代码清除、重复实现收拢、文档校准
-- 第 33 轮（2026-09-13，modenicheng）：平台角色基建 + 全局凭证收口
-- 第 34 轮（2026-09-13，modenicheng）：admin 用户管理（server + web）
-- 第 33 轮 B 线（2026-09-14，Lidozs55）：全仓审查调优轮 —— 代码/逻辑/契约/架构/端点
-- 第 36 轮（2026-09-16，Lidozs55）：登记簿瘦身归档 —— 轮次详录/已完成清单/CLI 联调清单移入 TODO-archive.md
+1. **契约唯一事实来源是 `api/openapi.yaml`**：路径、错误码、响应形状与 openapi
+   一字不差；改契约必须两侧同步并由契约门验证。
+2. **三个自动契约门**（`server/internal/app/openapi_contract_test.go`）：
+   路由↔openapi 双向一致；openapi ErrorCode enum ↔ `internal/httpx/errors.go`
+   常量一致；事件类型 `outbox/types.go` ↔ `api/schemas/event.json` ↔
+   `web/src/api/sse.ts` 三方一致。**go test 缓存不感知 openapi.yaml 变化**，
+   验证必须 `go test ./internal/app/ -count=1`。
+3. 所有非 2xx 走 `internal/httpx` 错误 envelope（稳定 `error.code`）。新增错误码
+   = 同步改 httpx/errors.go + openapi ErrorCode enum + `api/schemas/error.json`。
+4. 业务写操作 = 领域表变更 + audit + outbox **同事务**（三件套）；领域事件一律
+   经 `outbox.EmitTx`。
+5. schema 变更先写 goose migration（`server/migrations/`）。sqlite 单测不走
+   goose：新表/新列必须**同时**加进 `internal/model/model.go` 与
+   `internal/testsupport/db.go` 的 AutoMigrate 清单。
+6. 生产 schema 禁止 GORM AutoMigrate；migration 必须在 PostgreSQL 方言下可执行。
+7. secrets 只来自环境变量 / gitignored `.env`，绝不入库、不进日志（redaction
+   matcher 见 docs/architecture.md §23）。
+8. `docs/看我看我.md` 人工维护，只读，不修改不删减。
+9. 不引入新第三方依赖（所有任务标准库 + 既有依赖可完成）；不引入 UI 组件库（§1.2 U1）。
+10. 代码风格与既有模块一致：handler 只做编解码与编排；单行查询走 `store.First`
+    单一出口；DTO 与 model 分离（wire 一律 snake_case）。
+11. ID 一律经 `internal/ids` 生成；新增前缀须登记 §9。
+12. 长度校验口径 = **UTF-8 字节数**（§1.2 L1）；openapi `maxLength` 仅参考展示。
 
-## 1. 文档分歧裁决（脚手架已统一，实现时不要再摇摆）
+### 0.2 验证命令（每阶段收尾必须全绿）
 
-两份文档对同一端点写了不同路径。**api/openapi.yaml 是唯一事实来源**，
-以下为裁决结果与理由：
+```bash
+cd server && go vet ./... && go test ./... -count=1   # 含三个契约门
+make openapi-lint                                      # redocly lint api/openapi.yaml
+cd web && npm run build                                # S6-2 起必须
+```
 
-| # | 分歧点 | 裁决 | 理由 |
-|---|--------|------|------|
-| D1 | device flow 路径 | `POST /api/v1/auth/device/authorizations`、`POST /api/v1/auth/device/authorizations/{device_code}/token` | architecture.md §8.2 与 astral-cli 文档一致（2:1）；protocol.md §8 的 `/auth/device` 废弃 |
-| D2 | 身份自检端点 | `GET /api/v1/auth/me` | 同上；protocol.md §8 的 `/auth/session` 废弃 |
-| D3 | Tag 确认参数拼写 | `--confirm` | 文档 typo `--comfirm` 已在 architecture §14 明确不沿用 |
-| D4 | 乐观并发 | body 内 `expected_revision`（方案 A） | protocol.md §6 MVP 推荐方案 A，CLI JSON/事件流一致性好处理 |
-| D5 | revision 自增位置 | **应用层**（UPDATE 里显式 `revision = revision + 1`），不靠 PG 触发器 | 可移植 + 可测（sqlite 测试与 PG 生产行为一致）；migration 00003 的 bump 触发器已删除，同 workspace 父子触发器保留作纵深防御 |
-| D7 | task 搜索实现路径 | **Go 侧过滤排序**（RE2 regex + 字符 trigram 相似度），候选集结构化过滤后封顶 2000 行 | RE2 线性时间天然免疫 ReDoS（架构文档担心的 POSIX regex 拖库问题不存在）；MVP 规模下内存排序足够且 sqlite/PG 可移植可测。回迁 pg_trgm/POSIX SQL 的触发条件：单 workspace 任务量到万级或出现搜索延迟 SLO（实现隔离在 task/search.go，语义不变） |
-| D6 | Human 浏览器登录 MVP | **本地账号**（email+password, bcrypt）+ HttpOnly Cookie session | Device Flow 需要 Human 在浏览器完成登录才能闭环；OIDC/federation 是后续项（security.md 暂缓清单）。首个 human 账号通过 bootstrap 注册创建（仅当服务器无 human 时开放） |
-| D8 | approval 裁决人约束 | MVP 允许发起人**自批**（审批人须为 owner） | 单 owner workspace 若强制双人裁决，首位新 owner 永远无法产生（死锁）。approval 的 MVP 目标是显式生命周期 + TTL + 可审计，而非双人控制；收紧为「他人裁决」的触发条件：出现多 owner 的生产 workspace 或安全事件 |
-| D9 | agent 的 workspace 归属模型 | **不引入新绑定模型**：membership 行（人/agent 通用）与 credential 绑定（agent 专用）即既有两条真实路径；`createAgent` 同事务补 role='agent' 成员行；listAgents 取两路径并集 | 原计划「需 agent-workspace 绑定模型」是第三条平行路径，会让「谁在 workspace 里」出现三种事实来源；membership 本就是人 actor 的归属事实，agent 复用它即可。credential 绑定保持纯授权语义（scope 载体），不承担归属语义 |
-| D10 | session 绝对上限 | `MaxSessionLife=90d`（创建起算），`RefreshTTL=30d`（滑动） | 原两者同为 30d，轮换窗口可无限续命，绝对上限永不生效，与 architecture §8.3「生命周期上限从创建时刻算」矛盾。90d 给足跨季度长任务余量，同时封顶被盗 refresh 的最长寿命 |
-| D11 | tag 与 task 的关联 | `PUT/DELETE /tasks/{id}/tags/{tag_id}`；关联是任务修改：条件 revision bump + `task.updated` 事件；Task DTO 的 `tags` 仅 get/attach/detach/update 响应填充 | tags 故事在 round 5 只做了「建/删」，attach 链路缺失导致 task_tags 表、search?tag= 过滤、Task.tags 字段全部空转。revision bump 使 tag 变更纳入既有乐观并发与事件流，不新造事件类型 |
-| D14 | 全局「根 TODO」的归属 | **默认工作区约定**：`default/<user>/todo`——普通 workspace + membership 权限隔离；不引入「个人工作区」类型；按需显式创建（不做首次使用自动开荒）；`<user>` = 登录用户名（非 usr_id、非可变 display_name） | 任务必须归属协作边界（授权/事件/审计的锚点）；全局任务映射为「个人默认容器」模型零改动。服务端命名空间强制（`default/<user>/*` 仅 `<user>` 可建）列为后续收紧项，触发条件：出现抢注/滥用 |
-| D15 | 任务树读取模型（v2 破坏性重构） | **容器化**：凡容器（workspace/task），子任务集合统一为 `GET/POST /workspaces/{id}/children` 与 `GET/POST /tasks/{id}/children`（同参数 status/tag/assignee/limit/cursor，同响应，行内批量填充 tags + children_count）；**移除** `GET/POST /workspaces/{id}/tasks`（同路径改语义=隐性漂移，禁止）；平面查询归 `GET /workspaces/{id}/task-search`（原 search 路径废除；结构化与内容过滤平权，≥1 条件守卫保留，补 assignee）；TaskCreate 移除 parent_id；嵌套树端点**永不建**（将来真需要属纯增量，不破坏 v2） | 「默认=根层、参数=子层、flat=逃生门」让一个集合背三种语义，不优雅；客户端递归只换容器 id。开发期零兼容负担，protocol_version 1→2、快照 v2、CLI/Web 锁步适配；v2 落地前排队中的 CLI tags/msg 暂缓以免白干 |
-| D16 | 平台全局角色模型（admin/user/agent 三角色，round 33/34） | **固定平台角色 + 全局 scope 词表**：`actors.platform_role`（human ∈ admin/user；agent/service 固化 kind，CHECK 钉死）；`GlobalScopesFor` 代码内 bundle 与 workspace 轴 `RoleToScopes` 同构，授权一律 `RequireGlobal` 按最终 scope 判定（403 INSUFFICIENT_SCOPE，无 404 分支）。**不建权限表**（psql 式 GRANT/REVOKE 无第三方自定义角色需求，且与 workspace 层两套体系并存）；**不做裸 `role=="admin"` 硬判**（与 scope 哲学割裂，加第二特权角色要逐点改）。首 human 即 admin（bootstrap 同管线）；停用=disabled_at 准入闸门 + 会话撤销加速 | 平台层此前零角色：任意 human 可签发服务器级 credential（代码自标 TODO phase-2）是真缺口。复刻 workspace 轴既有模式成本最低——加新特权=加 scope 常量授予 admin，零 schema 变更；opaque token 每请求查库使角色/停用变更即时生效（对比 JWT claim 需等 access TTL） |
+gofmt：提交前 `gofmt -w .`；本 Windows 工作区 `gofmt -l` 有 CRLF 假阳性，
+以 `git diff` 是否引入格式变更为准。
 
-## 2. 待裁决契约
+### 0.3 仓库地图（实现时反复参照）
 
-> 2026-09-07 第 2 轮：A1/A2/A3 已裁决并实现（见下表“状态”）。
+```text
+api/openapi.yaml                    公网契约唯一事实来源（+ schemas/）
+server/cmd/astral-server            入口：配置、装配、生命周期
+server/internal/httpx               错误 envelope / 公共头 / 分页（ParseLimit/NewPage）
+server/internal/modules/<域>/       auth workspace task tag message presence event
+                                    audit admin document memory（后三者本轮实装）
+server/internal/outbox              领域事件词表 + EmitTx（写侧）
+server/internal/model + migrations  GORM 模型 + goose SQL（两者手工同步）
+server/tests/                       app 级 HTTP 集成测试（新端点的端到端测试放这里）
+web/src/{views,api,stores,...}      Vue3 SPA（axios 统一请求层 + 全局错误 toast）
+docs/                               architecture/protocol/sync-semantics/registration/...
+```
 
-| # | 问题 | 裁决 | 状态 |
-|---|------|------|------|
-| M1 | Memory 工作区公网 API 形状未定稿 | （未裁决）复用 documents 表 + 保留路径前缀，phase-5 前定 | **open** |
-| A1 | Device 轮询 pending 语义 | **按 RFC 8628**：token 端点对 pending 返回 `400 AUTHORIZATION_PENDING`、轮询过快返回 `400 SLOW_DOWN`（客户端应退避）；denied→`401 TOKEN_REVOKED` 语义不复用，用 `VALIDATION_FAILED`+details 或专用码见 openapi 注释 | ✅ 已实现 |
-| A2 | access token 校验路径 | **每请求查库**（比对 sha256 hash）；MVP 单体延迟可接受；缓存接口后续再加 | ✅ 已实现 |
-| A3 | Web 审批页 API | `GET /api/v1/auth/device/authorizations?user_code=`（需 human session）+ `POST .../{id}/approve`、`POST .../{id}/deny` | ✅ 已实现 |
-| A4 | ASTRAL_TOKEN 格式 | Agent credential secret 为 `astral_<43字符base64url>` 随机串；服务端按 sha256 hash 查 credentials 表校验；请求头仍为 `Authorization: Bearer astral_...` | ✅ 已实现 |
-| A5 | human 注册形式（多账号进入通道） | **一次性邀请码注册**（2026-09-13 用户裁决）：workspace 绑定的一次性邀请码（human session + `workspace:manage_members` 签发；角色限 viewer/contributor/maintainer，不含 owner），持码者经 web/CLI 注册并同事务建号+入伙；链接 `/register?code=` 为核心分发形式，SMTP 邮件邀请为衍生期；bootstrap 保留为冷启动首账号路径；注册成功即建立 web 会话。设计 docs/registration.md + ADR-0008，实施分期 §11 第 16-19 项 | ✅ P1 server 已实现（第 29 轮）；P2-P4 待做 |
-| T1 | task 删除/取消语义 | （未裁决，phase-3）MVP 暂不提供 DELETE，仅 cancelled 状态 | **open** |
-| S1 | snapshot.required 事件与 outbox 保留窗口 | **已裁决并实装**：保留窗口 24h（`event.RetentionWindow`，清扫器每小时清理）；游标超窗下发 `snapshot.required`（reason=cursor_expired）后断流；已纳入 event.json 契约 | ✅ 已实现 |
+## 1. 决策速查（全部已裁决，实现时不再讨论）
 
-## 3. Phase 1 — Auth（architecture §27 Phase 1）
+### 1.1 历史裁决（D/A/S 系列，一行结论；全文与理由见 TODO-archive.md §D）
 
-### 3.2 Phase 1 剩余（下轮）
+| # | 一行结论 |
+|---|---|
+| D1/D2/D3 | device flow 走 `/auth/device/authorizations` 两端点；身份自检 `/auth/me`；CLI 拼写 `--confirm` |
+| D4/D5 | 乐观并发 = body 内 `expected_revision`（409 REVISION_CONFLICT）；revision 应用层自增 |
+| D6 | human 浏览器登录 = 本地账号（bcrypt）+ HttpOnly Cookie session；bootstrap 开放首账号 |
+| D7 | task 搜索 = Go 应用层 RE2 + trigram，候选集封顶 2000；pg_trgm 仅规模触发后回迁 |
+| D8 | approval MVP 允许 owner 自批（单 owner 死锁规避） |
+| D9 | agent 归属 = membership 行 ∪ credential 绑定，无第三条路径 |
+| D10 | session 绝对上限 90d（创建起算）+ RefreshTTL 30d 滑动轮换 |
+| D11 | tag attach/detach 是任务修改：条件 revision bump + task.updated |
+| D14 | 全局根 TODO = 默认工作区约定 `default/<user>/todo` |
+| D15 | 任务树读取 v2 容器化：`<container>/children` 端点；平面查询归 task-search |
+| D16 | 平台角色 admin/user + 全局 scope bundle（GlobalScopesFor），无权限表 |
+| A1-A5 | device pending 按 RFC 8628；access token 每请求查库；审批三端点；ASTRAL_TOKEN=`astral_<43字符>`；邀请码注册 |
+| S1 | SSE outbox 保留窗口 24h；超窗 `snapshot.required` 断流 |
 
-- [ ] user_code 防枚举限流（HTTP 层，phase-6 一并做 rate limit）
-- [x] credential/session 撤销后主动断开 SSE 连接（第 9 轮实装：Hub 订阅携带
-      actor 身份，auth.OnRevoke → Hub.DisconnectActor，覆盖 session 撤族/
-      refresh 重放/credential 吊销/logout 四条路径）
-- [ ] 认证失败写 audit（Authenticate 中间件当前只拒不记；需先向 Service
-      注入 audit recorder）
-- [x] refresh 家族生命周期上限窗口测试加固（第 9 轮随 D10 补齐：89d 过 /
-      90d+1s 拒）
+### 1.2 本轮裁决（round 37，Lidozs55；实现按此执行）
 
-## 4. Phase 2 — Workspace（architecture §27 Phase 2）
+| # | 问题 | 结论 |
+|---|------|------|
+| M1 | Memory 公网 API 形状 | **不设独立 API**。项目记忆 = documents 保留前缀 `memory/**`，经既有 `/workspaces/{id}/documents/*` 端点读写，前缀内改用 memory:read/write scope；组织记忆 = 保留 workspace `org-memory`（bootstrap 注册惰性种子 + owner membership，见 S1-4），此后经邀请/加成员进入；memory agent 编排是客户端行为（architecture §15），服务端不建整理/审阅接口 |
+| T1 | task 删除/取消 | MVP **不提供 DELETE task**；取消走 status=cancelled（既有）；cancelled 非硬终态，允许显式改回（乐观并发保护乱序） |
+| P1 | push 双改处理 | **不做服务端自动三方合并**（diff3 选型关闭）：base 不匹配一律落 document_conflicts + 409 DOCUMENT_CONFLICT；客户端本地合并后经 resolve(merged/manual) 提交最终内容 |
+| P2 | 文档删除 | 版本化 tombstone：`DELETE ?base_revision=N`；远端已变更 → conflict artifact（delete-vs-edit）；对已删行且 base 匹配 → 幂等 204；对 tombstone push 且 base_revision=0 → 复活（revision 续增） |
+| P3 | 文档历史版本 | MVP 不建 revision 历史表：conflict 行已含双方全文，audit 记录每次 push 的 hash；历史窗口需求出现再扩 |
+| L1 | 长度校验单位 | 口径统一 = UTF-8 字节数。**既有端点上限数值与口径不动**（避免破坏合法输入），新端点一律字节口径并在协议文档标注 |
+| E1 | 错误码配对 | 400 VALIDATION_FAILED=形状/约束；403 INSUFFICIENT_SCOPE=权限；409+专用码=状态/唯一性冲突；一次性码错误维持现状（tag confirm 403 / 过期 409）。新端点一律按此表 |
+| A1' | message.send 审计 | **豁免**：messages 表自身即完整事实（作者/目标/时间）；audit 只记治理与安全动作（与 architecture §6.10 一致） |
+| F1 | fuzzy 0 分行 | fuzzy-only 查询剔除 0 分行（无共享 trigram = 无语义价值）；带 regex/结构化过滤时不过滤 |
+| G1 | 分页信封 | 全列表端点统一 `{items,next_cursor}`（契约 round 37 已铺）；presence 恒 null（成员规模有界） |
+| U1 | UI 框架 | 维持 Vue3 + 手写组件，不引入组件库（现有 10 视图已成型，引入=重写无收益） |
+| X1 | 范围裁剪 | SMTP 邮件邀请、CLI `astral register`（属 astral-cli 仓）、config TOML、pg_trgm 回迁、平台角色可选项全部移出本轮（§3） |
 
-✅ 全部落地，无遗留项（原 §4.1 实施清单见归档卷 §B）。
+### 1.3 Phase 5 关键既有语义（实装前必读）
 
-## 5. Phase 3 — TODO 树 / 搜索 / Tags（architecture §27 Phase 3）
+- documents/document_conflicts 表结构见 migration 00005；契约形状见 openapi
+  documents 段（manifest / get / put / delete / conflicts / resolve 全部已定稿）。
+- `content_hash` 统一 `sha256:<hex>`（小写十六进制），基于**原始 UTF-8 bytes**
+  重算（不重写换行）；CLI 本地 hash 必须与此一致——双端对接最易错点。
+- scope 判定入口 `auth.RequireWorkspace(r, svc, wsID, scope)`；memory/ 前缀 =
+  同一端点内按 path 前缀换 scope（单点实现见 S1-4）。
+- 事件 `document.updated` / `document.conflict` 已在词表预留（outbox/types.go），
+  实装时启用；**不新增事件类型**（resolve 落内容时发 document.updated）。
+- org workspace 种子不能放 migration（workspaces.created_by NOT NULL，届时无
+  actor），放 bootstrap 注册事务内（S1-4）。
+- httpx 已有：`ParseLimit`（缺省 50 上限 200）、`NewPage(items, nextCursor)`、
+  `NotFound/Invalid/Conflict` 错误构造、`NotImplemented` 501 桩。
 
-### 5.1 剩余
+## 2. 实施计划（S1-S8 按序执行）
 
-- [ ] pg_trgm 回迁路径（D7 触发条件：单 workspace 任务量到万级或搜索延迟 SLO；
-      语义不变，实现替换点在 task/search.go）
-- [ ] 裁决并登记 T1
+> 契约与 501 桩已先行铺好（round 37）。实装 = 替换 501 处理器为真实实现，
+> 并**删除 openapi 中对应操作的 "501" 响应行**（契约门强制两侧同步）。
+> 每个任务的「验收」是完成的定义；端到端测试放 `server/tests/`（照既有
+> 集成测试模式），单元测试放各模块包内。
 
-## 6. Phase 4 — Presence / Message / Events（architecture §27 Phase 4）
+### S1 Phase 5 · document 模块实装（最大阶段）
 
-- [ ] messaging thread 树形聚合视图（GUI/CLI 消费侧，随任务视图一并做）
+- [ ] **S1-0 模型与 migration**：model.go 增 `Document`/`DocumentConflict`
+  （列对应 00005 + 新增 deleted_at）；testsupport AutoMigrate 清单补两模型；
+  新 migration `00015_documents_tombstone.sql`（documents 加
+  `deleted_at TIMESTAMPTZ NULL`）。
+  验收：build/test 绿；本地 `docker compose up -d` + `make serve-db` goose up 通过。
+- [ ] **S1-1 路径 canonicalize**（新文件 `document/paths.go`，单点 helper）：
+  URL 解码后按 `/` 切分；拒绝空路径、前导 `/`（绝对路径）、`..` 与 `.` 段、
+  反斜杠、NUL/控制字符、空段（连续斜杠）、任一段 >255 字节、总长 >512 字节、
+  保留前缀 `.git/`、`.astral/`、`secrets/`、`.env` 开头文件名；非法一律
+  400 VALIDATION_FAILED（details.field=path）。表驱动单测覆盖
+  sync-semantics §19 的 path 项（traversal / 绝对路径 / 空段 / 保留前缀）。
+- [ ] **S1-2 manifest + get**：manifest 按 path 升序游标（游标=末行 path），
+  limit 缺省 200 上限 1000（不用共享 Limit 参数，契约即如此）；默认排除
+  tombstone，`include_deleted=true` 含之（deleted=true）；get 返回 Document
+  DTO，不存在 404 NOT_FOUND，tombstone 也返回（deleted=true，同步端侦测远端
+  删除的依据）。scope 按 S1-4 前缀规则。
+  验收：分页/过滤/scope 前缀两轴/404 单测。
+- [ ] **S1-3 push + delete**（事务与冲突核心）：
+  push（PUT，支持 Idempotency-Key）：服务端重算 sha256，与请求 content_hash
+  （若带）不符 → 400；路径不存在且 base_revision=0 → 创建 revision=1
+  （audit `document.push` details.created=true）；存在且 revision==base_revision
+  且 content_hash==base_hash → 写入 revision+1 + `document.updated`；base 与
+  该 revision 的 hash 不一致 → 400（调用方本地状态错乱）；revision 不匹配 →
+  插入 document_conflicts（ours_json=push 内容+hash+actor，theirs_json=当前
+  内容+hash）+ 409 DOCUMENT_CONFLICT（details 含 conflict_id / current_revision
+  / current_hash）+ `document.conflict` 事件 + audit（action=document.push，
+  details.conflict_id）；对 tombstone：base_revision=0 → 复活（deleted_at=NULL，
+  revision+1），base 不匹配 → 同冲突路径。
+  delete（`DELETE ?base_revision=N`，参数缺失 400）：当前未删且 revision 匹配 →
+  deleted_at 落地 + revision+1 + `document.updated`(data.deleted=true) + 204；
+  已删且 base 匹配 → 幂等 204；不匹配 → 冲突路径（delete-vs-edit）。
+  验收：单测覆盖 sync-semantics §19 前八项（local-only / remote-only / dual /
+  edit-vs-delete / delete-vs-edit / 重复删 / 复活 / hash 不符）。
+- [ ] **S1-4 scope 前缀单点 + org workspace 种子**：helper
+  `requireDocScope(r, svc, wsID, path, read bool)`——`memory/` 前缀 →
+  ScopeMemoryRead/Write，否则 ScopeDocumentRead/Write；S1-2/S1-3 端点统一走它。
+  bootstrap 注册分支（无 invite_code）同事务：若 slug=`org-memory` 的
+  workspace 不存在则创建（name "Organization Memory"，created_by=新 actor）+
+  该 actor owner membership（已有 human 即 403 的守卫保证无并发竞争）。
+  验收：前缀 scope 单测（viewer 可读 memory/ 路径但无 document:read 的
+  agent 不可读其他路径等，按 RoleToScopes 实际 bundle 设计断言）；bootstrap
+  单测断言 org workspace + owner membership 落地。
+- [ ] **S1-5 conflicts 列表/详情/resolve**：列表 status=open|resolved|all
+  （open = resolved_at IS NULL），created_at DESC + id 游标，共享 Limit；
+  详情 404 NOT_FOUND，返回 DocumentConflictDetail（列表形状 + 双方全文）；
+  resolve：非 open → 409 VALIDATION_FAILED（details.reason=already_resolved）；
+  ours → 以 ours_json 落新 revision；theirs → 仅关闭冲突返回当前 Document
+  （不 bump revision 不发事件）；merged/manual → content 必填（缺失 400），
+  落新 revision；全部同事务写 resolution/resolved_by/resolved_at +
+  audit `document.resolve` + `document.updated`（theirs 分支除外）。
+  验收：四种 resolution 各一测 + 已解决 409 + 详情 404。
+- [ ] **S1-6 契约收口**：删除 openapi documents 段全部 "501" 响应行；
+  契约门 + redocly 绿；`grep -rn "TODO(phase-5" server` 仅剩已处置项。
 
-## 7. Phase 5 — Memory / Document Sync（architecture §27 Phase 5）
+### S2 Phase 5 收口：capabilities
 
-- [ ] manifest/get/push 三方同步 + conflict artifact（禁止 last-write-wins）
-- [ ] diff3 合并选型（sync-semantics.md）
-- [ ] path canonicalize + 越界/secrets 路径防护
-- [ ] memory agent 整理流程 + 人工 review policy（裁决 M1 后开工）
-- `content_hash` 统一 `sha256:<hex>`（小写十六进制）——文档同步联调最易错点
-  （原 §10 第 12 项，随第 36 轮归档迁入）
+- [ ] `GET /api/v1/meta/capabilities` 的 features 开放 `document_sync`
+  （task_lease 既有先例）；memory 不开 feature（复用 documents，无独立能力面）。
+  验收：capabilities 测试断言 features 含 task_lease + document_sync。
 
-## 8. Phase 6 — Web GUI / Hardening（architecture §27 Phase 6）
+### S3 行为小项
 
-- [ ] 生产模式 server 托管 `web/dist`（同源，去 CORS）
-- [ ] GUI 各视图：任务树/Tag 管理/presence/消息/冲突/成员/凭证/审计
-- [ ] UI 框架选型（用户标记「待定」；候选评估后写 ADR）
-- [ ] rate limit（auth/device 端点优先）+ SSE 重连独立限流
-- [ ] config TOML 支持（deployment.md 提到 server.toml）
-- [ ] 跨版本 contract test、协议 artifact 发布流程
-- [ ] `types.ts` 改为 openapi-typescript 生成；错误码/事件枚举一致性 CI 检查
+- [ ] **S3-1 fuzzy 0 分行剔除**（task/search.go）：fuzzy 非空且无 regex 时过滤
+  score==0 行；有 regex 不过滤。验收：单测两分支。
+- [ ] **S3-2 长度口径登记**：docs/protocol.md §3 补一句「长度上限按 UTF-8
+  字节数计，openapi maxLength 仅参考」；巡检新端点（S1）校验均为字节口径。
+  既有端点不动（L1）。
 
-## 9. 契约变更登记（新增/修改协议时追加）
+### S4 audit 闭环
+
+- [ ] **S4-1 workspace 审计实装**：`GET /workspaces/{id}/audit`（audit:read）：
+  actor_id/action/outcome 过滤 + 共享 Limit/Cursor，created_at DESC + id 游标；
+  AuditEntry DTO 含 request_id；删 openapi 501 行。
+- [ ] **S4-2 平台审计实装**：`GET /admin/audit`（RequireGlobal +
+  ScopePlatformAuditRead，常量与 admin bundle round 37 已加）：workspace_id/
+  actor_id/action/outcome 过滤，**含 workspace_id IS NULL 的服务器级记录**。
+- [ ] **S4-3 认证失败写 audit**（原 §3.2，集中登记处注释在 audit/module.go）：
+  auth.Service 注入 audit recorder（构造器加参，app 装配处传入，参照 message
+  模块注入模式）；覆盖 login 失败、refresh 重放、device token denied/expired、
+  Authenticate 中间件 401（actor 可辨时填 actor_id，否则 NULL；action 用
+  auth.login / auth.refresh / auth.device / auth.bearer，outcome=denied）。
+  中间件路径无事务用 Record（非 RecordInTx）；量由 S5 限流兜住。完成后移除
+  audit/module.go 与 app/router.go 对应 TODO 注释。
+  验收：各失败路径单测断言 audit 行 + outcome=denied。
+- [ ] **S4-4 MeResponse 增 session.expires_at**：Principal 已带 SessionID，
+  补过期时间输出；openapi Me schema 同步（auth/module.go 的 TODO(phase-6) 就此关闭）。
+
+### S5 rate limit（§1.2 X1 之外全量实装；protocol.md §6 形状已定）
+
+- [ ] **S5-1 限流器**（新包 `internal/ratelimit`，仅标准库）：进程内 token
+  bucket，map[key]*bucket + mutex + 惰性清理（最后访问超 10 分钟删除）；
+  key：未认证 = 客户端 IP（`X-Forwarded-For` 仅当 `ASTRAL_TRUSTED_PROXY=true`
+  采信首跳，默认 false 直连），认证后 = actor_id。
+- [ ] **S5-2 桶配置与挂载**（env 可覆盖，config.go 增配置 + 部署文档登记）：
+  敏感桶 10/min/IP：`/auth/login`、`/auth/register`、
+  `POST /auth/device/authorizations`、`GET /auth/device/authorizations`（user_code
+  防枚举）、approve/deny、`/auth/token/refresh`；
+  轮询桶 60/min/IP：`POST /auth/device/authorizations/{device_code}/token`
+  （CLI interval=3s 轮询必须容纳）；
+  通用桶 300/min/actor：其余 `/api/v1`；
+  SSE 桶 30/min/actor（独立，重连风暴不占通用桶）：events 连接建立。
+  超限 429 RATE_LIMITED（httpx 已有码）+ `Retry-After` 秒头。
+  env：`ASTRAL_RATELIMIT_SENSITIVE_PER_MIN` / `_POLL_PER_MIN` / `_API_PER_MIN`
+  / `_SSE_PER_MIN` / `ASTRAL_TRUSTED_PROXY`。
+  验收：单测（桶满 429+Retry-After、窗口恢复、桶间隔离、XFF 开关）；auth/
+  tokens.go 与 auth/module.go 的限流 TODO 注释随之关闭。
+
+### S6 工程化与部署
+
+- [ ] **S6-1 生产托管 web/dist**（同源去 CORS）：新包 `server/webdist`，
+  `//go:embed all:dist`（仓库内 `webdist/dist/.gitkeep` 占位保证 embed 可编译）；
+  router：dist/index.html 存在时，非 `/api`、`/.well-known`、`/healthz|readyz`
+  的 GET 走静态 + SPA fallback（任何未命中路径回 index.html）；Makefile 增
+  `web-dist`（npm run build → 拷贝 web/dist → server/webdist/dist）；
+  httpx/middleware.go 与 web/vite.config.ts 的 CORS TODO 注释随之更新。
+  验收：make web-dist 后启动，`curl /` 返回 index.html；API 路由不受影响。
+- [ ] **S6-2 类型生成与契约 CI**：web devDependency 加 `openapi-typescript`；
+  package.json script `gen:api` = `npx openapi-typescript ../api/openapi.yaml -o
+  src/api/schema.d.ts`；S7 各视图迁移时改用生成类型（types.ts 保留导出别名，
+  手工重复类型逐步删除）；CI 增 web job：npm ci → gen:api →
+  `git diff --exit-code src/api/schema.d.ts` → npm run build；
+  client.ts 客户端版本改 vite define 从 package.json 注入（消除双写）。
+  验收：CI 绿；schema.d.ts 与 openapi 一致（diff 门）。
+
+### S7 Web GUI 视图补全（复用 axios 请求层 + 全局错误 toast；不引入组件库）
+
+每个视图的通用验收：`npm run build` 绿；新类型走 schema.d.ts；写清一段
+手动验收步骤（登录 → 操作 → 断言）作为任务产出。
+
+- [ ] **S7-1 任务树翻页**：TaskTreeView 搜索/树模式消费 next_cursor
+  （当前超页静默丢弃，原 §11 #11 尾巴）。
+- [ ] **S7-2 Tag 管理**：列表 / proposal+confirm / rename / delete / 任务挂载入口。
+- [ ] **S7-3 Presence 总览**：WorkspaceOverviewView 的 TODO(phase-4) 位。
+- [ ] **S7-4 消息视图**：workspace 广播 + task thread 聚合展示（原 §6 树形聚合
+  项），目标过滤 + 发消息。
+- [ ] **S7-5 文档与记忆浏览**：manifest 列表 + 内容查看；`memory/` 前缀标注
+  （含 org-memory workspace 入口）。
+- [ ] **S7-6 冲突解决**：conflicts 列表 / 详情双栏对比（ours|theirs）/
+  resolve 四选一（merged/manual 需填内容）。
+- [ ] **S7-7 成员与凭证管理**：成员列表/角色变更/邀请管理（已有）之外补
+  agent 凭证签发（明文仅一次展示）/ 撤销卡。
+- [ ] **S7-8 审计时间线**：workspace audit + admin audit（platform:audit:read
+  可见）两入口，actor/action/outcome 过滤。
+
+### S8 收尾与登记
+
+- [ ] 逐项勾选本文件 §2；轮次详录写 TODO-archive.md §A 卷末（格式照既有轮次）。
+- [ ] NOT_IMPLEMENTED 此时应无任何端点返回：从 httpx/errors.go、openapi
+  ErrorCode enum、api/schemas/error.json 三处移除（契约门强制同步）。
+- [ ] §0.2 全量验证命令绿；`git status` 干净。
+
+## 3. 明确不做 / 延期清单（不要顺手实现）
+
+| 项 | 状态 | 理由 / 重启条件 |
+|---|---|---|
+| SMTP 邮件邀请（原 §11 #19 / P4） | 裁剪 | invite_url 人工分发已闭环；出现真实邮件需求再启 |
+| CLI `astral register`（#18 / P3） | 移交 astral-cli 仓 | CLI 侧工作；协议快照刷新随其节奏 |
+| 服务端自动三方合并（diff3） | 关闭 | §1.2 P1；客户端本地合并后 resolve(merged) 提交 |
+| 文档 revision 历史表 | 延期 | §1.2 P3 |
+| config TOML（server.toml） | 裁剪 | 环境变量唯一通道，避免双配置源（deployment.md 本就只写了环境变量） |
+| pg_trgm / SQL 搜索回迁 | 触发式 | D7：单 workspace 万级任务或搜索延迟 SLO |
+| 平台角色可选项（#22：注册开关/全 ws 可见/平台 agent/web 全局 403 出口/CLI me 消费） | 触发式 | D16 延伸清单，出现需求再做 |
+| presence 真分页 | 不做 | 成员规模有界，信封统一即可 |
+| metrics/tracing、慢订阅者断开、多实例 migration 门 | 触发式 | hub.go / store.go 内 TODO 注释即触发条件 |
+| workspace 默认策略/repo metadata 字段 | 延期 | model.go TODO(phase-2)，无消费方 |
+| presence upsert ON CONFLICT 化 | 延期 | 现实现正确，无性能触发 |
+| 开放注册 / 邮箱验证 / 服务器级邀请 / 邀请授 owner | 永不（MVP） | docs/registration.md §8 |
+
+## 4. 代码内 TODO(phase-x) 处置映射
+
+| 位置 | 处置 |
+|---|---|
+| httpx/respond.go maxBodyBytes 注释 | S1-3 后更新：全局 8MiB 兜底保留，文档 1MiB 上限在 handler 校验（size>1MiB → 400） |
+| httpx/middleware.go metrics/tracing | 延期（§3） |
+| httpx/middleware.go CORS 生产关闭 | S6-1 随同源托管更新注释 |
+| model/model.go workspace 默认策略 | 延期（§3） |
+| auth/module.go session 过期时间 | S4-4 |
+| auth/module.go 可信代理 | S5（XFF 采信开关） |
+| auth/tokens.go user_code 限流 | S5 |
+| presence/module.go ON CONFLICT | 延期（§3） |
+| event/hub.go dropped 指标 | 延期（§3） |
+| store/db.go 多实例 migration | 延期（§3） |
+| testsupport/db.go sqlite/PG 差异 | 长期备注，不处置 |
+| web/src/api/client.ts 版本双写 | S6-2 |
+| web/src/api/types.ts 手工类型 | S6-2 起逐步替换 |
+| WorkspaceOverviewView 三个 TODO 注释 | S7-3 / S7-4 / S7-5 完成时删 |
+| document / memory / audit / admin 模块桩注释 | S1 / S4 实装时以真实实现注释替换 |
+
+## 9. 契约变更登记（新增/修改协议时追加；历史 40 行见 TODO-archive.md §D）
+
+> 编号沿用历史「§9」：代码与 docs 以「TODO.md §9」「契约变更登记」引用本表；
+> §5-§8 编号已随 round 37 重写退役。
 
 | 日期 | 变更 | 类型 | 影响端 |
 |------|------|------|--------|
-| 2026-09-07 | 初始契约基线（openapi 1.0.0-scaffold） | 初版 | CLI/Web |
-| 2026-09-07 | 新增 ID 前缀：srv/req/dev/ses/cred/tgp/tag/doc/cfl/prs/aud/apv（protocol.md §3 仅列 7 个） | 补充 | CLI（不得解析前缀语义，无破坏） |
-| 2026-09-07 | 新增端点 `GET /workspaces/{id}/tags`（proposal 比对数据源，architecture §14 隐含但未列） | 补充 | CLI/Web |
-| 2026-09-07 | 新增端点 `GET /workspaces/{id}/audit`（audit:read scope 与 GUI 需求隐含） | 补充 | Web |
-| 2026-09-07 | 新增开发期错误码 `NOT_IMPLEMENTED`（HTTP 501 桩专用，各 Phase 移除） | 临时 | CLI 不得依赖 |
-| 2026-09-07 | 新增 env：ASTRAL_HTTP_ADDR/ASTRAL_PUBLIC_URL/ASTRAL_DATABASE_DSN(或 DATABASE_URL)/ASTRAL_SERVER_ID/ASTRAL_AUTO_MIGRATE/ASTRAL_DEV_CORS_ORIGINS/ASTRAL_LOG_LEVEL | 补充 | 部署 |
-| 2026-09-07 | 第 2 轮：新增端点 `POST /auth/register`（bootstrap-only）、`POST /auth/login`（web 表单→Cookie session）、`GET /auth/device/authorizations?user_code=`、`POST /auth/device/authorizations/{id}/approve|deny`（A3） | 补充 | Web/CLI |
-| 2026-09-07 | 第 2 轮：新增错误码 `AUTHORIZATION_PENDING`、`SLOW_DOWN`（A1，RFC 8628 语义） | 补充 | CLI |
-| 2026-09-07 | 第 2 轮：定义 ASTRAL_TOKEN 格式 `astral_<base64url>`（A4）；Bearer 可为 human access token 或 agent credential | 补充 | CLI |
-| 2026-09-07 | 第 2 轮：sessions 表 scopes 列由 TEXT[] 改 JSON text（可移植）；tasks revision 自增改应用层（D5） | 内部 | 无（schema 未发布） |
-| 2026-09-07 | 第 3 轮：v1 协议快照发布至 astral-cli protocol/snapshots/v1（冻结 modulator@75269c4，含 MANIFEST）；无语义变更 | 发布 | CLI |
-| 2026-09-07 | 第 5 轮：新增事件类型 `tag.created`/`tag.renamed`/`tag.deleted`（architecture §14 要求 tag 变更写 outbox；types.go/event.json/web 三处已同步） | 补充 | CLI/Web |
-| 2026-09-07 | 第 5 轮：capabilities.features 开放 `task_lease`（原子 claim 稳定并有并发测试覆盖） | 补充 | CLI |
-| 2026-09-07 | 第 5 轮：事件路径统一——全部领域事件经 EmitTx outbox（PublishDomain 直发已移除），SSE 事件延迟 ≤ dispatcher 轮询间隔（500ms） | 行为 | CLI/Web |
-| 2026-09-09 | 第 6 轮：新增控制事件 `snapshot.required`（SSE resume 超窗，reason=cursor_expired；不在领域事件语义内） | 补充 | CLI/Web |
-| 2026-09-09 | 第 6 轮：SSE resume 正式可用（保留窗口 24h，S1 裁决落定）；Idempotency-Key 语义实装（同 actor+endpoint+key 24h 内重放首次 2xx） | 行为 | CLI/Web |
-| 2026-09-09 | 第 7 轮：新增错误码 `NOT_FOUND`（HTTP 404，非 retryable）：/api/v1 未知路由，及无专用码的次级资源不存在（成员/凭证/tag/proposal/actor/thread 等）。原先这些场景返回 `VALIDATION_FAILED`（404/409）或 `INTERNAL_ERROR`（未知路由） | 补充 | CLI/Web |
-| 2026-09-09 | 第 7 轮：task 列表排序定为 `id DESC`（UUIDv7 创建序，毫秒精度），cursor 即末行 id；search cursor 语义不变 | 行为 | CLI/Web |
-| 2026-09-09 | 第 7 轮：presence 语义定为 (actor, workspace) 一行：同一 actor 在多个 workspace 各自心跳，互不覆盖（migration 00010 主键变更） | 行为 | CLI/Web |
-| 2026-09-09 | 第 7 轮：私信发送校验收件人「本 workspace 可达」（成员 或 绑定 credential 的 agent）；不可达返回 404 NOT_FOUND | 行为 | CLI/Web |
-| 2026-09-09 | 第 7 轮：refresh 并发轮换改条件更新：输家收到 401（token 已被替换），不再误触整族撤销 | 行为 | CLI |
-| 2026-09-09 | 第 8 轮：新增端点 POST/GET `/workspaces/{id}/approvals`、POST `/approvals/{id}/approve|deny`（T-ws-6，architecture §22）；新增错误码 `APPROVAL_EXPIRED`（409）；MVP 仅开放 `membership.promote_owner`，approve 同事务执行并重用 workspace.member.changed 事件（data.change=promoted） | 补充 | CLI/Web |
-| 2026-09-09 | 第 9 轮：新增端点 PUT/DELETE `/tasks/{id}/tags/{tag_id}`（D11，attach/detach 幂等；attach 响应=Task 含 tags）；task.updated 事件 data 增补 `tag_change`/`tag_id`；session 绝对寿命 90d（超期 refresh 返回 TOKEN_EXPIRED）；撤销（session family/credential/logout）后该 actor 的 SSE 流主动断开 | 行为 | CLI/Web |
-| 2026-09-10 | **v2 破坏性重构（D15，定案未实施）**：移除 `GET/POST /workspaces/{id}/tasks` 与 `GET /workspaces/{id}/tasks/search`；新增 `GET/POST /workspaces/{id}/children`、`GET/POST /tasks/{id}/children`、`GET /workspaces/{id}/task-search`；TaskCreate 移除 parent_id；children/task-search 响应行内增补 `tags`（当页批量填充，修订 D11）与 `children_count`；task-search 补 assignee、免 regex/fuzzy 强制（≥1 过滤条件）；protocol_version 1→2 | 破坏 | CLI/Web 锁步适配（快照 v2） |
-| 2026-09-12 | 第 21 轮：`GET /tasks/{id}/messages` 对不存在/不可见 task 的 404 由 NOT_FOUND 修正为 **TASK_NOT_FOUND**（对齐「端点主语用专用码」既有规则，round 20 实装时口径漂移） | 行为 | CLI（错误码分支；CLI 目前不区分） |
-| 2026-09-12 | 第 21 轮：message.send 的 `thread_id` 补「parent 必须属于本 workspace」校验，跨 ws thread 引用返回 404 NOT_FOUND（此前可关联他 workspace 线程；读路径可见性子查询本就收口，写侧对齐） | 行为 | CLI |
-| 2026-09-12 | 第 21 轮：`GET /workspaces/{id}/agents` 按 D9/T-ws-7 实装 workspace 过滤（membership ∪ 有效 credential 绑定）；此前恒返回服务器全局 agent 列表（round 9 已登记完成但代码未实施的断链） | 行为 | CLI/Web |
-| 2026-09-12 | 第 21 轮：openapi Task schema required 补齐 parent_id/description/priority/assignee_actor_id（服务端恒序列化、web 类型一致，契约文档落后于实现的修正，无 wire 变化）；TokenPair.refresh_token 补 cookie 模式省略说明；悬空 responses 组件补齐；死 schemas.NotFound 删除、schemas.Conflict 正名 DocumentConflict | 契约文档 | CLI/Web（无 wire 变化） |
-| 2026-09-12 | 第 21 轮：claim 冲突时 409 details.current_revision 改为事务内重读（原为请求开头快照；并发窗口内信息更准，正常路径无差异）；task get 的 lease 查询 DB 故障改 500（原呈现为「无租约」）；renewLease 非法 JSON 改 400（原静默视为空 body）；workspace 三处次级资源 404 补「查无此行 vs DB 故障」区分 | 行为（错误路径） | CLI/Web（正常路径无差异） |
-| 2026-09-12 | 第 22 轮：`GET /workspaces/{id}/events` 补 workspace 级订阅授权（非成员 404 / scope 不足 403，与 workspace 端点同语义；此前仅要求已认证，任何主体可订阅任意 workspace 流——§11 第 10 项安全修复）；openapi 补 404/403 响应 | 行为（安全） | CLI/Web |
-| 2026-09-12 | 第 10 轮（modenicheng）：actors 表增 `bio`/`avatar_url`（00012，头像仅 http(s) 外链，服务端不抓取）；新增端点 `PATCH /auth/me`（部分更新语义：display_name/bio/avatar_url）；`Me` 响应增 `email`（human 只读）；Actor schema 增 `bio`/`avatar_url`。同时修复 /auth/register、/auth/login、/auth/me 直接序列化 model.Actor 导致字段名 PascalCase 与契约 snake_case 漂移的潜伏 bug（auth 模块引入 actorDTO） | 补充+修复 | CLI/Web |
-| 2026-09-13 | 整合轮（merge origin/main）：两侧并行开发的 DTO 双轨合一——第 10 轮引入的私有 `actorDTO` 并入 round 20 的全仓单一来源 `ActorDTO`（增补 bio/avatar_url，构造器仍为 `ToActorDTO`），workspace 模块复用点不变、openapi Actor schema（bio/avatar_url 必填）覆盖两端点；`newActorDTO` 删除 | 内部（重构） | 无（wire 不变，与 Actor schema 契约一致） |
-| 2026-09-13 | 第 28 轮：新增 env `ASTRAL_WEB_BASE_URL`——device flow `verification_uri[_complete]` 的 web 控制台基址（回退 PublicURL → 请求 Host）；两链接由相对路径改为绝对 URL（对齐 openapi `format: uri`） | 补充 | CLI（直接打开 verification_uri_complete）/Web |
-| 2026-09-13 | 第 29 轮：**邀请注册 P1 落地（A5）**——migration `00013_workspace_invitations`（码只存 sha256，CHECK 限 viewer/contributor/maintainer）；新增 ID 前缀 `inv` | 补充 | CLI/Web |
-| 2026-09-13 | 第 29 轮：新增端点 POST/GET `/workspaces/{id}/invitations`、POST `/invitations/{id}/revoke`（幂等 204）；授权=human session + `workspace:manage_members`（agent credential 403）；签发响应含 `code` 明文（仅一次）与 `invite_url`（`{WebBaseURL}/register?code=`，基址回退链与 device 链接同源 `auth.ResolveWebBaseURL`） | 补充 | CLI/Web |
-| 2026-09-13 | 第 29 轮：`POST /auth/register` 扩展 `invite_code` 分支（兑换=建号+条件更新抢邀请+入伙+audit invite.redeem/auth.register+outbox 同事务；email 撞车 409 且邀请不消耗）；operationId `registerBootstrap`→`register`；**两分支注册成功即建会话**（Set-Cookie + 响应=Me+session，与 login 同形状） | 行为 | CLI/Web |
-| 2026-09-13 | 第 29 轮：新增错误码 `INVITE_INVALID`（400，四种失效统一防探测）、`EMAIL_TAKEN`（409） | 补充 | CLI/Web |
-| 2026-09-13 | 第 29 轮：新增事件类型 `security.invite.created/revoked/redeemed`（types.go→outbox 叶子包、event.json、web sse.ts 三方同步；纯增量，protocol_version 不变）。事件类型目录与 EmitTx 写侧移至 `server/internal/outbox`（auth 需在兑换事务内发事件，而 event/sse.go 反向依赖 auth，成环；读侧 hub/SSE/dispatcher 留在 modules/event） | 补充+内部 | CLI/Web |
-| 2026-09-13 | 第 29 轮：修复唯一约束冲突在非英文 locale PostgreSQL 上漏判（错误文案随服务器 locale 本地化，`store.IsUniqueViolation` 按 message 匹配失效 → EMAIL_TAKEN/WORKSPACE_NAME_TAKEN 等变 500）：`store.Open` 开 `TranslateError`，判断补 `gorm.ErrDuplicatedKey`（sqlite 单测路径保留 message 兜底）。E2E 真机 PG（中文 locale）验证 | 修复 | Web/CLI（错误码语义恢复契约） |
-| 2026-09-13 | 第 33 轮：Me 响应（/auth/me、login、register 共用）增 required 字段 `platform_role`（enum admin/user/agent/service，D16）；actor 形状（ActorDTO/成员列表）不带该字段；migration 00014 `actors.platform_role` + `disabled_at`（纯增量，protocol_version 不变） | 补充 | Web/CLI（CLI 纯增量兼容，`astral me` 后续可选消费） |
-| 2026-09-13 | 第 33 轮：行为收口——签发/吊销不绑定 workspace 的服务器级 credential 由「任意已注册 human」改为 `platform:credentials:manage`（admin 专属，403 INSUFFICIENT_SCOPE）；绑定 workspace 的路径不变（agent:manage） | 行为（破坏性收紧） | CLI（此前凭 human token 可发的用法被拒） |
-| 2026-09-13 | 第 34 轮：新增端点 `GET /admin/users`、`POST /admin/users/{id}/disable|enable`、`POST /admin/users/{id}/role`（body `{platform_role: admin\|user}`，返回 AdminUser）；新 schema `AdminUser`（含 email/disabled_at）；新增 scope 词表 `platform:users:read`/`platform:users:manage`/`platform:credentials:manage`（admin 角色专属，D16）；停用后该 actor 全部会话/凭证 401 `TOKEN_REVOKED`（account disabled） | 补充 | Web（CLI 不消费 /admin/*） |
-| 2026-09-14 | 第 33 轮 B 线：**messages 两个列表端点落实已声明的分页**——`GET /workspaces/{id}/messages`（id 游标 DESC，此前恒 `Limit(100)` 且忽略 limit/cursor，CLI `--all`/`--limit` 被静默丢弃）与 `GET /tasks/{id}/messages`（id 游标 ASC）补 `{items,next_cursor}` 真实翻页（limit 缺省 50 上限 200，经新 `httpx.ParseLimit` 单点，与 children/task-search 同语义）；openapi `listMessages` 补声明已实装的 `target_id` 过滤参数 | 行为（对齐契约） | CLI（msg list 分页立即生效） |
-| 2026-09-14 | 第 33 轮 B 线：openapi Message schema 补 `target_type`/`target_id`（服务端 DTO 恒序列化、契约漏声明，required 同步补齐）；documents 四端点与 audit list 六个脚手架桩补声明 `501 NOT_IMPLEMENTED` 响应（此前契约只写 200，超卖现状） | 契约文档 | CLI（快照随 P3 `astral register` 一并刷新，归入 §11 第 14 项） |
+| 2026-09-16 | 第 37 轮：新增端点 `DELETE /workspaces/{id}/documents/{path}`（tombstone 删除，`?base_revision=`）与 `GET /workspaces/{id}/conflicts/{conflict_id}`（冲突详情）；均以 501 桩落地 | 补充 | CLI（phase-5 消费） |
+| 2026-09-16 | 第 37 轮：新增端点 `GET /admin/audit`（服务器级审计查询）；新增全局 scope `platform:audit:read`（scopes.go 常量 + admin bundle） | 补充 | Web |
+| 2026-09-16 | 第 37 轮：列表信封统一（G1）——documents manifest（limit 上限 1000 + include_deleted）/conflicts（status 过滤）/workspace audit（outcome 过滤）补 `{items,next_cursor}`；presence 补 next_cursor（恒 null）；DocumentConflict 扩展（status/base_hash/双方摘要/resolution 三件）并新增 DocumentConflictDetail；Document/ManifestItem 增 deleted；AuditEntry 增 request_id | 契约文档+补充 | CLI/Web |
+| 2026-09-16 | 第 37 轮：裁决落档（无新增 wire）——M1 memory 无独立 API（`memory/` 前缀 + org-memory 保留 workspace）；T1 无 task DELETE；push 双改不做自动合并；message.send 豁免 audit；长度口径=字节（既有端点不动）；fuzzy-only 剔除 0 分行 | 行为登记 | CLI/Web |
 
-## 10. 对接 astral-cli 的联调清单（已归档）
+## 附录 A. 稳定锚点（原 §2 裁决表 / 原 §11 编号清单，编号不变）
 
-全部条目已实装；原文照录于 [TODO-archive.md](TODO-archive.md) §C，
-其中 phase-5 相关的 `content_hash` 约定迁入 §7。
+> 编号是稳定引用 ID（代码注释与 docs 以「TODO.md §2 A5」「§11 第 N 项」引用），
+> 只压缩不删除不重排；原表全文与理由见 TODO-archive.md §D。
 
-## 11. 下一轮计划
+### A.1 原 §2 待裁决契约表（终态）
 
-> 优先级原则：先闭合「已宣称完成但实际断链」的功能，再做新面。
-> 条目编号是稳定引用 ID（代码注释与 docs 以「§11 第 N 项」引用）：
-> 完成后压缩为单行保留编号，不删除、不重排；实施明细见归档卷对应轮次。
+| # | 一行终态 |
+|---|---|
+| M1 | ✅ 第 37 轮裁决（§1.2）：Memory 无独立 API；`memory/` 前缀 + org-memory 保留 workspace |
+| A1 | ✅ device pending 按 RFC 8628（AUTHORIZATION_PENDING/SLOW_DOWN） |
+| A2 | ✅ access token 每请求查库（sha256 比对） |
+| A3 | ✅ 审批端点 `GET ?user_code=` + approve/deny |
+| A4 | ✅ ASTRAL_TOKEN = `astral_<43字符base64url>`，服务端只存 sha256 |
+| A5 | ✅ 一次性邀请码注册（P1/P2 已落地；P3 移交 CLI 仓、P4 裁剪，见 §3） |
+| T1 | ✅ 第 37 轮裁决（§1.2）：无 DELETE task；cancelled 可复活 |
+| S1 | ✅ 保留窗口 24h + snapshot.required（cursor_expired） |
 
-1. 【✅ 第 9 轮完成】D11 tag attach/detach + D9 T-ws-7 + D10 session 上限 + 凭证/会话撤销断流
-2. 【✅ 第 10 轮完成】CI 修复（goose embed 目录、迁移 StatementBegin/End）+ 双仓库卫生轮
-3. 【✅ 第 11 轮完成】CLI login/init 实装（D12/D13 预审施工；端到端真机验收见第 27 轮）
-4. 【✅ 第 13 轮完成】Web 任务树视图（第 17 轮重构为逐容器懒加载）
-5. 【✅ 第 12 轮完成】Web/GUI approval 裁决视图 + device 审批页联调收尾
-6. 【✅ 第 16/19 轮完成】CLI todo v2 适配 + tags/msg 命令族
-7. 【✅ 第 21 轮完成】双仓库卫生轮（冗余清理/补丁化收敛/文档重写）
-8. 【✅ 第 22 轮完成】CLI event listen（SSE 流式消费，JSON Lines + 断线续传）
-9. rate limit（auth/device 端点优先；phase-6）
-10. 【✅ 第 22 轮完成】SSE workspace 级授权（安全项提级）：非成员 404 / scope 不足 403，fail closed
-11. 分页统一（契约债务）：presence/documents manifest/conflicts/audit 四个
-    列表端点补 `{items, next_cursor}` envelope（protocol.md §3 已注明例外）；
-    web TaskTreeView 的搜索/树模式消费 next_cursor（当前超页静默丢弃）
-12. message.send 审计策略裁决：send 目前只写业务行 + outbox，无 audit
-    （task/tag/workspace 全为三件套）——裁决「高频消息豁免」或补齐
-13. 小项打包：~~web 搜索守卫补 assignee~~（✅ 第 25 轮随 UI 移植关闭：assignee
-    已纳入 canSearch）；长度校验 byte vs rune 统一（message/task 按
-    字节、tag 按字符）；409/403 搭配 VALIDATION_FAILED 的配对规则裁决
-    （approval pending 重复 409、tag confirm_code 403）
-14. 【✅ 第 29 轮 B 线完成】协议快照 v2.1 刷新（0330768 → 48ab5f2）；
-    invite P1 与 round 33B 的 openapi 增量随 P3 `astral register` 消费时再刷新
-15. fuzzy-only task-search 的 0 分行展示策略：服务端无 score 阈值 → UI 出现
-    大量「匹配 0%」行（第 25 轮忠实呈现现语义）；裁决「服务端加阈值」或
-    「前端过滤/弱化零分行」
-16. 【✅ 第 29 轮完成】邀请注册 P1（server，A5）：migration 00013 + 邀请三端点 +
-    register invite_code 分支 + INVITE_INVALID/EMAIL_TAKEN + security.invite 三事件
-17. 【✅ 第 30 轮完成】邀请注册 P2（web）：/register 页 + workspace 邀请管理卡
-18. 邀请注册 P3（CLI）：`astral register <server> [--invite-code …]`
-    （缺省交互提示，--json）；注册只建号，登录仍走设备流（CLI 凭证存储与
-    web cookie 是不同通道）；快照消费并入第 14 项刷新
-19. 邀请注册 P4（衍生）：SMTP 邮件邀请（.env 增 SMTP_*，邮件含
-    `/register?code=` 链接）；邮箱验证策略随本项一并评估（MVP email 仅登录名）
-20. 【✅ 第 33 轮完成】平台角色基建（D16）：platform_role + 全局 scope 词表 +
-    RequireGlobal + 首 human=admin + 全局凭证收口（migration 00014）
-21. 【✅ 第 34 轮完成】admin 用户管理：/admin/* server 端点 + web 用户管理页 +
-    停用即时失效闸门
-22. 平台角色后续可选项（D16 延伸，触发再做）：注册策略开关（开放 vs 仅邀请，
-    server_meta + admin 切换）；全工作区可见（platform:workspaces:read，运维
-    排查用）；平台级 agent 账号（动 D9 语义）；web 全局 403 统一出口（现仍走
-    各 surface fail-closed）；CLI `astral me` 消费 platform_role
-23. 【✅ 第 35 轮完成】web 请求层重构：api/client 换 axios 实例（拦截器管
-    请求头/Bearer/请求 id/204 归一）+ 失败统一 toast（silent 尾参豁免后台路径）
-    + useApiAction 瘦身；修复 login/register 401 误触全局登出
+### A.2 原 §11 下一轮计划（编号保留）
+
+1. 【✅ 第 9 轮】D11 tag attach/detach + D9 T-ws-7 + D10 session 上限 + 撤销断流
+2. 【✅ 第 10 轮】CI 修复 + 双仓库卫生轮
+3. 【✅ 第 11 轮】CLI login/init 实装
+4. 【✅ 第 13 轮】Web 任务树视图（第 17 轮重构为逐容器懒加载）
+5. 【✅ 第 12 轮】Web/GUI approval 裁决视图 + device 审批页联调收尾
+6. 【✅ 第 16/19 轮】CLI todo v2 适配 + tags/msg 命令族
+7. 【✅ 第 21 轮】双仓库卫生轮
+8. 【✅ 第 22 轮】CLI event listen（SSE 流式消费，JSON Lines + 断线续传）
+9. 【→ S5】rate limit（auth/device 端点优先）——第 37 轮已定桶配置
+10. 【✅ 第 22 轮】SSE workspace 级授权（安全项）：非成员 404 / scope 不足 403，fail closed
+11. 【✅ 第 37 轮契约化 → S1/S4/S7-1】分页统一：四列表端点补 `{items,next_cursor}`
+12. 【✅ 第 37 轮裁决】message.send 审计豁免（§1.2 A1'）
+13. 【✅ 第 37 轮裁决】长度口径=字节 + 409/403 配对规则（§1.2 L1/E1）→ S3-2
+14. 【✅ 第 29 轮 B 线】协议快照 v2.1 刷新；后续增量随 CLI 仓 P3 消费时刷新
+15. 【→ S3-1】fuzzy 0 分行剔除（§1.2 F1）
+16. 【✅ 第 29 轮】邀请注册 P1（server）
+17. 【✅ 第 30 轮】邀请注册 P2（web）
+18. 【→ §3 移交 astral-cli 仓】邀请注册 P3：`astral register`
+19. 【→ §3 裁剪】邀请注册 P4：SMTP 邮件邀请
+20. 【✅ 第 33 轮】平台角色基建（D16）
+21. 【✅ 第 34 轮】admin 用户管理
+22. 【→ §3 触发式】平台角色后续可选项
+23. 【✅ 第 35 轮】web 请求层重构（axios + 全局错误 toast）

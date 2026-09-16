@@ -5,14 +5,15 @@ import "github.com/go-chi/chi/v5"
 
 type Module struct{}
 
-// RegisterRoutes：Memory 的公网 API 形状尚未在文档定稿（TODO.md「待裁决契约」#M1）。
-// 候选方向：复用 documents 表 + 保留路径前缀（organization/、projects/<ws>/），
-// 只暴露读写与列表，不单独发明第二套文档协议。定稿前不注册任何路由，
-// 避免先写死错误契约。
+// RegisterRoutes：M1 已裁决（round 37，TODO.md 决策速查）——Memory 不设独立公网 API：
+//   - 项目记忆 = 各 workspace documents 的保留前缀 memory/**，经既有
+//     /workspaces/{id}/documents/* 端点读写，按前缀改用 memory:read/write scope；
+//   - 组织记忆 = 保留 workspace `org-memory`（bootstrap 注册惰性种子 + owner
+//     membership），同样走 documents 端点；
+//   - memory agent 的编排属客户端行为（architecture §15 工作流），服务端只提供
+//     文档读写 + audit + 事件，MVP 不建整理触发/审阅接口。
+//
+// 因此本模块永远不注册路由；保留包位作为该裁决的活文档。
 func (m *Module) RegisterRoutes(r chi.Router) {
 	_ = r
-	// TODO(phase-5): 定稿后注册：
-	//   GET  /api/v1/memory/documents           （组织记忆，需 memory:read）
-	//   GET/PUT /api/v1/workspaces/{id}/memory/documents/{path}
-	// 以及 memory agent 的整理触发/审阅接口（人工 review policy，尤其组织记忆）。
 }

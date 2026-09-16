@@ -32,6 +32,13 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/users/{actor_id}/disable", m.disableUser)
 	r.Post("/admin/users/{actor_id}/enable", m.enableUser)
 	r.Post("/admin/users/{actor_id}/role", m.changeRole)
+	r.Get("/admin/audit", m.listAudit)
+}
+
+func (m *Module) listAudit(w http.ResponseWriter, r *http.Request) {
+	// TODO(phase-6): 平台级审计查询（platform:audit:read）：含 workspace_id IS NULL
+	//  的服务器级记录（认证失败等，round 37 契约）；created_at 降序游标分页。
+	httpx.NotImplemented(w, r, "admin.audit.list", "phase-6", "api/openapi.yaml listAdminAudit")
 }
 
 // UserDTO 是 admin 用户列表项：平台视角比 ActorDTO 多邮箱/角色/停用态。

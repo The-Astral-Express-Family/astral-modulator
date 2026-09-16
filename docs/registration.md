@@ -151,8 +151,8 @@ email 撞车：唯一约束在 `a` 步先挡，邀请不消耗。
 |----|------|------|
 | P1 server | migration 00013、邀请三端点、register 扩展、audit/事件/错误码、openapi + 单测 + 契约测试；protocol_version 不变（纯增量） | 邀请闭环可用（curl/CLI 可走通） |
 | P2 web | `/register` 路由与页面；workspace 邀请管理卡（签发/列表/复制链接/撤销）；守卫对称性 | 非技术成员可被邀请进场 |
-| P3 CLI | `astral register` 命令；协议快照刷新并入 §11 既有 v2.1 快照项 | 全 CLI 流程 |
-| P4 衍生 | SMTP 邮件邀请（.env 增 `SMTP_*`）、邮件模板含链接 | 邀请分发不必人工传码 |
+| P3 CLI | `astral register` 命令；协议快照刷新并入 §11 既有 v2.1 快照项 | 移交 astral-cli 仓（round 37 裁决：CLI 侧工作，随其节奏实施） |
+| P4 衍生 | SMTP 邮件邀请（.env 增 `SMTP_*`）、邮件模板含链接 | 裁剪（round 37：invite_url 人工分发已闭环；真实邮件需求出现再启） |
 
 ## 8. 明确不做与后续项
 

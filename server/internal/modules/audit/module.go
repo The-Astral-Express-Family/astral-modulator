@@ -32,8 +32,8 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	// TODO(phase-2, 服务器级审计的集中登记处): 认证/授权失败写 audit——
 	// 现状 Authenticate 中间件只拒不记；需要向 auth.Service 注入 audit recorder
 	// 并覆盖 login 失败、refresh 重放、device 兑换失败等路径（security.md 审计要求，
-	// TODO.md §3.2；auth/middleware.go、auth/service.go、app/router.go 的相关
-	// 注释均指向本条，不重复登记）。
+	// TODO.md S4-3（原 §3.2）；auth/middleware.go、auth/service.go、app/router.go
+	// 的相关注释均指向本条，不重复登记）。
 	r.Get("/workspaces/{workspace_id}/audit", m.list)
 }
 

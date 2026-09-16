@@ -1,8 +1,10 @@
-# Markdown 工作区同步语义初稿
+# Markdown 工作区同步语义
 
-> 状态：Draft
+> 状态：Accepted（MVP 口径，round 37 裁决落档：无服务端自动合并 / tombstone
+> 删除 / 不建历史版本表；修订点在 §8/§9/§13/§14 就地标注）
 >
 > 目标：确保多个 Agent/人类并发修改文本时不会静默丢数据。
+> REST 契约（端点与响应形状）以 `api/openapi.yaml` documents 段为准。
 
 ## 1. 范围
 
@@ -105,6 +107,9 @@ Hash 基于 canonical bytes。MVP 必须明确 newline 处理：建议 **不自�
 
 是否保存全部历史可配置；MVP 至少保存有限 revision window。
 
+> **round 37 裁决**：MVP 不建 revision 历史表——冲突行（document_conflicts）
+> 已保存双方全文，audit 记录每次 push 的 hash；历史窗口需求出现再扩展。
+
 ## 9. Push
 
 请求：
@@ -127,6 +132,11 @@ Hash 基于 canonical bytes。MVP 必须明确 newline 处理：建议 **不自�
 4. 若当前 revision == base revision，则写入；
 5. 否则返回 `REVISION_CONFLICT`，提供当前 metadata；
 6. 客户端进入 merge/conflict 流程。
+
+> **round 37 裁决**：第 5 步固定为 `409 DOCUMENT_CONFLICT` 并落 conflict
+> artifact（返回体带 conflict_id / current_revision / current_hash）；
+> 服务端不尝试自动合并（见 §13）。对已 tombstone 的路径 push 且
+> base_revision=0 视为复活（revision 续增）。
 
 ## 10. Pull
 
@@ -186,9 +196,19 @@ MVP 可使用行级 diff3 思路：
 
 不要把“merge 工具返回成功”当作语义正确；高风险文档可配置禁止自动 merge。
 
+> **round 37 裁决**：diff3 **不在服务端做**——服务端一律「落冲突工件 +
+> 409」，把合并决策留给客户端/人；客户端本地合并的结果经
+> `resolve(resolution=merged|manual, content=…)` 提交。选型项就此关闭。
+
 ## 14. 删除
 
 删除也必须版本化，使用 tombstone 或明确 delete operation。
+
+> **round 37 裁决（契约已定稿）**：`DELETE /workspaces/{id}/documents/{path}
+> ?base_revision=N` 落 tombstone（行保留、deleted=true、revision+1、
+> `document.updated` 事件 data.deleted=true）；manifest 默认排除 tombstone，
+> `include_deleted=true` 供同步端侦测远端删除；重复删除（base 匹配已删行）
+> 幂等 204；delete-vs-edit 与 edit-vs-delete 双边变化一律落冲突工件。
 
 情况：
 

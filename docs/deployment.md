@@ -22,7 +22,8 @@ go run ./cmd/astral-server
 
 无数据库也能启动（桩模式）：发现/能力/健康/SSE 可用，受保护端点返回 401；
 需要存储的端点在鉴权后返回 503 INTERNAL_ERROR；未实装端点返回 501
-（document/audit，phase-5/6）；memory 因 M1 未裁决未注册路由（404）。
+（document/audit，phase-5/6）。memory 无独立路由（M1 裁决：复用 documents
+端点与 `memory/` 路径前缀，见 architecture §6.5）。
 环境变量全集见 `server/internal/config/config.go`。
 
 ### 小型自托管（推荐基线）
