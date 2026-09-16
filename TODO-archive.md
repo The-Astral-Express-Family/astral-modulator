@@ -1,0 +1,1092 @@
+# TODO 登记簿 · 历史卷
+
+> [TODO.md](TODO.md) 的归档卷，**只增不改**（append-only）：正文只保留「现在需要看」
+> 的内容，已完成工作的实施明细原文照录于此，供追溯裁决痕迹与 commit 对照。
+>
+> - §A 轮次详录 —— 新轮次追加到卷末，同时在 TODO.md §0 索引加一行；
+> - §B Phase 实施清单（已完成部分，原文照录）；
+> - §C CLI 联调清单（原正文 §10，全部实装后于第 36 轮归档）。
+>
+> 本卷由第 36 轮（2026-09-16）建立；§A/§B/§C 为此前 TODO.md §0/§3 头两条/
+> §3.1/§4.1/§5.1 已勾项/§6 已勾项/§10 的原文搬运（只移不改）。
+
+## A. 轮次详录
+
+### 第 1 轮（脚手架，2026-09-07 上午）
+
+- Go 模块化单体骨架（chi + GORM + goose + slog），`go build/vet/test` 全绿；
+- `api/openapi.yaml` 全量契约 + `api/schemas/{error,event}.json`（Redocly 校验通过）；
+- 8 个 goose migration（init/auth/task/tags/documents/outbox/audit/presence）；
+- 真实实现：`/.well-known/astral`、`/api/v1/meta/capabilities`、`/healthz`、`/readyz`、
+  SSE 事件流端点（keepalive + hub）、错误 envelope、request-id/protocol-version 中间件、
+  前缀 ID 生成、公共响应头、CORS 开关；
+- Web 脚手架（Vue3+TS+Vite+Pinia+Router），api client/SSE 封装/device 审批页路由，
+  `vue-tsc + vite build` 通过；
+- CI（server/web/openapi 三 job）、docker-compose 开发库、Makefile。
+
+### 第 2 轮（2026-09-07 下午）：Phase 1 Auth + Phase 2 Workspace + Phase 3 spike 核心 全量实装
+
+- **Auth 全链路**：bootstrap 注册（D6 本地账号）→ web 登录（HttpOnly Cookie）→
+  Device Flow（create → web 审批 → 轮询兑换，A1 RFC 8628 语义）→ opaque
+  access/refresh（15min/30d，轮换 + 重放检测整族撤销）→ logout；
+- **Agent credential**：签发（`astral_` 明文一次性，A4）/ 吊销 / workspace 绑定 /
+  scope 强制（403 INSUFFICIENT_SCOPE），`ASTRAL_TOKEN` Bearer 校验；
+- **授权**：Authenticate 中间件（Bearer access | Bearer credential | Cookie session
+  三来源）+ workspace 级 scope 解析（human 按 role bundle，agent 按 credential scopes）；
+- **Workspace 模块**：CRUD、`?name=` 精确解析（init 依赖）、成员管理（owner 提升显式拒绝，
+  等 approval 流）、agent identity 管理；
+- **Task 模块**：CRUD + 应用层 revision 乐观并发（D5）+ parent 校验/循环检测 +
+  **原子 claim**（事务内条件更新，roadmap spike 验收项）+ lease renew/release +
+  过期清扫器（发 task.lease.expired）；search/tags 仍为 501 桩（T-task-6/7）；
+- **Presence / Message**：heartbeat（TTL 钳制 + offline 派生）+ 发送/列表
+  （actor/workspace/task 三 target）；
+- **事件**：transactional outbox dispatcher（500ms 轮询 → hub → SSE）；
+  关键写路径同事务写 audit + outbox；
+- **server_id 固化**：首启写 server_meta，此后以库中值为准（architecture §7）；
+- **Web**：登录页、Device 审批页（查询/批准/拒绝）、session store（Cookie 续期 +
+  内存 access token + Bearer provider 注入）；
+- **测试**：auth 单测（device flow/refresh 重放/credential/cookie）、task 单测
+  （claim 竞争唯一成功/租约过期接管/revision 冲突/清扫器）、app HTTP 集成测试
+  （spike 全链路 E2E + scope 强制 + 401 边界）、postgres migration 测试
+  （CI 注入 DSN，本地自动跳过）；
+- **CI**：server job 加 postgres service 跑 migration 测试。
+
+### 第 3 轮（2026-09-07 晚）：astral-cli 对接轮
+
+astral-cli 已落地 v0.1 骨架（login/init/doctor/version 命令面、HTTP/SSE client、
+credential store、workspace binding、protocol snapshot 机制；login/init 业务逻辑
+仍是桩，等 auth client 接线）。本轮完成：
+
+- **发布 v1 协议快照**到 astral-cli `protocol/snapshots/v1/`
+  （openapi.yaml + error/event schema + MANIFEST.json，冻结于 modulator
+  commit 75269c4）。CLI 后续 device flow / init 实现即以此为准。
+- **openapi↔路由防漂移契约测试**（`server/internal/app/openapi_contract_test.go`）：
+  双向比对 openapi 全部 47 个操作与 chi 实际注册路由，任一侧漂移 CI 即失败；
+  附错误码枚举 ↔ httpx 常量一致性检查。
+- **跨仓库冒烟**：真实二进制上按 CLI contract test 的断言逐字段校验 well-known
+  快照形状 + capabilities，全部通过。
+- CLI 侧现状核对（无冲突）：kProtocolVersion=1；well-known 字段一致；CLI 仅发
+  Authorization 头（其余公共头可选，服务端不强制）。
+
+
+### 第 4 轮（2026-09-07 深夜）：代码/逻辑/文档 卫生清理
+
+- **去重**：事件发布 4 处重复 envelope 构造统一为 `event.Hub.PublishDomain`
+  （workspace/task/presence/message；nil hub 安全）；workspace 级授权前置
+  8 处重复模式统一为 `auth.Service.RequireWorkspaceScopes`
+  （非成员 404 / scope 不足 403 语义单点定义）。
+- **死代码移除**：`audit.Recorder` 死接口、`deviceAuthRow` 别名、
+  `ids.MustValidate`（无生产调用）、web `listTasks`（无调用方）。
+- **文档清理**：`docs/protocol.md` 瘦身为"OpenAPI 之外的传输/语义约定"
+  （删除与 openapi 冲突的 §8-13 端点草案、§6 并发双方案、过时 ID 前缀表）；
+  删除 `docs/cli-ux.md`（职责已归 astral-cli 仓库）；
+  `docs/deployment.md` 由 17 章 CLI 发行手册瘦身为纯服务端部署
+  （CLI 分发归 astral-cli）；MANIFEST/docs 索引/roadmap 同步刷新。
+
+### 第 5 轮（2026-09-07 深夜）：Phase 3 收尾 —— 搜索 / Tags / 事件统一
+
+- **task 搜索实装**（原 501 桩）：语义固定为 权限 → 结构化（parent/tag/status）→
+  regex 过滤 → fuzzy 排序 → 分页；实现路径见裁决 D7（Go RE2 + trigram，
+  候选集封顶 2000）。`GET /workspaces/{id}/tasks/search` 需要 regex 或 fuzzy 至少其一。
+- **tags 两步确认实装**（原 501 桩）：
+  - 规范化：trim + NFKC + 小写（`tag.NormalizeName`，唯一性基于规范化名）；
+  - propose：确定性重名预检（精确，非模糊相似度）、confirm_code 只存 hash、
+    TTL 120s、绑定 actor/workspace/action/name、响应带全量 existing_tags；
+  - confirm：单次使用原子置位、code 常数时间比对、同事务复查唯一约束（TOCTOU 兜底）、
+    create/rename/delete 一体落地，audit + outbox 同事务；
+  - 新增 `TaskTag` GORM 模型（此前只有 SQL 表）。
+- **事件路径统一**：全部领域事件经 EmitTx 写 outbox（同事务），dispatcher 投递 hub；
+  删除 PublishDomain 直发路径。代价：SSE 事件可见延迟 ≤500ms 轮询间隔（已登记）。
+- **capabilities.features** 开放 `task_lease`。
+- 事件枚举三处同步（types.go / event.json / web sse.ts）——自动一致性检查列入下轮。
+
+### 第 6 轮（2026-09-09）：SSE 断线重放 + 幂等 + 一致性检查
+
+- **SSE resume 实装**（protocol.md §5 承诺兑现）：
+  `Last-Event-ID` 头 / `last_event_id` query 双通道；先订阅缓冲 → outbox 按
+  id 升序批量补发（500/批）→ 按游标去重接入实时流；游标超窗（24h）下发
+  `snapshot.required` 后断流。超窗判定依赖 UUIDv7 字符串可比性；
+  同毫秒乱序的极小概率误去重已注释记录（客户端幂等消费兜底）。
+- **outbox 保留窗口清扫**（S1 = 24h，每小时执行）与 **幂等键清理**同批启动。
+- **Idempotency-Key 中间件**（T-ws-5）：`internal/idempotency`，actor+endpoint
+  (路由模板)+key 主键；仅激活于携带头请求；只缓存 2xx（≤64KB）；并发同键
+  依赖主键冲突后回读重放；挂载于鉴权后（公共端点不受影响）。
+- **事件枚举一致性检查**（TestEventTypesSync）：types.go ↔ event.json ↔
+  web sse.ts 三方互比，CI 防漂移（与路由/错误码检查同属契约门）。
+- snapshot.required 纳入 event.json 契约 + web 订阅清单。
+
+### 第 7 轮（2026-09-09）：代码 / 逻辑 / 文档 卫生轮（双仓库）
+
+- **正确性修复（server）**：
+  - message list 私信可见性补 `workspace_id` 收口（跨 workspace 私信泄露）；
+    send 对 actor 目标补「本 workspace 可达」校验（成员 或 绑定 credential）；
+  - lease 清扫器改条件删除（`expires_at < now`），快照后已续租的行不再被误删；
+  - task.release 条件更新检查 RowsAffected，0 行回滚并返回 REVISION_CONFLICT；
+  - task.update 业务写与 audit/outbox 合并单事务（原先分离提交，失败窗口会卡死客户端重试）；
+  - SSE 补发与实时流重叠期重复投递修复（replay 返回去重前沿）；
+  - logout 补桩模式 nil-DB 防护；Recover 中间件改为契约 JSON envelope（带日志）；
+  - /api/v1 未知路由 404 改用新码 `NOT_FOUND`（原先返回 retryable=true 的
+    INTERNAL_ERROR）；各次级资源 404（成员/凭证/tag/proposal/actor）统一 NOT_FOUND；
+  - Claim/Login 区分「查无此行」与「DB 故障」（后者 500 + 日志，不再伪装成 404/401）。
+- **去重与死代码**：
+  - audit+outbox 序列三种写法并存 → createAgent 改事务内 RecordInTx、workspace.update 补审计；
+  - `httpx.NewPage` 统一分页 envelope（删除 task 内 nextCursorPtr/手写 map）；
+  - `revisionConflict` / `httpx.NotFound` / `Invalid` / `Conflict` 构造器消除 ~30 处字面量；
+  - 新增 `internal/background.RunEvery`，4 份 ticker 循环归一；
+  - task 列表 cursor 简化为 id（UUIDv7 时间序，单列比较 sqlite/PG 行为一致，
+    替换原 RFC3339Nano 与 sqlite 存储格式不匹配导致的分页序错乱）；
+  - EmitTx 双重序列化死代码、`httpx.Page` 死类型、`ids.Validate`、
+    模块 Hub/Audit 死字段（task/message/presence/workspace/tag）、presence 手动 TTL 常量
+    从 auth.Service 归位各模块；
+  - `auth.Refresh` 改条件轮换（并发双刷新不再互相踩踏/误撤族）；
+    ExchangeDeviceToken 状态机补 default；
+  - presence 主键改 (actor_id, workspace_id)（migration 00010；同 actor 多 workspace
+    presence 不再互相覆盖）+ list N+1 修复；
+  - credential last_used 更新按分钟节流；RequireWorkspaceScopes 记录底层错误。
+- **过时 TODO 注释清理**：config/server_meta、hub/SSE resume、outbox/LISTEN、
+  errors.go contract test、types.go codegen、task 包头（均已完成，注释删除或改写）。
+- **web**：SSE 重连携带 lastSeenId（原先重连丢事件）；access token 到期前静默续期
+  （与注释承诺一致）；types.ts 补齐 4 个漂移错误码并接入 AstralApiError；
+  删除死类型（Task/Tag/Lease/Me/register 等）；formatApiError 收敛 4 处复制粘贴；
+  WorkspaceOverview 路由参数响应式。
+- **astral-cli**：cacheDir 尊重 ASTRAL_HOME；删除死代码 versionString；
+  login/logout/whoami 桩骨架合一；randomSuffix+原子写提取 platform/atomic_file；
+  parseTargetSpec 接入 normalizeServerUrl（原先只测不用）；sse.cpp 死条件删除；
+  openInBrowser 改 fork/exec 消除 shell 拼接面；MANIFEST.json 三处过时描述对齐 revisions。
+- **文档**：roadmap.md 里程碑与 architecture §27 的 Phase 编号冲突消除；
+  architecture §5/§13 pg_trgm/POSIX 表述对齐 D7；§25 仓库结构对齐实际；
+  本文件（TODO.md）勾选实况、修正 Phase 指向与 501 桩清单。
+- **协议变更**：见 §9 登记表 2026-09-09 各条（NOT_FOUND、次级资源 404 码、
+  task 列表排序/cursor、presence 语义、私信可达性校验）。
+
+### 第 8 轮（2026-09-09）：T-ws-6 approvals 状态机（promote_owner）
+
+- migration 00011_approvals（apv_ 前缀；requested -> approved|rejected|expired -> executed）；
+- 端点：POST/GET `/workspaces/{id}/approvals`、POST `/approvals/{id}/approve|deny`
+  （openapi 契约 + approval DTO/ApprovalPage；新增错误码 `APPROVAL_EXPIRED`，三方已同步）；
+- 语义：MVP 仅开放 `membership.promote_owner`；发起需 workspace:manage_members，
+  目标须为非 owner 成员；同 (action,target) 只允许一条 pending；
+  裁决仅限 workspace **owner**（maintainer 持 manage_members 亦不可）；TTL 72h 惰性过期；
+  **approve 与 promote 同事务**（成员 role 变更 + status=executed + audit + member.changed 事件，
+  任一失败整体回滚）；裁决单次使用（条件更新防并发双裁决）；
+  D8 裁决：MVP 允许发起人自批（单 owner workspace 的唯一出路；双人裁决列为后续收紧项）；
+- addMember/updateMember 的 owner 分支改为 400 引导走 approvals 端点；
+- 测试：approve 原子提升 / maintainer 无权裁决 / 裁决单次使用 / 过期 409 /
+  owner 目标与非成员目标拒绝。go build/vet/test、redocly lint、路由与错误码契约门全绿。
+
+### 第 9 轮（2026-09-09）：设计复审落地 —— D9/D10/D11 + 撤销断流
+
+> 本轮先做「对计划本身的设计审查」再实施：发现并裁决 4 个规划缺陷（D9/D10/D11
+> 及 tag 列表 DTO 缺 workspace_id 的契约漂移），全部闭环后才动代码。
+
+- **D11 tag 关联链路补全**：`PUT/DELETE /tasks/{id}/tags/{tag_id}`（幂等语义见
+  openapi 注释）；关联 = 任务修改（条件 revision bump + `task.updated` 事件
+  data.tag_change=attach|detach + audit）；Task DTO 增补 `tags`（get/update/claim/
+  attach 响应填充，list/search 省略）；tag 包导出统一 `TagDTO`（补 workspace_id，
+  修掉与 openapi Tag schema 的漂移）。task_tags 表、search?tag= 过滤自此真实可用。
+- **D9 T-ws-7**：不建新绑定模型（推翻原计划前提）；listAgents = membership 行 ∪
+  有效 credential 绑定（覆盖存量只发过 credential 的 agent）；createAgent 同事务
+  补 role='agent' 成员行——「谁在 workspace」自此只有 membership 一个事实来源。
+- **D10 session 绝对寿命**：MaxSessionLife 30d→90d（原与 RefreshTTL 相同，
+  上限永不生效）；Refresh 在轮换后若已越界明确拒绝（修掉「签发即过期 session」的
+  边界洞）；补 TODO 3.2 拖欠的滑动 vs 创建起算边界测试（89d 过 / 90d+1s 拒）。
+- **凭证/会话撤销断流（security.md）**：Hub 订阅携带 actor 身份，`DisconnectActor`
+  关闭该 actor 全部 SSE 流；装配层把 auth.OnRevoke 接到 hub（session family 撤销、
+  refresh 重放撤族、credential 吊销、logout 四条路径触发）。
+- 协议行为变更登记见 §9；openapi 新增 2 个操作（attachTaskTag/detachTaskTag）。
+
+### 第 10 轮（2026-09-09）：CI 修复 + 代码/逻辑卫生轮（双仓库）
+
+- **CI 修复（先导）**：
+  - store.Migrate 的 goose 目录参数与 embed FS 根不匹配（`*.sql` 直接嵌在根，
+    却找 `migrations/` 子目录），postgres migration test 自引入 embed 起从未真正
+    跑过；改指 FS 根并新增无库回归测试（CollectMigrations 锁定 (FS, dir) 组合）；
+  - 修复暴露出的 00003 迁移解析失败：plpgsql 函数体加 goose
+    StatementBegin/End（分号切分器不识别 $$ 引用）。
+- **去重（server）**：4 个模块逐字复制的 `requireWorkspace` 上收为
+  `auth.RequireWorkspace`（workspace 模块的三返回值变体语义不同，保留）；
+  唯一约束冲突判断 3 份实现（含 "constraint failed" 文案分叉）归一为
+  `store.IsUniqueViolation`；`v := x; &x` 取址样板 8 处归一为 `ptr.Of`；
+  user_code 与 tag confirm_code 的去混淆字母表+生成循环归一为
+  `auth.NewRandomCode`。
+- **死代码移除**：workspace.Module.Audit 字段（装配与测试零有效引用）；
+  web `ApiErrorEnvelope` 类型、`AstralApiError`/`currentAccessToken` 的多余导出；
+  config 的 `getEnv` 纯别名。
+- **行为对齐**：RevokeCredential 404 由 `VALIDATION_FAILED` 修正为 `NOT_FOUND`
+  （对齐第 7 轮已登记的次级资源 404 裁决，openapi 该端点未文档化错误码，无契约冲突）；
+  audit 录入在调用方未显式传值时从请求上下文补 `request_id`
+  （列此前恒空）；message.send 的 task 目标查询区分「查无此行 404」与「DB 故障 500」
+  （此前一律 404）。
+- **构造器收敛**：新增 `httpx.Internal`/`httpx.ConflictWith`，全库 ~40 处
+  APIError 字面量改为构造器（带 Retryable 的扩展字面量保留）。
+- **web**：session boot/login 的会话建立序列去重（establishSession）。
+- **过时 TODO 注释清理**：service.go 撤销断流（第 9 轮已实装）、middleware/router
+  的孤儿 phase-2 标签（改指本文件 §3.2）、module.go 的 me() phase 标签。
+- **本文件对账**：§3.2/§4.1/§6 中「已完成未勾选」的撤销断流、T-ws-7、
+  refresh 窗口测试补勾并注明轮次；§10 桩清单与实际一致。
+- **astral-cli**：见该仓库同轮提交（commitlint 放行 protocol、macos-13 摘除、
+  严格构建修复、死代码与过时表述清理、MANIFEST 修订链修复、文档对齐）。
+
+### 第 11 轮（2026-09-10）：astral-cli auth 链路实装（消费协议快照 v1）
+
+> 按 §11 第 3 项的设计预审（D12/D13）照图施工，未新增契约、未改 openapi。
+
+- **D12 会话分槽落地**：`credentials.json` 升 v2——human 会话（device flow 产出、
+  按 canonical server URL 键）与 agent credential（按 server_id 键）分槽互不混淆；
+- **device flow**（A1/RFC 8628）：well-known 协议门 → 创建授权 → 拉起浏览器
+  （失败降级手动 URL+user_code，输出走 stderr 保住 --json 单对象契约）→
+  轮询兑换（AUTHORIZATION_PENDING/SLOW_DOWN 退避 +5s、401 拒绝、expires_in 超窗 TIMEOUT）；
+  传输/等待均为注入 seam，轮询状态机纯逻辑单测覆盖；
+- **D13 惰性刷新**：whoami/init 的已认证调用统一经 withLazyRefresh——
+  401 时单次轮换并重放，refresh 再 401 即判整族撤销并清除本地会话；
+- **login/whoami/logout/init 实装**：init 走 §9.3 状态机（解析 → 发现 →
+  ?name= 解析 → --create 可选创建 → GET /workspaces/{id} 可见性校验 →
+  绑定写入，已绑定同目标幂等、异目标须 --rebind）；logout 服务端登出尽力而为 +
+  本地必清；server 解析统一为 positional > --server > ASTRAL_SERVER；
+- **doctor** 增加服务端连通性探测（仅在 env/绑定给出目标时，离线仍是合法状态）；
+- 测试 55 项全绿（新增 device flow 状态机 6 项、会话槽往返 2 项）；CI 4 平台全绿。
+- CLI 侧对应提交：astral-cli@4cd6a74。
+
+### 第 12 轮（2026-09-10）：Web approval 裁决视图 + device 审批页联调收尾
+
+- **裁决队列视图**（§11 第 5 项）：`/workspaces/{id}/approvals`——待裁决列表
+  （GET ?status=requested）+ 批准/拒绝（confirm 后 POST，owner 专用），
+  15s 自动刷新、裁决后立即刷新；新增 api/modules/workspace.ts（approvals 三个调用）
+  与 Approval/ApprovalPage 类型（手工对齐 openapi）；
+- **device 审批页联调收尾**（§11 第 6 项）：pending 状态每 5s 轮询，
+  请求在别处被批准/拒绝/过期时页面自动跟进；裁决或终态后停止轮询；
+- workspace 总览页增加裁决队列入口。
+
+### 第 13 轮（2026-09-10）：Web 任务树视图（§11 第 4 项）
+
+- **`/workspaces/{id}/tasks` 视图**：
+  - 树模式（默认）：list 端点全量分页拉取（limit=200 循环到 next_cursor=null）→
+    前端按 parent_id 组树；兄弟按 id（UUIDv7 字典序=时间序）排序；折叠状态按
+    任务 id 记忆；孤儿任务（parent 不在集合内，防御性）标「孤儿」徽标；
+  - 搜索模式：search 端点（regex 过滤 / fuzzy 排序，可叠加 tag/status；
+    客户端强制 regex/fuzzy 至少其一，对齐服务端 400 语义），flat 结果表 +
+    score 列 + 「加载更多」（cursor 续页）；
+  - 状态过滤（树模式为前端树形过滤，保留命中节点到根的路径并忽略折叠；
+    搜索模式下透传给服务端）；
+  - 详情侧栏：`GET /tasks/{id}`（tags/lease 仅详情响应填充，D11）——
+    tag 徽标、租约 holder/到期、revision、description；
+  - **SSE 实时刷新**：task.* 事件 300ms 防抖重载当前模式；snapshot.required
+    立即全量重拉（游标超窗语义）；tag.* 刷新打开中的详情；
+  - tag 搜索输入带 datalist 联想（GET /workspaces/{id}/tags）；成员列表
+    （GET /members）做 actor id → 显示名映射，失败降级显示原始 id；
+- api/modules/task.ts 新增（list/search/getDetail）；workspace.ts 补 listTags/
+  listMembers；types.ts 补 Task/Lease/Tag/Member/TaskSearchHit（手工对齐
+  openapi，注意 list/search 省略 tags、lease 恒 null 的 DTO 差异）；
+- workspace 总览页加任务树入口（phase-3 的 TODO 注释兑现删除）；
+- 无契约变更（纯消费既有端点）；vue-tsc + vite build 全绿。
+
+### 第 14 轮（2026-09-10）：astral-cli todo 命令族实装（§11 第 8 项）
+
+> CLI 侧按 docs/ARCHITECTURE.md §11 命令面施工，消费协议快照 v1，无契约变更。
+
+- **`astral todo` 六命令**（替换 StubbedNounCommand）：
+  - `list`：结构化过滤（--status/--assignee/--parent）+ cursor 分页
+    （默认单页，`--all` 跟随 next_cursor 取尽）；
+  - `add`：POST create（--parent/--priority/--description/--tag 重复）；
+  - `show`：GET /tasks/{id} 详情（tags/lease 展示，人读输出为键值面板）；
+  - `claim`：POST /claim {expected_revision, lease_seconds}——不传 --revision 时
+    先 GET 当前 revision 再提交（读改写窗口由服务端 409 兜底）；--revision 跳过读取；
+  - `done`：PATCH {expected_revision, status:"done"}，同上 revision 语义；
+  - `search`：--regex/--fuzzy（至少其一，缺失为 exit 2 USAGE）+ --tag/--status，
+    regex/fuzzy 查询串百分号编码（client::urlEncode，libcurl escape）；
+- **auth/api 模块（新）**：业务命令公共底座——resolveLocalTarget（flag >
+  binding > env）→ ApiSession（well-known 发现 + 鉴权策略：ASTRAL_TOKEN 优先，
+  否则 human 会话槽 + 单次惰性刷新 D13；一个命令跑只做一次 discovery）→
+  resolveWorkspace（仅 name 时 ?name= 精确解析，空 items = WORKSPACE_NOT_FOUND）；
+  throwApiError 按状态映射退出码（401/403→3、404→4、409→5、5xx→6、其余
+  4xx→9）；
+- **协议错误透传**（兑现 CLI ARCHITECTURE.md §12 拖欠）：AstralError 增加
+  protocolCode/requestId/retryable 附加；--json 失败 envelope 对服务端失败输出
+  冻结契约 `{"error":{code,message,request_id,retryable}}`（code 如
+  TASK_ALREADY_CLAIMED），CLI 本地失败保持本地码；新增 Errc
+  NotFound/Conflict/InsufficientScope/Usage；
+- 测试 seam：auth::commandHttp() + setCommandTransportForTests（进程级注入，
+  供 runApp 级单测脚本化传输）；test_todo_cmd 16 项（分页合并、revision 读取/
+  钳定、协议码透传、惰性刷新重放与换新对持久化、撤族清会话、URL 编码、
+  无目标 LOCAL_WORKSPACE_ERROR），全仓 71/71 绿；clang-format 通过；
+- CLI 侧对应提交：astral-cli@881c919（README/ARCHITECTURE §11/§12 已同步）。
+
+### 第 15 轮（2026-09-10）：v2 server 轮 —— 容器化任务树（D15，破坏性）
+
+- **openapi 2.0.0-scaffold**：移除 `GET/POST /workspaces/{id}/tasks` 与
+  `GET /workspaces/{id}/tasks/search`；新增 `GET/POST /workspaces/{id}/children`、
+  `GET/POST /tasks/{id}/children`、`GET /workspaces/{id}/task-search`；
+  TaskCreate 移除 parent_id；Task schema 增 `children_count`（required），
+  `tags` 转 required（恒填充，修订 D11）；redocly lint 过；
+- **task 模块**：新 children.go——容器集合统一核心（workspace 容器=根层
+  parent_id IS NULL，task 容器=直接子层；参数 status/tag/assignee/limit/cursor；
+  id cursor 分页沿用 v1 语义）；创建核心 createTask（容器寻址 + tags-on-create：
+  规范化名解析、未知名字 404 整体不创建、关联与 audit/事件同事务）；
+  批量填充 enrichTasks（每页各一次 tags/children_count 查询，杜绝 N+1）；
+  task-search 守卫放宽为「任一过滤条件」（regex/fuzzy/tag/status/assignee），
+  search.go 补 assignee 结构化过滤 + 结果批量填充；
+- **顺带修复两个 v1 隐性缺陷**：① tag 模块生产装配从未接 DB（全部 tag HTTP
+  端点上线至今 500）——main.go 与测试装配补接；② search 结果行误包在
+  `"Task"` 键下（ScoredTask 具名字段无 json tag），与契约内联语义漂移——
+  改匿名嵌入内联；
+- **protocol_version 1→2**（httpx 常量 + well-known min_cli）；go build/vet/test
+  全绿（新增 app 级 TestTaskTreeContainersV2 全链路契约测试）。
+
+### 第 16 轮（2026-09-10）：v2 CLI 轮 —— 快照 v2 + todo 适配（astral-cli）
+
+- **协议快照 v2 发布**至 `protocol/snapshots/v2/`（openapi + schemas +
+  well-known protocol_version=2 + MANIFEST：breaking_changes 清单与
+  key_semantics 速查；冻结 modulator@0330768）；
+- **kProtocolVersion 2**；契约测试指向 v2 快照；
+- **todo 命令 v2 语义**：`list` 默认列 workspace 根层集合，`--parent <id>`
+  切到该任务 children 集合（URL 寻址取代 parent_id 查询参数），新增 `--tag`；
+  `add --parent <id>` 投递进 task 容器（body 不再带 parent_id）；`search` 走
+  `/task-search`，守卫放宽为「任一过滤条件」，新增 `--assignee`；
+  表格新增 KIDS 列（children_count）；
+- 测试同步（URL/协议 pin/search 守卫/容器切换新增用例），74/74 全绿；
+  clang-format 过；astral-cli@d7899b8。
+
+### 第 17 轮（2026-09-10）：v2 web 轮 —— 任务树逐容器懒加载
+
+- **TaskTreeView 重写**：根层 = workspace children 集合；展开节点懒拉取该
+  任务 children 集合并缓存；重载范围 = 可见集合（根层 + 已展开容器），
+  与树规模解耦（第 13 轮全量平铺拉取的 O(N) 问题了结）；
+  行内展示 tags 徽标与 children_count 展开列（v2 集合行内恒带）；
+- 过滤（status/tag/assignee）服务端生效；搜索模式走 task-search
+  （regex/fuzzy/tag/status/assignee 至少其一）；
+- SSE：task.* 防抖重载可见集合；snapshot.required 立即重拉；tag.* 重载
+  可见集合 + 刷新详情；types.ts/task.ts 对齐 v2 契约（tags/children_count
+  required）；vue-tsc + vite build 全绿。
+
+### 第 18 轮（2026-09-10）：API 冗余清理（外部 agent 实施，本端验收）
+
+- **server**：新增 filters.go——children 集合与 task-search 的结构化过滤
+  （status/tag/assignee）收敛为 applyTaskFilters 单一实现（status 校验单点化；
+  列名 `tasks.` 前缀约定统一限定，children 的 workspace_id/parent_id 条件
+  一并对齐）；loadTaskTags/childCount 改为批量版 tagsForTasks/childCounts 的
+  退化调用（tag 行组装与排序只剩一处）；task-search 行组装复用 enrichTasks；
+- **openapi**：新增 TaskStatusFilter/TaskTagFilter/TaskAssigneeFilter/
+  TaskRegexFilter/TaskFuzzyFilter 组件参数，三个任务端点的内联参数块改 ref
+  （过滤定义单点化，契约语义零变化）；
+- **web**：apiPath 查询串构造上提 client.ts，core/workspace/task 三个模块
+  收敛（原三份手写 URLSearchParams 循环删除）；core.ts 过时 phase-3 TODO 改写；
+- 门禁：go build/vet/test、redocly lint、vue-tsc + vite build 全绿；
+  零行为变化。
+
+### 第 19 轮（2026-09-10）：CLI tags/msg 命令实装（astral-cli，基于 v2）
+
+- **`astral tags`**（替换桩命令）：`list` 词典；`create <name>` propose →
+  人读输出携带完整可复制的确认命令行（`--proposal <id> --confirm <code>`，
+  无本地状态，与服务端 code↔actor/workspace/action/name 绑定语义一一对应）；
+  `rename <name-or-id> <new>` / `delete <name-or-id>` 先经 tag 词典按名解析
+  `target_tag_id`（`tag_` 前缀参数直接作 id；delete 的 confirm name 用服务端
+  canonical 名）；
+- **`astral msg`**：`send <target> <body> [--thread <id>]`——目标语法
+  `workspace`（广播）| `actor:<id>` | `task:<id>`（非法 → USAGE exit 2）；
+  发送携带确定性 Idempotency-Key（内容 FNV-1a，重跑同命令 24h 内服务端重放
+  首次 2xx 不双发）；`list [--task <id>] [--thread <id>] [--limit] [--all]`
+  ——`--task` 走任务线程集合端点，其余走 workspace messages；
+- **auth/api 共用件**：`openWorkspace`（目标解析 + 单次 discovery +
+  workspace 解析合一；LOCAL_WORKSPACE_ERROR/WORKSPACE_NOT_FOUND 附带 D14
+  default/<user>/todo 提示）与 `fetchPageItems`（分页取尽），todo_cmd 同步
+  去重；CLI 文档（README/ARCHITECTURE §11）同步；`event listen`（SSE 流式
+  消费）列为下一轮；
+- 测试：runApp 级脚手架抽至 tests/unit/support/api_fixture.hpp（EnvGuard/
+  CwdGuard/FakeApi/ApiFixture 共享，test_todo_cmd 改用），新增
+  test_tags_msg_cmd（两步确认流程、target 解析、线程选择、幂等键、D14 提示
+  等用例），全仓 85/85 绿；clang-format 过；
+- CLI 侧对应提交：astral-cli@0e757da。
+
+### 第 20 轮（2026-09-12）：server task thread messages + actor DTO 修正
+
+- **`GET /tasks/{task_id}/messages` 实装**（phase-4 遗留 501 桩）：task 归属
+  校验 + workspace 级 message:read scope；线程按时间正序（阅读序）；
+- **actor DTO 契约修正**（E2E 发现）：直接序列化 model.Actor 会漏出大写
+  字段名，auth 包统一经 actorDTO（id/kind/display_name）输出；
+- CLI 侧对应提交：astral-cli@c1150b9（init 解析 flat Workspace 响应）。
+
+### 第 21 轮（2026-09-12）：双仓库卫生轮 —— 冗余清理 + 补丁化收敛 + 文档重写
+
+> 外部勘察（server/web/cli/docs 四路）+ 本端逐条验收实施。门禁：go
+> build/vet/test、gofmt、vue-tsc + vite build、cmake + ctest、clang-format
+> 全绿。行为变化均为「对齐已登记裁决」的修正，逐条见 §9 与下文。
+
+- **server：task 模块收敛（补丁化主战场）**
+  - task「加载 + 404 + scope 校验」四份实现（requireTask/Claim/Attach/
+    Detach）统一为 `LoadForWorkspace`（ctx 介质，可跨模块复用）；handler 侧
+    `requireTask` 退化为薄包装；
+  - 乐观并发「条件更新 + RowsAffected==0 → 重读 → REVISION_CONFLICT」五份
+    拷贝统一为 `bumpRevisionTx`（updates 不含 revision，由其统一 +1）；
+    claim 的 409 details.current_revision 由快照值改为事务内重读（并发窗口
+    内更准确，正常路径无差异，§9 登记）；
+  - 「释放任务归属」字段集 sweep/release 两份拷贝 → `releaseOwnershipFields`；
+    parent 存在性 + 同 workspace 校验两份 → `validateParent`（createTask 与
+    update 共用）；
+  - **Claim 授权内聚服务层**（对齐 AttachTag/DetachTag 同规矩）：handler 去掉
+    双重加载，Claim 经 LoadForWorkspace 自带 task:claim 校验——修复「服务层
+    可被复用绕过授权」的分层隐患；
+  - task get 的 lease 读取不再吞 DB 错误（原先故障呈现为「无租约」200）；
+    renewLease 换 `httpx.DecodeJSON`（空 body 仍合法，非法 JSON 如实 400，
+    对齐全仓解码纪律）。
+- **server：message 模块**
+  - `listTaskThread` 复用 `task.LoadForWorkspace`：消除手写 task 加载，
+    404 由通用 NOT_FOUND 修正为 **TASK_NOT_FOUND**（task 是端点主语，对齐
+    errors.go 既有规则；§9 登记）；
+  - message.send 补 thread parent 同 workspace 校验（原先可用他 workspace
+    的 thread_id 建立跨 ws 关联；§9 登记）；
+- **server：workspace 模块**
+  - **T-ws-7/D9 断链闭合**：`listAgents` 此前仍返回服务器全局 agent 列表
+    （round 9 已登记完成但代码未实施），现按 D9 实装 membership(role=agent)
+    ∪ 有效 credential 绑定的并集去重；
+  - addMember/createCredential/revokeCredential 三处「查无此行 vs DB 故障」
+    区分补齐（DB 故障不再伪装 404，对齐 round 7 裁决）；
+  - listMembers 逐行 First 的 N+1 与静默吞错 → 一次 IN 查询 + 错误上抛
+    （对齐 presence）；
+- **server：单一来源与构造器**
+  - `auth.ActorDTO/ToActorDTO` 导出为全仓单一来源，workspace 模块删除平行
+    actorDTO（round 20 修正的巩固，下次契约修正只改一处）；
+  - `httpx.Forbidden` / `httpx.Unavailable` 构造器新增，8 处 403/503 字面量
+    收敛（readyz、dbOrError、requireHuman、租约/审批/提议非属主等）；
+  - tag 列表查询 + DTO 组装两份 → `workspaceTags`；task 加载常量/DTL 常量
+    降导出（leaseDefault 等无外部消费）；`boolPtr` → `ptr.Of`；
+    presence list 死条件（Find 永不返回 ErrRecordNotFound）删除。
+- **server：装配**：message.Module 增 `Tasks` 依赖并在 main/测试装配接线；
+  tag 桩模式补 `Auth` 字段（一致性）；router_test 顺手修正 gofmt 对齐。
+- **server：过时注释清理**：model.go TaskTag「无 GORM 读写路径」（已有）、
+  ids.go 前缀表（protocol.md 引用 + 不存在的 obx）、审计 TODO 四处重复
+  （集中登记到 audit/module.go）、hub dropped TODO 双登记（phase 号统一）、
+  config.go 桩模式行为描述。
+- **web**：
+  - `useWorkspaceEvents` composable 抽取（WorkspaceOverview/TaskTree 的 SSE
+    生命周期各删 ~15 行）；`lib/format.ts` 收敛 fmtTime 两份拷贝；
+  - main.css 新增 `.error-text`/`.notice-text`，7 处内联色值收敛；
+  - auth.ts 查询串换 `apiPath`（round 18 收尾）、session.ts bootError 换
+    `formatApiError`（对齐「UI 一律经 formatApiError」纪律）；
+  - TaskTreeView 删除 tag.* 事件的冗余第二次详情 GET（reloadVisible 内部
+    已刷新）、hits 声明上移到使用点之前（round 17 残留）、历史战况注释精简；
+  - WorkspaceOverview 头注释对齐实况（presence/消息视图未实装）。
+- **astral-cli**（astral-cli@9a912f0）：
+  - `output/render.{hpp,cpp}` 新增：scalarOr（3 份拷贝）、truncateUtf8
+    （2 份）、printPageJson（4 份 --json 列表 envelope）、printMoreHint
+    （分页尾注）收敛；`auth::getJson/sendJson` 消灭 6 处手写 HTTP 请求样板
+    （postJson 封装自此有消费方）；
+  - **token_provider 模块删除**（自述「do not delete」的策略已被 round 11
+    ApiSession 完整接管，全仓零生产调用方）；init/whoami 的手写
+    withLazyRefresh 闭包收敛为 `sessionGet/sessionPost`（会话专用身份策略
+    与 ApiSession 的 ASTRAL_TOKEN 优先有意分离，注释言明）；
+  - **行为修正**：init 的 `?name=` 补 urlEncode（特殊字符 workspace 名
+    崩坏）；logout body 改 nlohmann 序列化（不再手拼 JSON）；错误 envelope
+    组装统一到 `errorEnvelope`（app.cpp printFailure 复用，可选
+    request_id/retryable 字段）；
+  - 死代码删除：core::logger()、Painter::enabled()；过时注释修正：
+    credential_store 格式（v1 单槽 → v2 双槽实况）、device_flow「snapshot
+    v1」、target.hpp 两阶段 discovery（已不存在）、doctor 页脚（探测已
+    实装）、registry stub 提示（login/init 已落地）；
+  - 测试：test_cli 迁移到 api_fixture（删 ~35 行同构脚手架）、死常量
+    kWellKnown 删除、D14 提示用例从 test_tags_msg_cmd 归位 test_todo_cmd；
+    85/85 绿、clang-format 过。
+- **文档卫生（本仓库）**：roadmap 进度块重写；architecture §7 示例升 v2、
+  §20 错误码手抄清单删除改链接（曾连漏 6 码）、§25 仓库树补 ptr/TODO 等、
+  §26 兼容声明对齐 D15、§27 pg_trgm 措辞 + approval 归属标注、§14 confirm
+  body 补 name、§6.3 补 v2 语境；protocol §2 示例升 v2、§3 分页例外写明；
+  requirements FR-005 去 claimed；security §4 scope 手抄表改链接；
+  sync-semantics §5/§12 的 .astral/ 布局移交 astral-cli（单一来源）；
+  deployment/README 桩模式 501 清单修正 + env 表补 ASTRAL_LOG_LEVEL；
+  MANIFEST 补 redocly/LICENSE/.github；docs 索引收录看我看我.md。
+- **openapi 卫生**：悬空 `#/components/responses/{NotFound,Conflict}` 引用
+  补齐组件（此前 CI lint 未见报，疑 redocly 配置放行——组件现已真实存在）；
+  死 `schemas.NotFound`（响应形状误放 schemas）删除；`schemas.Conflict`
+  正名 `DocumentConflict`（消除与 responses.Conflict 的同名异物混淆）；
+  info/schemas 描述里的 protocol.md 陈旧节号改指 TODO.md 裁决；servers.
+  description 写明「路径前缀 ≠ 协议版本」；**Task schema required 补齐
+  parent_id/description/priority/assignee_actor_id**（服务端恒序列化、
+  web 类型一致，openapi 此前落后于实现；契约文档修正）；TokenPair.
+  refresh_token 补「cookie 模式省略」口径。
+- **已知遗留（登记为后续项，本轮不做）**：见 §11。
+
+### 第 22 轮（2026-09-12）：SSE workspace 级授权（安全）+ CLI event listen 端到端落地
+
+> §11 第 10 项（安全提级）+ 第 8 项（CLI event listen）同轮闭环；第 21 轮
+> 卫生提交验收（补一处 test_cli.cpp 缺 namespace 闭合的编译损坏，
+> astral-cli@8b51332）。全程本地双仓库端到端联测（PG 18 临时实例 + 真服务器
+> + 真 CLI 流式）。
+
+- **server：`GET /workspaces/{id}/events` 订阅授权**（此前仅要求已认证，
+  任何主体可订阅任意 workspace 事件流）：
+  - SSEHandler 增 `Auth *auth.Service` 依赖；stream 入口
+    `auth.RequireWorkspace(..., workspace:read)`——非成员 404
+    WORKSPACE_NOT_FOUND（不泄露存在性）/ scope 不足 403，与其余 workspace
+    端点同语义；Auth 未接线 fail closed（503）；main.go 两个分支（有库/
+    桩模式）均接线；
+  - event 模块测试重构：带授权的流式测试夹具（actor+workspace+member 行 +
+    WithPrincipal 注入），新增非成员 404 与 fail-closed 用例；openapi
+    events 端点补 404/403 响应；protocol.md §5 补订阅授权语义。
+- **CLI：`astral event listen` 实装**（astral-cli c055744 + 两枚 E2E 修复）：
+  - `HttpClient::sendStreaming`：chunk 级 sink、无总超时、60s 停滞探测器
+    （keepalive 15s 兜底）、非 200 body 缓存供错误 envelope 解析、sink 返
+    false 干净中止；
+  - `events/listen` 重连循环（FrameParser 之上）：指数退避（1s 起步、30s
+    封顶，投递成功即重置）、Last-Event-ID 断线续传、snapshot.required 后
+    丢弃过期游标、429 遵循 Retry-After；401 经 withLazyRefresh 每连接一次
+    懒刷新重放，403/404 等终态走 throwApiError（协议 envelope 透传 +
+    标准退出码）；`--max-events N` 消费满干净退出（控制事件不计入）；
+    --json 输出原始 envelope JSON Lines，人读模式输出「时间 类型 ID」；
+  - 测试：test_event_cmd 7 用例（脚本化流式 fake：JSON Lines/max-events、
+    关流续传游标、跨 chunk 帧完整性、snapshot.required 清游标、传输错误
+    退避、5xx 重试 vs 404 终止、人读格式），全仓 92/92 绿。
+- **E2E 揪出并修复两枚真 bug（同类：lambda 按引用捕获已亡局部）**：
+  - astral-cli@f2cf2f3：makeAttempt 返回的 attempt 链捕获 helper 局部
+    （HttpClient/HttpFn），返回即悬垂，首个真实流上崩 INTERNAL
+    "string too long"；
+  - astral-cli@6f5bf20：LoginSession 仍声明在 else 分支块内被按引用捕获，
+    块结束即亡 → 空 Bearer 401 → 空 session 拼出无 scheme 的刷新 URL。
+    两枚都是单测 fake 覆盖不到的接线层生命周期错误。
+- **端到端联测结论（本地栈，三场景全过）**：
+  - A 成员流式：listener --json --max-events 2，`todo add` + `msg send`
+    触发 task.created/message.created，JSON Lines 按序各一行，干净退出；
+  - B 断线续传：listener 常驻，杀掉 astral-server 再重启，断线窗口内
+    创建的 task 经 outbox 按 Last-Event-ID 补发送达，无重复交付；
+  - C 越权 404：无成员关系的 workspace 绑定订阅事件流 → 服务端
+    WORKSPACE_NOT_FOUND，CLI exit 4 + 协议 envelope 透传（即本轮安全修复
+    的黑盒验证）。
+- CLI 侧对应提交：astral-cli@c055744、f2cf2f3、8b51332（卫生轮验收修复）。
+
+### 第 23 轮（2026-09-13）：双线并行开发整合（merge origin/main）+ 全栈 E2E 回归
+
+> 远端 modenicheng 在本线 rounds 13-22 期间并行落地了 用户资料系统
+> （actors.bio/avatar_url + PATCH /auth/me + web 个人页）、astral-bootstrap
+> 交互式向导、godotenv .env 预加载、shadcn-vue reka-nova 主题重构 +
+> MainLayout/路由守卫。本轮合并两条线并解决冲突，全栈回归。
+
+- **合并与冲突解决**（10 文件冲突，双侧功能均保留）：
+  - **auth DTO 双轨合一**：远端为资料功能引入的私有 `actorDTO` 并入 round 20
+    的全仓单一来源 `ActorDTO`（增补 bio/avatar_url；AvatarURL nil→空串），
+    workspace 模块成员/agent 响应随之带上资料字段（与 openapi Actor schema
+    required 一致，wire 无破坏）；`newActorDTO` 删除，`meBody`（human 邮箱
+    查询）保留为 Me 响应组装单点；
+  - router：取远端 MainLayout + meta.auth 子路由结构，`workspace-tasks`
+    路由补回（auth: required）；5 个冲突视图取远端主题版，总览页补回
+    「任务树」入口；error/notice 文本色工具类移植进新 `index.css`
+    （TaskTreeView 等仍依赖）；
+  - openapi/TODO.md 双侧条目均保留，登记整合记录。
+- **验证**：server `go build/vet/test` 全绿（openapi↔路由契约测试含新
+  PATCH /auth/me）；web `vue-tsc` + `vite build` 全绿；openapi redocly
+  valid；astral-cli 92/92。
+- **端到端联测（本地栈：PG 18 临时实例 :5439 + 真服务器 + 真 CLI + 浏览器）**：
+  - CLI 全命令面：register/login（设备流 Web API 审批）/whoami/init/
+    todo add·list·search(fuzzy)/tags 两步确认/msg send/list 全通；
+  - `event listen --max-events 2`：todo add + msg send 触发双事件，
+    JSON Lines 按序、干净退出（round 22 场景 A 回归）；
+  - SSE 订阅授权回归：匿名 401 / 非成员 404（不泄露存在性）；
+  - 整合新面：PATCH/GET /auth/me（bio/avatar_url）；workspace members
+    响应含统一 ActorDTO 资料字段；astral-bootstrap 向导全流程（迁移校验、
+    server_id 沿用库中值、已有账号跳过、写 .env）；
+  - 浏览器黑盒：路由守卫匿名拦截 → 登录（新主题）→ 侧边栏用户菜单 →
+    总览 workspace 列表 → 任务树（SSE open、容器懒加载展开出子任务）→
+    个人资料页（API 写入的 bio 正确回显）。
+- **遗留观察（下轮可处理）**：astral-bootstrap 对 Public URL 缺 URL 形状
+  校验（任意字符串可写入 .env）；web 侧 SSE 封装双轨（远端 `useEventStream`
+  vs 本线 `useWorkspaceEvents`）可择一收敛；自动化无障碍点击在 reka-ui
+  Button 上超时（真用户点击正常，测试基建观察项，非应用 bug）。
+
+### 第 24 轮（2026-09-13）：三仓逻辑拉直轮 —— 单一抽象收编、深嵌套拆平
+
+> 三路并行审查（server Go / web Vue / CLI C++）产出 30 项缠绕点，本轮落地
+> 其中影响×安全度最高的一批；每仓库独立提交，全量测试兜底。原则：同一条
+> 业务规则/同一段管线只允许一个实现点，分支「决定语义」、尾部统一「执行」。
+
+- **server**（6850bbb）：
+  - `requireWorkspace` 删 scopes 死返回值（13 个调用点全部丢弃，`_` 白扛）；
+  - idempotency：两处逐字复制的重放块收编为 `replay()`；
+  - auth：`authenticateAccessToken`/`authenticateCookieSession` 双胞胎
+    （查行→404/500→撤销→过期→Principal）公共管线抽 `liveSession()`，
+    差异（列名/过期列/文案）留在各自入口显式可见；
+  - `model.ActorsByIDs`：「收集 ID→IN 查询→按 ID 建索引」三份手写
+    （workspace members/presence/listAgents）收单点；listAgents 顺带删掉
+    多余的收集期去重闭包（IN 按主键天然去重）；
+  - `tag.Confirm`：100 行事务闭包、全仓最深 6 层嵌套，拆为
+    `loadProposalTx/checkProposal/claimProposalTx/applyTagAction{Create,
+    Rename,Delete}`，闭包退化为 5 步直线（加载→校验→单次置位→动作→审计+事件）。
+- **web**（bd43640）：
+  - SSE 封装双轨合一（第 23 轮遗留项闭合）：`useEventStream` 增
+    `onEvent/maxEvents` 选项，删除 `useWorkspaceEvents`（TaskTreeView 迁移，
+    订阅时机从 load 末尾提前到 setup，重载本就有 300ms 防抖）；`SseState`
+    类型单点化到 `api/sse.ts`；
+  - `useApiAction` 删 notice 死代码路径（零调用方；成功提示归 vue-sonner），
+    run 收敛 busy/error 两态；
+  - `DeviceApproveView`：终态三个写入点收敛为 `enterTerminal` 单点 +
+    status→文案映射表；
+  - `TaskTreeView` 接入共享件：StatusBadge（map 补 task 六状态）/
+    Badge outline/ErrorAlert，删 15 行手写徽章 CSS 与死的 `session.boot()`
+    （路由守卫已保证）；`fmtTime` 去重（ApprovalsTable → lib/format）；
+    `loginLocation()` 统一 401 出口与路由守卫的登录跳转构造。
+- **astral-cli**（086de96）：
+  - `HttpClient`：`send`/`sendStreaming` 约 45 行逐行重复的 curl 接线
+    （URL 校验/init/header 组装/公共 setopt/清理）收编为 RAII
+    `PreparedRequest`，两函数只留差异项（TIMEOUT vs LOW_SPEED 停滞探测、
+    body 回调）；清理逻辑随 RAII 覆盖 throw 路径；
+  - `events/listen`：三段复制「sleep+growBackoff+continue」合一为单一
+    重连尾部，分支只产出 `reconnectIn+diagnose`（429/5xx 文案动词统一，
+    无测试断言依赖）；
+  - `commands/paging.hpp`：`appendParam/PageFlags/addPageFlags/addPageParams`
+    共享件落地，msg_cmd 删手搓 append lambda 与 limit_/all_ 对，todo_cmd
+    以 `TaskPageFlags` 组合共享旗标 + status；
+  - `tags_cmd`：runMutate 的字符串状态机改 `enum class Action`（协议串经
+    `wireName()` 单点转换），嵌套三元 outcome 改 switch。
+- **验证**：server `go build/vet/test` 12 包全绿；web `vue-tsc`+`vite build`
+  全绿；astral-cli 92/92。
+- **已识别未落地（下轮候选，按价值排序；状态见各条）**：
+  1. CLI `event_cmd` attempt 组装链（约 8 层 lambda 间接、认证策略与 api.cpp
+     重复、`&store/&session` 引用捕获靠作用域约定兜底）收编进
+     `ApiSession::sendStreaming`——本轮 listen 循环已动，此项涉及认证接线
+     形态，单独成提交（**仍 open**）；
+  2. ~~server「First→NotFound/500」三行样板~~（✅ 第 31 轮：`store.First[T]`
+     单一出口，14 站点收敛，-54 行净删）；
+  3. server approval 状态机动作表（当前仅 promote_owner 一项，加第二动作前做，
+     **仍 open**）；
+  4. server `bootstrap.Run` 230 行主流程按段抽取（远端活跃开发中，避免踩线，
+     **仍 open**）；
+  5. web TaskTreeView 五处手写 try/catch 接入 useApiAction（✅ 复审后不采纳，
+     第 31 轮记录理由）；session.login 三连请求（✅ 第 30 轮：adoptMe 两请求）。
+
+### 第 25 轮（2026-09-13）：任务树视图 UI 重设计（双栏，round13 分支移植）
+
+- **背景**：并行会话曾在 v1 契约上实现过完整任务视图（本地分支
+  `round13-task-view-alt`，视觉验收 10/10），因 D15 v2 落地而废弃；本轮把其
+  UI 层按 v2 容器契约移植到主线，**数据骨架沿用 round 17 的逐容器懒加载语义
+  不变**（reloadVisible/防抖/snapshot.required 原样保留）。
+- **数据层**：`api/modules/task.ts` 补写操作（createRoot/createChild/updateTask/
+  claim/renew/release/attachTag/detachTag——这些端点 v2 未变）；新增
+  `api/taskSource.ts` 数据源缝（mock/真实同签名）+ `lib/mockMode.ts` +
+  `mocks/`（v2 内存实现：children 过滤、task-search ≥1 条件守卫、claim/release/
+  租约清扫语义）；dev + `VITE_TASKS_MOCK=1` 时任务视图离线可演示（不触发
+  真实 API 401 全局登出）；session boot 在「后端不可达/在线未登录」时落演示
+  身份（仅 mock 开启时生效，真实会话优先）。
+- **视图**：TaskTreeView 从原生 HTML 表格重写为双栏（左缩进树 + 右详情面板）；
+  工具栏 shadcn 组件化（fuzzy/regex/assignee/状态/标签；状态与标签变更即时
+  重载可见集合）；详情面板全操作——编辑标题/描述、状态/优先级、标签增删、
+  认领（时长可选）/续租/释放、新建子任务；REVISION_CONFLICT/租约过期 → 回源
+  + toast，不静默覆盖；新建对话框按 v2 寻址（无 parent_id，创建位置由容器
+  端点决定，支持按名附带标签），创建子任务后自动展开父容器保证新行可见；
+  搜索结果模式带匹配度徽章。
+- **顺带关闭** §11 第 13 项的搜索守卫缺口（assignee 纳入 canSearch，与契约
+  ≥1 条件语义一致）。
+- **验证**：vue-tsc/build 全绿；mock 模式浏览器实测 8 场景自审通过（主视图/
+  展开子层/创建对话框/创建后自动展开/搜索/模拟认领/快照重载）；真实 API
+  冒烟待有账号的环境点验（置 VITE_TASKS_MOCK=0）。
+- **已知未决**：fuzzy-only 搜索出现 0 分行（服务端无阈值语义，UI 忠实呈现，
+  见 §11 第 15 项）；next_cursor 消费仍在 §11 第 11 项。
+
+
+### 第 26 轮（2026-09-13）：任务树 UX 打磨 —— 骨架屏 + 过渡动画 + 事件闪烁
+
+- **骨架屏三处**：整树初始加载（既有）；容器展开时子层骨架挂在容器节点下
+  （缓存命中则即时展开不出骨架）；点选任务后详情面板结构化骨架（标题/选择器/
+  描述/标签/租约占位）。`expandingIds`/`detailLoading` 分路驱动。
+- **过渡动画**：树行 `TransitionGroup` 进出场/重排（leave 用 absolute 让留存行
+  立即上移配合 v-move）；搜索结果列表同动画；详情面板 out-in 淡入切换。
+  全部带 `prefers-reduced-motion` 降级。
+- **事件闪烁**：SSE/模拟事件改任务时，revision 发生变化的可见行底色闪烁 1.1s
+  （revision diff 驱动 `.task-row-flash` keyframe）——「实时事件驱动」可感知。
+- **mock 注入 250ms 延迟**：骨架/busy 态在演示模式下真实可见（约等于本地 API 往返）。
+- **验证**：vue-tsc/build 全绿；浏览器页内轮询实证（展开骨架 max=2、详情骨架
+  max=10、闪烁类命中）+ 定时截图自审（事件后子行无丢失/透明卡死）。
+
+
+### 第 27 轮（2026-09-13）：设备审批页独立布局 + Device Flow 全链路真机验收
+
+- **/device 独立化**：路由从 MainLayout children 提升为顶层（与 /login 同构）——
+  CLI 拉起的浏览器窗口不再携带应用外壳；视图补全屏居中容器。守卫链路不变：
+  未登录 `/device?code=X` → `/login?from=...` → 登录后原路返回自动查询。
+- **终态展示补齐**：lookup 直接命中非 pending（expired/denied/exchanged）也走
+  enterTerminal 终态 Alert（原先只显示卡片徽章，与「轮询发现」路径不一致）；
+  StatusBadge 补 exchanged variant。
+- **全链路真机验收**（收口 §11 第 3 项遗留）：curl 模拟 CLI + 内置浏览器走真实
+  审批 UI，9 项全过——create → pending 400 → 未登录重定向 /login 回跳 → 卡片
+  自动查询 → 批准终态 Alert → exchange 200（ata_/atr_）→ 重放 401 → /auth/me
+  Bearer 200 → 拒绝路径 exchange 401 + denied 终态展示。
+- **验收中发现的运行态问题**（留观，不在本轮代码内）：本地 8080 常驻
+  astral-server.exe 是旧编译产物（register 响应仍泄漏大写字段，round 20 已修），
+  已重启为当前源码，dev 库 bootstrap human 由验收账号占用；`verification_uri`
+  在 ASTRAL_PUBLIC_URL 未配置时返回相对路径 `/device`，CLI 需自行拼 base
+  （well-known 已有 Host 兜底，device create 尚无）——候选后续小轮。
+
+
+### 第 28 轮（2026-09-13）：设备登录 VS Code 式直达 —— 验证链接绝对化 + 审批页单步确认
+
+- **verification 链接绝对化**：新增 env `ASTRAL_WEB_BASE_URL`（§9 已登记）——
+  device create 的 `verification_uri`/`verification_uri_complete` 按
+  WebBaseURL → PublicURL → 请求 Host 回退链拼**绝对 URL**（对齐 openapi
+  `format: uri`，round 27 验收遗留项关闭）。CLI 拿到即可直接打开/展示，
+  不再二次拼接；dev 下指向 vite 5173。
+- **审批页单步确认**：带 `?code=` 直达（CLI 默认路径）时隐藏手动输码框，
+  页面只剩「CLI 请求登录」确认卡片 + 批准/拒绝——对齐 VS Code 设备码登录
+  体验；无码入口（侧栏）保留手动输码回退。终态/轮询/守卫链路不变。
+- **安全取舍**：已登录仍需一次点击批准，不做纯自动批准——防 login-CSRF
+  （攻击者诱导已登录浏览器批准攻击者的 device_code，等于把本账号 CLI 凭证
+  送给攻击者），与 GitHub/VS Code 设备流一致。
+- **验证**：go test（新增 `TestDeviceBaseURL` 回退链断言）+ vue-tsc/build
+  全绿；浏览器实测带码直达（无输码框 → 批准 → 终态 → CLI 兑换 200）与
+  手动入口双路径；curl 确认 `verification_uri_complete=http://localhost:5173/device?code=…`。
+
+### 第 29 轮 B 线（2026-09-13，modenicheng）：CLI 同步轮 —— actor profile 消费 + 协议快照 v2.1 刷新
+
+> 与第 29 轮 A 线（Lidozs55，邀请注册 P1，§9 同日多行）并行推进；轮号撞车按
+> 「第 10 轮（modenicheng）」先例以分线标注区分。A 线 openapi 增量 CLI 尚未
+> 消费，快照刷新（→ 7c46a7a+）随 P3 `astral register` 一并。
+
+- **profile 命令族（astral-cli round 29）**：`astral profile show`（GET
+  /auth/me，人读展示 display_name/email/bio/avatar，--json 透传 Me envelope）；
+  `astral profile set --display-name/--bio/--avatar-url`（PATCH /auth/me 部分
+  更新，只序列化出现的字段；bio/avatar 空串=清除，空 display_name 本地即拒）。
+  Bearer 走 ApiSession（ASTRAL_TOKEN 优先）——agent 凭证可自管资料，human
+  会话同路径。server 解析 positional > --server > repo 绑定 > ASTRAL_SERVER。
+- **whoami 增强**：Me envelope 的 email（human 只读）进人读输出与 --json。
+- **快照 v2.1（§11 第 14 项关闭）**：0330768 → 48ab5f2，收入 PATCH /auth/me +
+  Actor/Me 资料字段、device flow 绝对 URL（round 27/28）、SSE 404/403 契约
+  （round 22 语义收敛）、round 18 参数组件化形态漂移；protocol_version 仍为
+  2，CLI 契约测试全绿。
+- **顺带修复（astral-cli）**：`resolveServerUrl` 空串 positional 遮蔽显式
+  `--server`（`whoami --server X` 此前静默丢旗标必失败）；sessionGet/
+  sessionPost 与 whoami discovery 切到可注入 commandHttp seam（生产等价）；
+  单测 fixture 临时目录加 PID 区分（ctest 每用例独立进程共用同一目录的潜伏
+  串扰）。
+- **验证**：CLI 单测/契约 102/102（连跑两轮防 flake）；本地真机全链路：
+  API 登录 bootstrap human → 凭证文件注入临时 ASTRAL_HOME → profile
+  show/set（bio/avatar/display_name 部分更新保持、空串清除、--json envelope
+  透传）→ 重新 show 确认持久化 → 恢复资料 → logout 204；匿名 discovery
+  协议门与假 token 401 envelope（含 request_id）实测。
+
+### 第 30 轮（2026-09-13，Lidozs55）：邀请注册 P2（web）—— /register 页 + 邀请管理卡
+
+- **/register 顶层独立路由**：与 /login、/device 同构（无应用外壳，邮件/聊天
+  链接直达）；`?code=` 预填邀请码；匿名专属守卫与 /login 对称（已登录访问弹回
+  from 或总览）；页脚注明码的来源与一次性语义、无码时的 bootstrap 边界、CLI
+  用户走设备流。提交 → 注册即登录（服务端已建会话）→ 按 from/默认跳转。
+- **workspace 邀请管理卡**（InvitationsCard，挂工作区总览）：角色/有效期选择
+  签发（viewer/contributor/maintainer × 1/7/30 天）；签发结果面板一次性展示
+  明文码 + invite_url + 一键复制；列表（角色/状态/时间/兑换者）+ invited 行
+  撤销。可见性按能力收敛：listInvitations 403/404 即整卡隐藏（fail closed，
+  不在前端复制角色判断）。
+- **顺带关闭 round 24 遗留 ⑤ 的后半项**：login/register 会话建立从 3 请求
+  收敛为 2（响应本身即 Me，省去 GET /auth/me，新增 adoptMe；boot 路径不变）。
+- **契约同步**：web types.ts 的 ErrorCode union 补 INVITE_INVALID/EMAIL_TAKEN
+  （P1 漏项），新增 Invitation/InvitationCreated/InvitationPage 类型。
+- **验证**：vue-tsc + vite build 全绿；真机浏览器全闭环实测（临时 PG + dev
+  server）——带码注册 → 自动登录 → 跳总览且 workspace 列表已含目标工作区；
+  已登录访问 /register 被弹回；owner 视角邀请卡签发（明文码面板 + 复制按钮 +
+  toast）→ SSE 实时收到 security.invite.created → 撤销后状态翻转、撤销按钮
+  消失。reka-ui Button 的 Playwright 定位点击超时问题再现（round 24 已登记，
+  非 app bug），用 requestSubmit/DOM click 绕过。
+
+### 第 31 轮（2026-09-13，Lidozs55）：server 样板收敛 —— store.First 单一出口
+
+- **新增 `store.First[T]`**：按 query 查一行的单一出口——命中 nil / 查无返回
+  调用方给定的资源语义错误（404 专用码、400、401 皆可）/ 其余 DB 故障统一
+  INTERNAL_ERROR（原始错误由 gorm logger 记录，不进公网 envelope）。收拢
+  round 24 遗留 ② 的「First→ErrRecordNotFound→404→else 500」三行样板。
+- **14 站点收敛**（净删 54 行）：workspace（requireWorkspace/addMember/
+  createCredential/revokeCredential/approval 两处/invitation）、task
+  （LoadForWorkspace/validateParent/tagByName/tag_attach）、tag（target/
+  loadProposal）、message（actor/task/thread 三处目标查询）。
+- **不收敛并说明理由**：task lease 读路径与 DAG 环回溯（查无是正常分支，
+  显式 switch 更直白）；auth 全模块（401/pending 语义各异，liveSession 已
+  是收敛点）；event/sse.go（游标缺口判断）。500 文案统一为 "lookup failed"
+  （原为 "xxx lookup failed" 三种漂移写法；错误契约在 code 不在 message）。
+- **web TaskTreeView 接入 useApiAction 复审后不采纳**：五处错误路径均带
+  自定义恢复逻辑（集合增删/mode 切换/loading 旗标），套组合式需 4-5 个实例
+  且 busy 全弃用，比现状更绕——与「避免冗杂实现」原则相悖，维持共享 error
+  ref + formatApiError 的平直写法。
+- **验证**：`go build/vet/test` 全绿（12 包 + 契约三门）。
+
+### 第 32 轮（2026-09-13，modenicheng）：侧栏上下文升级 + 演示身份守卫修复
+
+> 与第 30 轮（Lidozs55，P2 web）并行开发撞车：本线独立实现了一份 P2
+> （/register + InvitationsCard + api 层），push 前发现远端已落同类实现，
+> **裁决：采纳远端（b5a6f05）为 P2 事实来源**，本线 P2 提交与对应 TODO
+> 登记丢弃，仅保留侧栏工作变基上去；两线验证互为交叉确认（两端都实测过
+> 注册→建会话→SSE 事件→撤销全链路）。
+
+- **侧栏上下文升级**：AppSidebar 从静态两项（总览/设备授权）重构为
+  workspace 上下文导航——新增 WorkspaceSwitcher（可见 workspace 列表、
+  当前值跟随路由、深链命中列表外时补拉详情取名、切换即跳该 workspace
+  概览）+ workspace 子导航（概览/任务树/裁决队列，SidebarLink 承载高亮
+  样式）；「设备授权」从一级导航降级到底部工具位（保留 round 28 手动输码
+  回退语义）。演示身份下 workspace 段整体隐藏（mock 模式不消费真实 API）。
+- **session.isDemo**：演示登录态的可判别导出（本线实现，已在变基中与
+  第 30 轮的 adoptMe/register 合并）——总览页 listWorkspaces 与侧栏
+  workspace 拉取据此跳过，修复「后端在线但未登录 + VITE_TASKS_MOCK=1」
+  组合下 401 触发全局登出、演示身份被弹走的潜伏问题。
+- **登录/注册守卫补丁**：已登录访问 /login、/register 弹走的判断补
+  `!session.isDemo` 例外（第 30 轮守卫未覆盖该场景——演示身份会被误判为
+  已登录，邀请链接落地页在 mock 模式下不可达；浏览器实测复现并确认修复）。
+- **运行态**：本地 8080 常驻 astral-server.exe 仍是 round 27 时点的旧编译
+  产物（无邀请端点），已重建当前源码并重启（同 server/.env，dev 库数据
+  延续）；旧二进制已清理。
+- **验证**：vue-tsc + vite build 全绿；内置浏览器 E2E（本线 P2 实现 + 变基
+  后冒烟复验）——建工作区 → 侧栏切换器/子导航/深链高亮 → 签发 contributor
+  邀请（SSE `security.invite.created` 到达）→ 登出 → invite_url 注册新号
+  （预填/建会话/from 回跳）→ 贡献者视角子导航可用且邀请卡自隐藏 →
+  redeemed/revoked 状态流转 → 已登录访问 /register 弹走 → 演示身份下
+  /register 正常渲染、总览/侧栏不再触发 401 弹走。
+
+### 第 32 轮 B 线（2026-09-13，Lidozs55）：卫生轮 —— 死代码清除、重复实现收拢、文档校准
+
+> 与第 32 轮（modenicheng，侧栏上下文升级）撞号：按「第 29 轮」先例以分线
+> 标注区分；两会话改动不相交（本线 server 为主 + session store 小抽，
+> 对方线 web 侧栏/守卫），session.ts 的 isDemo 与 refreshAccess 抽取已
+> 在变基中合并，合并后 vue-tsc 复验通过。
+
+- **删除 `event.EmitTx` 死副本**：round 29 把写侧拆到 `internal/outbox` 时，
+  旧实现未从 `event/outbox.go` 摘除；全仓调用点均已走 `outbox.EmitTx`，
+  event 包只余读侧（dispatcher/envelopeFromRow），随未用 import 一并删除。
+- **revokeInvitation 事务收口**：条件更新原在 audit/outbox 事务之外，两段
+  之间中断会留下「已撤销但无审计/事件」窗口；并入同一事务（与 invite.create
+  同规矩），幂等 204 与「仅赢家落审计/事件」语义不变。
+- **`randomFromAlphabet` 单点**：`NewInviteCode` 自抄了随机取样循环，违背
+  `NewRandomCode` 注释声明的「单一授权点」；两码共用循环、各持字母表。
+  同时修正注释的文档指向（user_code 强度定位在 architecture.md，原写
+  security.md 属失引——顺带全仓核对了本次新增注释的每处引用）。
+- **`httpx.TimeString`**：`*time.Time → RFC3339 *string` 单一转换点，收拢
+  invitation/approval/device 三处手工样板；副作用：credential `expires_at`
+  响应从本地时区偏移统一为 UTC（仍 RFC3339 date-time，其余端点本就是 UTC，
+  无 schema 变化）。
+- **`auth.RequireHuman(r, why)`**：四处 human session 闸（device find/decide
+  内联两处、邀请三端点、全局 credential 签发/吊销）收拢为单一实现，403
+  文案由调用点保留原语义；注册两分支的口令策略闸同抽 `hashPasswordOrInvalid`。
+- **scopes.go 意图注记**：agent 与 contributor 的 scope bundle 一致是 D9 的
+  刻意设计（agent 是 contributor 能力的凭证化载体，实际权限再经 credential
+  scopes 收窄），就地注释防止后续被当漂移「修复」或误同步修改。
+- **web session store**：establishSession/adoptMe 的 Cookie 续期前缀抽
+  `refreshAccess`（boot/login/register 三入口同一会话建立序列）。
+- **文档**：registration.md 迁移名 `00013_invitations` →
+  `00013_workspace_invitations`（与 §9 第 29 轮登记一致）。
+- **查过不动的**：git 索引恒为 LF（`git ls-files --eol` 证实），工作区 CRLF
+  系 autocrlf 所致，gofmt -l 的部分报警是工作区行尾假警，renormalize/加
+  .gitattributes 属 churn 不做；task `get` 租约 switch 与 Login 认证错误
+  分支维持显式写法（分支语义各异，收拢反而绕）。
+- **验证**：`go build/vet/test` 全绿（含 tests 包契约三门）；web
+  `vue-tsc` + `vite build` 全绿。无契约面变化（无新端点/事件/错误码），
+  CLI 快照 v2.1 不受影响。
+### 第 33 轮（2026-09-13，modenicheng）：平台角色基建 + 全局凭证收口
+
+> 背景与取舍见 D16：workspace 层本就是「role = scope bundle」制（round 2 起），
+> 缺的是平台全局轴。三选一裁决为「固定平台角色 + 全局 scope 词表」——零权限表，
+> 与 workspace 轴同构；psql 式 GRANT/REVOKE 无需求方，裸硬判与 scope 哲学割裂。
+
+- **migration 00014**：`actors.platform_role`（human ∈ admin/user；agent/service
+  固化 kind，PG CHECK 钉死 kind↔role 一致性；sqlite 测试走 AutoMigrate 无此约束，
+  由建号点显式赋值保证）+ 存量部署回填（最早 human 提升为 admin，防「升级后无
+  admin」死局）+ `disabled_at` 预留（round 34 启用）。
+- **全局 scope 词表**（scopes.go）：`platform:users:read` / `platform:users:manage`
+  / `platform:credentials:manage`；`GlobalScopesFor` 与 `RoleToScopes` 并排，
+  admin 持全组，user/agent/service 为空。
+- **Principal 携带平台角色**：三条认证管线（access token / credential / cookie）
+  统一经 `authActor` 补 actors 主键查询；`RequireGlobal`（403 INSUFFICIENT_SCOPE，
+  对齐 workspace 轴语义，无 404 分支）+ `GlobalScopesForPrincipal`。
+- **首任 admin**：`registerBootstrap`（bootstrap 向导与 web 零号邀请同管线）
+  创建的首个 human 直接 `platform_role='admin'`；邀请注册恒为 user。
+- **全局凭证收口**（安全修复）：签发/吊销不绑定 workspace 的服务器级
+  `astral_` credential 从「任意已注册 human」收口为 `platform:credentials:manage`
+  （原代码注释自标 TODO(phase-2)，本轮闭合）；workspace 内联的 `requireHuman` 助手随之删除（32B 线收拢的 `auth.RequireHuman` 仍服务 device/邀请等 human 闸）。
+- **/auth/me 增 `platform_role`**（Me 响应级，不进 ActorDTO——成员列表里的
+  actor 形状不带平台角色）；纯增量，CLI 兼容。
+- **验证**：go test 全绿（新增 auth `platform_role_test.go`：首 human admin /
+  邀请 user / credential 主体固化 kind / RequireGlobal 五角色矩阵；
+  workspace `platform_role_test.go`：全局凭证 user 403 / admin 201+204 /
+  绑定路径不受影响的 404 非成员语义）；dev 库真机 curl 矩阵 15/16（唯一非
+  PASS 是测试预期写错：非成员 404 WORKSPACE_NOT_FOUND 正是防探测设计语义）。
+
+### 第 34 轮（2026-09-13，modenicheng）：admin 用户管理（server + web）
+
+- **server**（`internal/modules/admin`，router 受保护组挂载）：
+  `GET /admin/users`（human 全量列表，UserDTO 含邮箱/角色/停用态）；
+  `POST /admin/users/{id}/disable|enable`（条件更新防重复 409；disable 同事务
+  audit + `RevokeActorSessions` 即时作废在途会话并触发 SSE 断流，撤销失败仅
+  记日志——准入闸门是 DisabledAt 检查，非会话撤销）；`POST .../role`
+  （admin/user 互转，返回 AdminUser）。防自锁：禁止自停用/自改角色；
+  last-admin 竞态 MVP 接受。仅 human 可管理（agent 归属随 workspace，D9）。
+  auth.Service 增 `RevokeActorSessions`；authActor/Login/credential 三处
+  DisabledAt 闸门（停用即时生效，不依赖撤销）。
+- **web**：MeResponse/session store 增 `platform_role`（isPlatformAdmin 导出）；
+  侧栏「平台管理 → 用户管理」段（`v-if isPlatformAdmin` 展示性判断，服务端
+  强制为准）；`/admin/users` 页（表格：徽章角色/邮箱/停用态 + 角色下拉 +
+  停用/恢复按钮；自身行收起操作；**数据加载即能力证明**——list 403 →
+  「无权访问」态，对齐 InvitationsCard 的 fail-closed 取向）；ProfileView
+  增平台角色只读展示。
+- **协议**：openapi 增 `/admin/*` 三路径 + `Me.platform_role`（required）+
+  `AdminUser` schema，契约门（TestRoutesMatchOpenapi）通过。
+- **验证**：go test 全绿（admin 模块矩阵：list 200/403、disable→access token
+  即时 401、enable 后可登录、自停用/agent 目标/未知用户 400/404、升降级
+  往返 + 非法值/自改 400）；内置浏览器 E2E——admin 登录侧栏出现平台管理段 →
+  用户管理页双行渲染（self 行「当前账号」无操作）→ 停用 round30-member
+  （徽章变已停用、按钮变恢复、toast 到达）→ 恢复 → 角色 admin↔user 往返 →
+  Profile 显示「管理员」→ 登出换 round30-member：侧栏无平台管理段、深链
+  /admin/users 呈现「无权访问平台管理功能」fail-closed 态。vue-tsc + build 绿。
+  dev server 已重建重启（同 .env，migration 00014 已在 dev 库生效，probe 经
+  存量回填成为 admin）。
+
+### 第 33 轮 B 线（2026-09-14，Lidozs55）：全仓审查调优轮 —— 代码/逻辑/契约/架构/端点
+
+> 与第 33 轮（modenicheng，平台角色基建）撞号：按「第 29/32 轮」先例以分线
+> 标注区分；两会话改动不相交（本线 message/task/httpx + openapi 契约收口，
+> 对方线 platform roles/admin），变基无代码冲突。
+
+- **审查范围**：server 全部 48 个源文件（本轮未读过的 sse 尾段/hub/retention/
+  search/filters/tag 全量/device/middleware/profile/router/audit/idempotency/
+  document/memory/store/main/config）、openapi.yaml 43 路径逐段、web types.ts
+  与 api 模块对照、模块依赖方向（go list）、CLI msg 消费面。整体结论：分层
+  无环、错误语义统一、并发写全部条件更新、事务性 outbox/audit 一致——
+  底子干净，问题集中在「契约宣称 vs 实现现状」的四处漂移。
+- **messages 分页断链闭合（本轮主修）**：openapi 两个 message 列表端点声明
+  `Limit/Cursor + MessagePage`，CLI 的 `msg list` 也已按分页消费
+  （addPageParams/fetchPageItems/--all），但 server 恒 `Limit(100)` 且忽略
+  两个参数——宣称完成实际断链的典型（§11 卷首语要求优先闭合）。两 handler
+  落实 id 游标翻页（workspace 列表 DESC `id <`、task 线程 ASC `id >`，
+  方向随排序），limit 缺省 50 上限 200。
+- **`httpx.ParseLimit` 单点**：limit 钳制从 task 私有 helper 提为 httpx
+  共享（children/task-search/messages 三类集合端点同一实现），openapi
+  `parameters/Limit`（default 50/max 200）的服务端对账点唯一。
+- **openapi 补声明**：`listMessages` 补已实装的 `target_id` 过滤参数；
+  Message schema 补 `target_type`/`target_id`（DTO 恒序列化，契约漏声明）；
+  documents 四端点 + audit list 六个脚手架桩补 `501 NOT_IMPLEMENTED` 响应
+  ——此前契约只写 200，属于向客户端超卖现状。
+- **审查过不动的（记录理由）**：presence/documents/conflicts/audit 四个
+  内联 `{items}` 列表维持 §11 第 11 项待裁决，不提前动手；hub 慢订阅者
+  丢弃策略与 SSE 同毫秒 uuidv7 去重极小概率误杀均为文档化接受设计；
+  Login 的 raw error 上抛（500 由 RespondError 收口）语义已正确；
+  Stub 模式 nil-DB 模块在 Authenticate 401 墙之后，不可达；
+  `ApprovalsTable.vue`/`search.go`/`filters.go` 等近期代码无问题。
+- **验证**：契约三门（routes/error-codes/event-types）以 `-count=1` 强制
+  重跑全绿（openapi.yaml 在包目录外，注意 go test 缓存陷阱）；go
+  build/vet/test 全部 12 包全绿（message 新增两个分页契约测试）；web
+  `vue-tsc` + `vite build` 全绿。openapi 增量（Message required、target_id、
+  501 声明）归入 §11 第 14 项的 CLI 快照刷新（随 P3 `astral register`）。
+
+### 第 36 轮（2026-09-16，Lidozs55）：登记簿瘦身归档 —— 轮次详录/已完成清单移入本卷
+
+- **动机**：TODO.md 膨胀至 1268 行（§0 轮次详录约 950 行占 75%），工作视图被历史
+  淹没，每轮登记的检索成本随之升高。
+- **做法（只移不改）**：①第 1-33B 轮详录原文迁入本卷 §A，今后轮次详录一律追加
+  于卷末，TODO.md §0 只加一行索引；②Phase 1-4 已完成实施清单（原 §3 头两条/
+  §3.1/§4.1/§5.1 已勾项/§6 已勾项）迁入 §B，各 Phase 剩余项留在正文；③§10 CLI
+  联调清单（全部实装）迁入 §C，其中 phase-5 相关的 content_hash 约定迁入正文 §7；
+  ④§11 已完成条目压缩为单行、编号保留——编号是代码注释与 docs 的稳定引用 ID
+  （如 sse.go「§11 第 10 项」、admin/module.go「§11 #11」、registration.md/
+  protocol.md/ADR-0008 引 §11），不删除、不重排。
+- **不动的**：§1 裁决表、§2 契约裁决（含已实现的 A1-A4/S1——代码注释仍按编号
+  引用，如 tokens.go「A4」、retention.go「S1」）、§9 契约变更登记（追加式台账）。
+  docs/ 各文件均为在用设计文档，无归档对象。
+- **净效果**：TODO.md 1268 → 约 300 行；零代码、零契约变更（故无 §9 登记项）。
+
+## B. Phase 实施清单（已完成部分，原文照录）
+
+### Phase 1（原正文 §3 头两条 + §3.1；剩余项见正文 §3.2）
+
+- [x] device flow 全链路 / opaque access+refresh / Authenticate 中间件 / RequireScopes /
+      Web Cookie session / ASTRAL_TOKEN 校验 / server_meta 固化（第 2 轮全量实装，清单见 3.1）
+- [x] 裁决并登记 A1/A2/A3（2026-09-07，另新增 A4/D5/D6）
+
+### 3.1 第 2 轮实施清单（2026-09-07，✅ 全部完成）
+
+- [x] T-auth-1 migration：00002 sessions 增 access_token_hash/access_expires_at；
+      scopes 从 TEXT[] 改 JSON text；00001 增 human_auth 表
+- [x] T-auth-2 tokens.go：opaque token 生成、sha256、常数时间比较
+- [x] T-auth-3 password.go：bcrypt 包装 + 强度校验
+- [x] T-auth-4 AuthService：register(bootstrap-only)/login/logout/refresh(轮换+重放撤族)/
+      device create-approve-deny-exchange(A1 语义)/me/credential 校验(A4)
+- [x] T-auth-5 Authenticate 中间件（Bearer access | ASTRAL_TOKEN credential | Cookie session）
+- [x] T-auth-6 audit.GormRecorder + redaction（security.md 敏感字段 matcher）
+- [x] T-auth-7 server_id 由 server_meta 固化（库中值优先于 env）
+- [x] T-auth-8 测试：device flow 全链路、refresh 重放撤族、credential 校验、scope 中间件
+- [x] T-auth-9 web：登录页 + /device 审批页实装（A3 API）+ session store 接 /auth/me
+- [x] T-auth-10 openapi 增补：/auth/register、/auth/login、approve/deny、新错误码
+      AUTHORIZATION_PENDING、SLOW_DOWN；已登记契约变更
+
+### Phase 2（原正文 §4.1，✅ 全部完成）
+
+### 4.1 第 2 轮实施清单（✅ 大部分完成）
+
+- [x] T-ws-1 workspace CRUD + `?name=` 精确解析 + 成员管理（创建者自动 owner）
+- [x] T-ws-2 agent actor 创建 + credential 签发（明文一次性返回）/撤销
+- [x] T-ws-3 workspace/member/credential 变更的审计与事件（credential 事件经 outbox 的
+      仅 task 路径；workspace 侧事件当前直发 hub，见 T-task-4 统一计划）
+- [x] T-ws-4 测试：CRUD、claim 竞争、scope 强制（app 集成测试覆盖）
+- [x] T-ws-5 Idempotency-Key 中间件（`internal/idempotency`：库表存储、24h 窗口、
+      仅缓存 2xx、actor+endpoint+key 主键、并发同键回读重放；挂载于鉴权后，
+      携带头即激活）
+- [x] T-ws-6 promote_owner approval 状态机（第 8 轮实装：approvals 表 + approve/deny +
+      同事务 promote；D8 登记 MVP 允许自批，双人裁决为后续收紧项）
+- [x] T-ws-7 agents 列表按 workspace 过滤（第 9 轮随 D9 实装：**推翻原
+      「需绑定模型」前提**，不建第三条路径；listAgents = membership 行 ∪
+      有效 credential 绑定，createAgent 同事务补 role='agent' 成员行）
+
+### Phase 3（原正文 §5.1 已勾项；剩余 pg_trgm/T1 两项留在正文 §5）
+
+### 5.1 第 2 轮实施清单
+
+- [x] T-task-1 task create/get/list/update（应用层 revision + expected_revision 乐观并发，
+      parent 同 workspace 校验 + 循环检测）
+- [x] T-task-2 **原子 claim**（roadmap spike 验收项）：事务内条件 UPDATE 抢租约，
+      只有一个成功；renew/release
+- [x] T-task-3 lease 过期清扫器（发 task.lease.expired）
+- [x] T-task-4 outbox → hub dispatcher（业务事务同事务写 outbox，后台轮询投递 SSE；
+      task 关键路径已走 outbox，workspace/presence/message 事件仍直发 hub，待统一）
+- [x] T-task-5 测试：并发 claim 唯一成功、revision 冲突、lease 过期语义、清扫器事件
+- [x] T-task-6 search：regex(RE2)→fuzzy(trigram) 管线 + 游标分页（D7；实现 task/search.go）
+- [x] T-task-7 tags proposal/confirm（normalize NFKC+case-fold、confirm_code hash/TTL 120s/
+      单次使用、事务内唯一约束复查；新增 tag.created/renamed/deleted 事件）
+- [x] capabilities.features 开放首个特性 `task_lease`
+- [x] tag attach/detach 实装（D11；round 5 遗留的关联链路缺口，task_tags 表自此启用）
+
+### Phase 4（原正文 §6 已勾项；剩余 thread 树形聚合视图留在正文 §6）
+
+- [x] presence heartbeat + TTL 钳制 + offline 读路径派生（第 2 轮）
+- [x] messaging：send/list（target 三类 + thread；第 2 轮；私信跨 workspace 可见性在第 7 轮收紧）
+- [x] **outbox dispatcher**：业务事务写 outbox → 轮询 → hub → SSE（第 2 轮；LISTEN/NOTIFY
+      待多实例需求出现，见 architecture §19 触发条件）
+- [x] SSE resume：Last-Event-ID 重放 + snapshot.required（第 6 轮，S1 裁决落定）
+- [x] 裁决并登记 S1
+- [x] 凭证 revoke 后主动断流（第 9 轮，见 §3.2 同项）
+
+## C. CLI 联调清单（原正文 §10；全部条目已实装，2026-09-16 第 36 轮归档留档）
+
+CLI 仓库开工时按此清单对表，顺序即依赖顺序：
+
+1. `GET /.well-known/astral` — server_id/api_base/protocol_version（已实装 ✅）
+2. `GET /api/v1/meta/capabilities` — features 门控（已实装 ✅，features 暂为空）
+3. 错误 envelope 解析 — 所有非 2xx（已实装 ✅；`NOT_IMPLEMENTED` 501 桩仅剩
+   document 5 端点（phase-5）与 audit.list（phase-6）；task.messages.list 已于
+   第 20 轮实装；memory 因 M1 未裁决尚未注册路由）
+4. 公共响应头回显 — `X-Astral-Request-Id`/`X-Astral-Protocol-Version`（已实装 ✅）
+5. ID 形状 `^[a-z]{2,3}_<uuidv7>` — CLI 只做透传与展示（已实装 ✅）
+6. **Device Flow 全链路（已实装 ✅，第 2 轮）**：
+   - `POST /auth/device/authorizations` `{"client_type":"cli"}` → 201
+     `{device_code, user_code, verification_uri, verification_uri_complete, expires_in:600, interval:3}`
+   - 两个 verification 链接为**绝对 URL**（第 28 轮起，基址 = ASTRAL_WEB_BASE_URL）：
+     CLI 默认直接打开/展示 `verification_uri_complete`（带码直达审批页，
+     已登录用户一步确认）；手动回退才展示 `verification_uri` + `user_code`
+   - CLI 轮询 `POST /auth/device/authorizations/{device_code}/token`：
+     pending → `400 AUTHORIZATION_PENDING`(retryable)；过快 → `400 SLOW_DOWN`（退避）；
+     成功 → `200 {access_token, token_type:"Bearer", expires_in:900, refresh_token, actor_id}`；
+     denied/expired/reused → 401
+   - **刷新**：`POST /auth/token/refresh` body `{refresh_token}` → 新对（rotating）；
+     旧值重放 → `401 TOKEN_REVOKED` 且整族失效 —— CLI 收到此码必须重新 login
+   - 401 处理顺序（astral-cli §13）与服务端行为已对齐：先试 refresh 一次，再重放原请求
+7. `POST /auth/logout` body `{refresh_token}` → 204（CLI logout 用）
+8. **ASTRAL_TOKEN（A4）**：credential secret 形如 `astral_xxxxx`，直接作
+   `Authorization: Bearer` 值；失效返回 401（TOKEN_REVOKED=被吊销 / TOKEN_EXPIRED=过期）
+9. **workspace init 语义（已实装 ✅）**：
+   - `GET /api/v1/workspaces?name=<exact-or-slug>`：空 items = 不存在或不可见
+     （CLI 可提示 `--create`）；命中 → items[0]
+   - `POST /api/v1/workspaces` `{name, slug?}` → 201；409 `WORKSPACE_NAME_TAKEN`
+   - `GET /api/v1/workspaces/{id}` 校验最终绑定；非成员 404
+10. **task claim（已实装 ✅）**：`POST /tasks/{id}/claim`
+    `{expected_revision, lease_seconds}` → 200 `{task, lease}`；
+    竞争失败 → 409 `TASK_ALREADY_CLAIMED`；过期后需重新 claim
+    （renew 对过期租约返回 409 `TASK_LEASE_EXPIRED`）
+11. **SSE（已实装 ✅，含断线重放）**：`GET /api/v1/workspaces/{id}/events`，
+    keepalive 注释行 15s；`Last-Event-ID` 头或 `last_event_id` query 携带游标，
+    保留窗口 24h，超窗收 `snapshot.required`（reason=cursor_expired）后须重拉快照；
+    事件消费必须幂等（重放/补发可能重复）
+12. `content_hash` 统一 `sha256:<hex>`（小写十六进制）— phase-5 文档同步联调时最易错

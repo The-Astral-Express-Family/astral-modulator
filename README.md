@@ -16,6 +16,7 @@ CLI（`astral`，C++20）在姊妹仓库 [astral-cli]，两仓库只通过本仓
 - [docs/protocol.md](docs/protocol.md) — OpenAPI 之外的传输与语义约定（请求头/SSE/限流/兼容性）
 - [docs/roadmap.md](docs/roadmap.md) — 里程碑视图（实施 Phase 划分见 architecture.md §27）
 - [TODO.md](TODO.md) — 脚手架任务登记簿 + 文档分歧裁决 + 契约变更登记
+- [TODO-archive.md](TODO-archive.md) — 登记簿历史卷（轮次详录，只增不改）
 - 根 [ARCHITECTURE.md](ARCHITECTURE.md) — 指向 docs 的简版入口
 
 ## 仓库结构

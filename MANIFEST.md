@@ -4,7 +4,8 @@
 
 - `README.md` — 项目简介与快速开始。
 - `ARCHITECTURE.md` — 架构入口指针（事实来源在 docs/ 与 api/）。
-- `TODO.md` — 进度登记簿：已完成工作、契约裁决、待办清单、CLI 联调清单。
+- `TODO.md` — 进度登记簿：裁决、各 Phase 剩余项、契约变更登记、待办清单。
+- `TODO-archive.md` — 登记簿历史卷（轮次详录等，只增不改）。
 - `docker-compose.yml` — 开发用 PostgreSQL。
 - `Makefile` — 常用开发命令。
 - `redocly.yaml` — openapi lint 配置（CI 契约门）。
