@@ -2,12 +2,14 @@
      底部工具（设备授权）与会话框。配色走 sidebar 语义 token。
      演示身份（mock 模式）不消费真实 API，workspace 段整体隐藏。 -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, UsersRoundIcon } from '@lucide/vue'
+import { GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, PlusIcon, UsersRoundIcon } from '@lucide/vue'
+import CreateWorkspaceDialog from '@/components/layout/CreateWorkspaceDialog.vue'
 import SessionBox from '@/components/layout/SessionBox.vue'
 import SidebarLink from '@/components/layout/SidebarLink.vue'
 import WorkspaceSwitcher from '@/components/layout/WorkspaceSwitcher.vue'
+import { Button } from '@/components/ui/button'
 import { useSessionStore } from '@/stores/session'
 
 const route = useRoute()
@@ -16,6 +18,8 @@ const session = useSessionStore()
 const workspaceId = computed(() =>
   typeof route.params.workspaceId === 'string' ? route.params.workspaceId : '',
 )
+
+const createOpen = ref(false)
 </script>
 
 <template>
@@ -29,9 +33,21 @@ const workspaceId = computed(() =>
         v-if="session.isLoggedIn && !session.isDemo"
         class="flex flex-col gap-1"
       >
-        <p class="px-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          工作区
-        </p>
+        <div class="flex items-center justify-between pr-2">
+          <p class="px-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            工作区
+          </p>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            class="text-muted-foreground hover:text-foreground"
+            aria-label="新建工作区"
+            title="新建工作区"
+            @click="createOpen = true"
+          >
+            <PlusIcon />
+          </Button>
+        </div>
         <WorkspaceSwitcher />
         <div v-if="workspaceId" class="mt-1 flex flex-col gap-1">
           <SidebarLink label="概览" :icon="HomeIcon" :to="`/workspaces/${workspaceId}`" />
@@ -48,6 +64,8 @@ const workspaceId = computed(() =>
         </div>
         <p v-else class="px-3 text-xs text-muted-foreground">选择工作区查看其页面。</p>
       </div>
+
+      <CreateWorkspaceDialog v-model:open="createOpen" />
 
       <div class="flex flex-col gap-1">
         <SidebarLink label="总览" :icon="HomeIcon" to="/" />

@@ -24,4 +24,10 @@ export function getWorkspace(id: string): Promise<Workspace> {
   return apiFetch(`/api/v1/workspaces/${encodeURIComponent(id)}`)
 }
 
+// WorkspaceCreate（openapi）：name 必填（1-200），slug 省略时服务端由 name 派生
+// （仅 [a-z0-9]，纯非 ASCII 名派生不出 → 400，需调用方提供）。
+export function createWorkspace(input: { name: string; slug?: string }): Promise<Workspace> {
+  return apiFetch('/api/v1/workspaces', { method: 'POST', body: input })
+}
+
 // TODO: tag proposal/confirm 随 tag 审核流视图一并补充（任务列表/搜索已落地 task.ts）。
