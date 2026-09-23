@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // Human 本地登录页（TODO.md D6）。独立布局（不套 MainLayout）。
-// 登录成功后跳回 from 指定的来源页或总览；已登录用户由路由守卫直接弹走。
+// 登录成功后跳回 from 指定的来源页；无 from 时兜底上次停留位置
+// （lib/lastLocation，如会话过期前的工作区页）或总览；已登录用户由路由守卫直接弹走。
 // 登录失败（错密码等）由 api/client 拦截器统一 toast。
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApiAction } from '@/composables/useApiAction'
 import { useLoginRedirect } from '@/composables/useLoginRedirect'
+import { readLastLocation } from '@/lib/lastLocation'
 import { useSessionStore } from '@/stores/session'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Button } from '@/components/ui/button'
@@ -24,7 +26,7 @@ const password = ref('')
 
 async function submit(): Promise<void> {
   const ok = await run(() => session.login(email.value, password.value))
-  if (ok) void router.push(consumeRedirect() ?? '/')
+  if (ok) void router.push(consumeRedirect() ?? readLastLocation() ?? '/')
 }
 </script>
 

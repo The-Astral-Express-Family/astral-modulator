@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from '../stores/session'
 import { loginLocation, sanitizeRedirect } from '../lib/redirect'
+import { readLastLocation, recordLocation } from '../lib/lastLocation'
 import MainLayout from '../components/layout/MainLayout.vue'
 
 // 路由规划对齐 roadmap Phase 5（GUI 监控/干预面）。
@@ -128,6 +129,13 @@ declare module 'vue-router' {
 // 再按 meta.auth 决定放行。守卫是登录态判断的唯一入口，解决两个问题：
 // 1) 视图挂载时登录态已就绪（不会拿 boot 中间态做跳转决策）；
 // 2) 未登录访问受保护页统一跳 /login?from=<fullPath>，登录后原路返回。
+//
+// 冷启动恢复（lib/lastLocation）：本进程首次路由解析若落在 /（总览）且已登录，
+// 送回上次停留的页面。仅首跳生效——之后点「总览」不被劫持；总览本身也会被
+// 记录，因此刷新总览仍留在总览。工作区页的刷新留原页由 URL 路径直接保证，
+// 不经此处。
+let firstNavigation = true
+
 router.beforeEach(async (to) => {
   const session = useSessionStore()
   await session.boot()
@@ -142,4 +150,20 @@ router.beforeEach(async (to) => {
   if ((to.name === 'login' || to.name === 'register') && session.isLoggedIn && !session.isDemo) {
     return sanitizeRedirect(to.query.from) ?? '/'
   }
+
+  const isLanding = firstNavigation
+  firstNavigation = false
+  if (isLanding && to.name === 'dashboard' && session.isLoggedIn && !session.isDemo) {
+    const last = readLastLocation()
+    if (last && last !== to.fullPath) return last
+  }
+})
+
+// 登录态下的每次落点记为「上次停留位置」，供冷启动 / 重新登录兜底恢复。
+// 匿名浏览与演示身份不记录（不污染真实恢复目标）；login/register 是过渡页、
+// not-found 不是有效停留位置，同样跳过。
+router.afterEach((to) => {
+  if (to.name === 'login' || to.name === 'register' || to.name === 'not-found') return
+  const session = useSessionStore()
+  if (session.isLoggedIn && !session.isDemo) recordLocation(to.fullPath)
 })

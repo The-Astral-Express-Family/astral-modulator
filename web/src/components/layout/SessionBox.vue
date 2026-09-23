@@ -14,12 +14,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useSessionStore } from '@/stores/session'
+import { clearLastLocation } from '@/lib/lastLocation'
 
 const session = useSessionStore()
 const router = useRouter()
 
 async function logout(): Promise<void> {
   await session.logout()
+  // 登出即忘：不让下个登录者被送进前一用户的上下文。
+  clearLastLocation()
   void router.push('/')
 }
 </script>

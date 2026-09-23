@@ -1,6 +1,8 @@
 <!-- workspace 切换器：列表来自 workspaces store（与创建对话框共享，
      新建后即时可见）；当前值跟随路由（深链/页面间切换都正确高亮）；
-     切换即跳该 workspace 概览。深链命中列表外 workspace 时补一次详情取名。 -->
+     切换保持当前子页（工作区 id 是路径前缀，/a/tasks → /b/tasks），
+     无工作区上下文的页面落到新 workspace 概览。深链命中列表外
+     workspace 时补一次详情取名。 -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -53,10 +55,25 @@ const current = computed<Workspace | null>(() => {
   )
 })
 
+// 工作区子页的路由名 → 路径后缀映射（与 router/index.ts 的 children 一一对应）。
+// 切换工作区时按当前路由名取后缀，页面类别不因切换丢失。
+const SUB_PATH_BY_NAME: Record<string, string> = {
+  'workspace-overview': '',
+  'workspace-tasks': '/tasks',
+  'workspace-approvals': '/approvals',
+  'workspace-tags': '/tags',
+  'workspace-messages': '/messages',
+  'workspace-documents': '/documents',
+  'workspace-conflicts': '/conflicts',
+  'workspace-members': '/members',
+  'workspace-audit': '/audit',
+}
+
 function onSelect(value: unknown): void {
   const id = String(value)
   if (!id || id === currentId.value) return
-  void router.push(`/workspaces/${id}`)
+  const suffix = SUB_PATH_BY_NAME[typeof route.name === 'string' ? route.name : ''] ?? ''
+  void router.push(`/workspaces/${id}${suffix}`)
 }
 </script>
 
