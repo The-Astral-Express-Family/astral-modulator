@@ -42,6 +42,9 @@ func (m *Module) RegisterPublic(r chi.Router) {
 func (m *Module) RegisterPrivate(r chi.Router) {
 	r.Get("/auth/me", m.me)
 	r.Patch("/auth/me", m.updateMe)
+	// 设备管理（会话列表/单会话注销）—— 需 human session
+	r.Get("/auth/sessions", m.listSessions)
+	r.Delete("/auth/sessions/{id}", m.revokeSession)
 	// 审批页 API（A3）—— 需 human session
 	r.Get("/auth/device/authorizations", m.findForApproval)
 	r.Post("/auth/device/authorizations/{id}/approve", m.approve)
@@ -231,6 +234,36 @@ func (m *Module) findForApproval(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) approve(w http.ResponseWriter, r *http.Request) {
 	m.decide(w, r, m.Svc.Approve)
+}
+
+// listSessions 是 GET /auth/sessions：设备管理页的会话列表（仅 human）。
+func (m *Module) listSessions(w http.ResponseWriter, r *http.Request) {
+	if apiErr := RequireHuman(r, "human session required"); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	p := PrincipalFrom(r.Context())
+	views, err := m.Svc.ListSessions(r.Context(), p.ActorID, p.SessionID)
+	if err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	httpx.WriteOK(w, r, http.StatusOK, views)
+}
+
+// revokeSession 是 DELETE /auth/sessions/{id}：注销自己的一个设备会话
+//（当前浏览器会话的注销走 /auth/logout，前端负责分流）。
+func (m *Module) revokeSession(w http.ResponseWriter, r *http.Request) {
+	if apiErr := RequireHuman(r, "human session required"); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	p := PrincipalFrom(r.Context())
+	if err := m.Svc.RevokeSession(r.Context(), p.ActorID, chi.URLParam(r, "id")); err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (m *Module) deny(w http.ResponseWriter, r *http.Request) {

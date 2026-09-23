@@ -245,6 +245,33 @@ paths:
       responses:
         "204": { description: 已登出 }
 
+  /auth/sessions:
+    get:
+      tags: [auth]
+      summary: 列出当前 human 的活跃会话（设备管理页）
+      operationId: listSessions
+      responses:
+        "200":
+          description: 会话条目数组（已撤销/已过期不入列；最近使用优先）
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SessionView" }
+        "403": { $ref: "#/components/responses/Error" }   # agent/service credential
+
+  /auth/sessions/{id}:
+    delete:
+      tags: [auth]
+      summary: 注销自己的一个会话（设备管理页「注销」；当前会话走 /auth/logout）
+      operationId: revokeSession
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 已注销 }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }   # 不存在/非本人/已撤销 同码防枚举
+
   /auth/me:
     get:
       tags: [auth]
@@ -1474,6 +1501,25 @@ components:
           properties:
             client_type: { type: string, enum: [cli, web] }
             expires_at: { type: string, format: date-time }
+
+    SessionView:
+      type: object
+      description: 设备管理页的会话条目（一条 session = 一个已登录设备/浏览器）
+      required: [id, client_type, user_agent, remote_addr, created_at, expires_at, current]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        client_type: { type: string, enum: [cli, web] }
+        user_agent:
+          type: string
+          description: 创建会话时的 User-Agent 原文；客户端负责友好化展示
+        remote_addr: { type: string, description: 创建会话时的客户端 IP（XFF 采信规则同限流） }
+        created_at: { type: string, format: date-time }
+        last_used_at:
+          type: string
+          format: date-time
+          description: 最近一次认证使用（access/cookie 每分钟节流、refresh 时更新）；从未使用则省略
+        expires_at: { type: string, format: date-time }
+        current: { type: boolean, description: 是否为发起本次请求的会话 }
 
     AdminUser:
       type: object

@@ -760,6 +760,7 @@ func (s *Service) authenticateAccessToken(ctx context.Context, token string) (*P
 			Details: map[string]any{"reason": "access token expired"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "access token expired"}
 	}
+	s.touchSessionLastUsed(sess)
 	actor, apiErr := s.authActor(ctx, sess.ActorID)
 	if apiErr != nil {
 		return nil, apiErr
@@ -830,6 +831,7 @@ func (s *Service) authenticateCookieSession(ctx context.Context, refresh string)
 			Details: map[string]any{"reason": "session expired"}})
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenExpired, Message: "session expired"}
 	}
+	s.touchSessionLastUsed(sess)
 	actor, apiErr := s.authActor(ctx, sess.ActorID)
 	if apiErr != nil {
 		return nil, apiErr
