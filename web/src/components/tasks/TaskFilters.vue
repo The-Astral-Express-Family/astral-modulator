@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { fromSelectValue, SELECT_ALL, toSelectValue } from '@/lib/selectAll'
 import { TASK_STATUSES, TASK_STATUS_META } from './taskMeta'
 
 const props = defineProps<{
@@ -69,14 +70,14 @@ const emit = defineEmits<{
     <div class="w-32">
       <Label class="text-muted-foreground mb-1 block text-xs">状态</Label>
       <Select
-        :model-value="status"
-        @update:model-value="emit('update:status', String($event))"
+        :model-value="toSelectValue(status)"
+        @update:model-value="emit('update:status', fromSelectValue($event))"
       >
         <SelectTrigger class="w-full">
           <SelectValue placeholder="全部状态" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">全部状态</SelectItem>
+          <SelectItem :value="SELECT_ALL">全部状态</SelectItem>
           <SelectItem v-for="s in TASK_STATUSES" :key="s" :value="s">
             {{ TASK_STATUS_META[s]!.label }}
           </SelectItem>
@@ -86,12 +87,15 @@ const emit = defineEmits<{
 
     <div class="w-32">
       <Label class="text-muted-foreground mb-1 block text-xs">标签</Label>
-      <Select :model-value="tag" @update:model-value="emit('update:tag', String($event))">
+      <Select
+        :model-value="toSelectValue(tag)"
+        @update:model-value="emit('update:tag', fromSelectValue($event))"
+      >
         <SelectTrigger class="w-full">
           <SelectValue placeholder="全部标签" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">全部标签</SelectItem>
+          <SelectItem :value="SELECT_ALL">全部标签</SelectItem>
           <SelectItem v-for="t in tags" :key="t.id" :value="t.name">{{ t.name }}</SelectItem>
         </SelectContent>
       </Select>

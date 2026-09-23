@@ -23,6 +23,7 @@ import { useCursorList } from '@/composables/useCursorList'
 import { useEventStream } from '@/composables/useEventStream'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { fmtTime, shortId } from '@/lib/format'
+import { fromSelectValue, SELECT_ALL, toSelectValue } from '@/lib/selectAll'
 import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
@@ -389,12 +390,15 @@ watch(workspaceId, () => {
               {{ chip.label }}
             </Button>
           </div>
-          <Select v-model="actorFilter">
+          <Select
+            :model-value="toSelectValue(actorFilter)"
+            @update:model-value="actorFilter = fromSelectValue($event)"
+          >
             <SelectTrigger size="sm" class="w-56">
               <SelectValue placeholder="全部对象" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">全部对象</SelectItem>
+              <SelectItem :value="SELECT_ALL">全部对象</SelectItem>
               <SelectItem v-for="mem in members" :key="mem.actor.id" :value="mem.actor.id">
                 {{ mem.actor.display_name }}
               </SelectItem>

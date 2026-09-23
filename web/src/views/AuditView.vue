@@ -21,6 +21,7 @@ import { useCursorList } from '@/composables/useCursorList'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { useSessionStore } from '@/stores/session'
 import { fmtTime, shortId } from '@/lib/format'
+import { fromSelectValue, SELECT_ALL, toSelectValue } from '@/lib/selectAll'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
@@ -239,12 +240,15 @@ watch(workspaceId, () => {
         <div class="flex flex-wrap items-end gap-2">
           <div class="w-52">
             <Label class="text-muted-foreground mb-1 block text-xs">操作者</Label>
-            <Select v-model="wsDraft.actorId">
+            <Select
+              :model-value="toSelectValue(wsDraft.actorId)"
+              @update:model-value="wsDraft.actorId = fromSelectValue($event)"
+            >
               <SelectTrigger size="sm" class="w-full">
                 <SelectValue placeholder="全部操作者" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">全部操作者</SelectItem>
+                <SelectItem :value="SELECT_ALL">全部操作者</SelectItem>
                 <SelectItem v-for="mem in members" :key="mem.actor.id" :value="mem.actor.id">
                   {{ mem.actor.display_name }}
                 </SelectItem>
@@ -262,12 +266,19 @@ watch(workspaceId, () => {
           </div>
           <div class="w-32">
             <Label class="text-muted-foreground mb-1 block text-xs">结果</Label>
-            <Select v-model="wsDraft.outcome">
+            <Select
+              :model-value="toSelectValue(wsDraft.outcome)"
+              @update:model-value="wsDraft.outcome = fromSelectValue($event)"
+            >
               <SelectTrigger size="sm" class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="opt in OUTCOME_OPTIONS" :key="opt.value" :value="opt.value">
+                <SelectItem
+                  v-for="opt in OUTCOME_OPTIONS"
+                  :key="opt.value || SELECT_ALL"
+                  :value="opt.value || SELECT_ALL"
+                >
                   {{ opt.label }}
                 </SelectItem>
               </SelectContent>
@@ -389,12 +400,19 @@ watch(workspaceId, () => {
           </div>
           <div class="w-32">
             <Label class="text-muted-foreground mb-1 block text-xs">结果</Label>
-            <Select v-model="adminDraft.outcome">
+            <Select
+              :model-value="toSelectValue(adminDraft.outcome)"
+              @update:model-value="adminDraft.outcome = fromSelectValue($event)"
+            >
               <SelectTrigger size="sm" class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="opt in OUTCOME_OPTIONS" :key="opt.value" :value="opt.value">
+                <SelectItem
+                  v-for="opt in OUTCOME_OPTIONS"
+                  :key="opt.value || SELECT_ALL"
+                  :value="opt.value || SELECT_ALL"
+                >
                   {{ opt.label }}
                 </SelectItem>
               </SelectContent>

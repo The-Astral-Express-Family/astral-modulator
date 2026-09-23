@@ -603,7 +603,9 @@ onUnmounted(() => {
           <!-- 树模式 -->
           <template v-else>
             <TransitionGroup v-if="rows.length" tag="div" name="tree-row" class="relative flex flex-col">
-              <template v-for="row in rows" :key="rowKey(row)">
+              <!-- 子节点必须单根：template v-for 的多根 fragment 会让 TransitionGroup
+                   的 vnode 追踪错位（离开页面卸载时 unmount 崩溃 → 路由视图卡死）。 -->
+              <div v-for="row in rows" :key="rowKey(row)">
                 <template v-if="row.kind === 'task'">
                   <TaskTreeRow
                     :row="row"
@@ -637,7 +639,7 @@ onUnmounted(() => {
                     ? '加载中…'
                     : `加载更多（该层已显示 ${containerCount(row.containerId)} 项）` }}
                 </button>
-              </template>
+              </div>
             </TransitionGroup>
             <Empty v-if="!loading && !rows.length">
               <EmptyHeader>
