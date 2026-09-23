@@ -90,3 +90,26 @@ export function approveDeviceAuthorization(id: ID): Promise<void> {
 export function denyDeviceAuthorization(id: ID): Promise<void> {
   return apiFetch(`/api/v1/auth/device/authorizations/${encodeURIComponent(id)}/deny`, { method: 'POST' })
 }
+
+// ---- 设备管理（会话列表 / 单会话注销）----
+
+/** 一条 session = 一个已登录设备（cli）/浏览器（web）。user_agent 原样返回，友好化在视图层做。 */
+export interface SessionView {
+  id: ID
+  client_type: 'cli' | 'web'
+  user_agent: string
+  remote_addr: string
+  created_at: string
+  last_used_at?: string
+  expires_at: string
+  current: boolean
+}
+
+export function listSessions(): Promise<SessionView[]> {
+  return apiFetch('/api/v1/auth/sessions')
+}
+
+/** 注销自己的一个设备会话；当前浏览器会话走 logout()（清 Cookie）。 */
+export function revokeSession(id: ID): Promise<void> {
+  return apiFetch(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}

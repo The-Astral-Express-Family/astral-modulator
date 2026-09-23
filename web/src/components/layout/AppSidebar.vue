@@ -83,7 +83,7 @@ const createOpen = ref(false)
 
     <div class="mt-auto flex flex-col">
       <div class="px-2 pb-2">
-        <SidebarLink label="设备授权" :icon="KeyRoundIcon" to="/device" />
+        <SidebarLink label="设备管理" :icon="KeyRoundIcon" to="/device" />
       </div>
       <SessionBox />
     </div>

@@ -175,6 +175,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出当前 human 的活跃会话（设备管理页） */
+        get: operations["listSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 注销自己的一个会话（设备管理页「注销」；当前会话走 /auth/logout） */
+        delete: operations["revokeSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -1014,6 +1048,27 @@ export interface components {
                 expires_at?: string;
             };
         };
+        /** @description 设备管理页的会话条目（一条 session = 一个已登录设备/浏览器） */
+        SessionView: {
+            id: components["schemas"]["Id"];
+            /** @enum {string} */
+            client_type: "cli" | "web";
+            /** @description 创建会话时的 User-Agent 原文；客户端负责友好化展示 */
+            user_agent: string;
+            /** @description 创建会话时的客户端 IP（XFF 采信规则同限流） */
+            remote_addr: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description 最近一次认证使用（access/cookie 每分钟节流、refresh 时更新）；从未使用则省略
+             */
+            last_used_at?: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description 是否为发起本次请求的会话 */
+            current: boolean;
+        };
         /** @description 平台视角的用户条目（/admin/*，仅 admin 可见；含邮箱与停用态） */
         AdminUser: {
             id: components["schemas"]["Id"];
@@ -1758,6 +1813,49 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    listSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话条目数组（已撤销/已过期不入列；最近使用优先） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionView"][];
+                };
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    revokeSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已注销 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getMe: {
