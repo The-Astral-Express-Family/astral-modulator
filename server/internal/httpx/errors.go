@@ -60,7 +60,6 @@ const (
 	// CodeEmailTaken：email 已被注册（409）。仅在邀请码验证通过后才会暴露
 	// （要求持有效码才可探测，泄露面可接受，docs/registration.md §3）。
 	CodeEmailTaken = "EMAIL_TAKEN"
-
 )
 
 // Error 是公网错误 envelope，契约见 api/schemas/error.json（语义见 docs/protocol.md §3）。
