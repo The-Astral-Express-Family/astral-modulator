@@ -302,7 +302,8 @@ type ServerMeta struct {
 
 func (ServerMeta) TableName() string { return "server_meta" }
 
-// IdempotencyKey 见 00009_idempotency_keys.sql：写操作幂等去重。
+// IdempotencyKey 见 00009/00016_idempotency_body_column.sql：写操作幂等去重
+// （00016 修复列名漂移：00009 的 response_body 对齐模型默认列名 body）。
 type IdempotencyKey struct {
 	ActorID     string `gorm:"primaryKey;size:40"`
 	Endpoint    string `gorm:"primaryKey;size:255"`
