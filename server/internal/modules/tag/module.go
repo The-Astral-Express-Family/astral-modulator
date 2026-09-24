@@ -329,7 +329,7 @@ func applyTagRename(tx *gorm.DB, proposal *model.TagProposal, name, normalized s
 	if res.RowsAffected == 0 {
 		return model.Tag{}, "", httpx.NotFound("target tag not found")
 	}
-	return model.Tag{ID: *proposal.TargetTagID, Name: name}, outbox.TypeTagRenamed, nil
+	return model.Tag{ID: *proposal.TargetTagID, WorkspaceID: proposal.WorkspaceID, Name: name}, outbox.TypeTagRenamed, nil
 }
 
 func applyTagDelete(tx *gorm.DB, proposal *model.TagProposal, name string) (model.Tag, string, error) {
@@ -340,7 +340,7 @@ func applyTagDelete(tx *gorm.DB, proposal *model.TagProposal, name string) (mode
 	if res.RowsAffected == 0 {
 		return model.Tag{}, "", httpx.NotFound("target tag not found")
 	}
-	return model.Tag{ID: *proposal.TargetTagID, Name: name}, outbox.TypeTagDeleted, nil
+	return model.Tag{ID: *proposal.TargetTagID, WorkspaceID: proposal.WorkspaceID, Name: name}, outbox.TypeTagDeleted, nil
 }
 
 // confirm：两步确认第二步的 HTTP 面（CLI 固定拼写 --confirm）。
@@ -359,5 +359,6 @@ func (m *Module) confirm(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, tagDTO{ID: tagRow.ID, Name: tagRow.Name})
+	httpx.WriteOK(w, r, http.StatusOK,
+		tagDTO{ID: tagRow.ID, WorkspaceID: tagRow.WorkspaceID, Name: tagRow.Name})
 }

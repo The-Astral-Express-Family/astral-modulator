@@ -118,7 +118,7 @@ func TestCreateFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
-	if tagRow.Name != "backend" || tagRow.NormalizedName != "backend" {
+	if tagRow.Name != "backend" || tagRow.NormalizedName != "backend" || tagRow.WorkspaceID != f.wsID {
 		t.Fatalf("tag: %+v", tagRow)
 	}
 
@@ -176,7 +176,7 @@ func TestRenameAndDeleteFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rename confirm: %v", err)
 	}
-	if renamed.Name != "new-name" {
+	if renamed.Name != "new-name" || renamed.WorkspaceID != f.wsID {
 		t.Fatalf("renamed: %+v", renamed)
 	}
 
@@ -184,8 +184,12 @@ func TestRenameAndDeleteFlow(t *testing.T) {
 	proposal2, code2 := propose(t, f, "delete", "new-name")
 	proposal2.TargetTagID = &tagRow.ID
 	f.db.Save(&proposal2)
-	if _, err := f.m.Confirm(context.Background(), f.p, proposal2.ID, code2, "new-name"); err != nil {
+	deleted, err := f.m.Confirm(context.Background(), f.p, proposal2.ID, code2, "new-name")
+	if err != nil {
 		t.Fatalf("delete confirm: %v", err)
+	}
+	if deleted.WorkspaceID != f.wsID {
+		t.Fatalf("deleted: %+v", deleted)
 	}
 	var count int64
 	f.db.Model(&model.Tag{}).Where("id = ?", tagRow.ID).Count(&count)
