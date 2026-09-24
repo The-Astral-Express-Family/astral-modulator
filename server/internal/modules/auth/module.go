@@ -252,7 +252,7 @@ func (m *Module) listSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // revokeSession 是 DELETE /auth/sessions/{id}：注销自己的一个设备会话
-//（当前浏览器会话的注销走 /auth/logout，前端负责分流）。
+// （当前浏览器会话的注销走 /auth/logout，前端负责分流）。
 func (m *Module) revokeSession(w http.ResponseWriter, r *http.Request) {
 	if apiErr := RequireHuman(r, "human session required"); apiErr != nil {
 		httpx.WriteError(w, r, apiErr)

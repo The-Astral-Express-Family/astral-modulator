@@ -150,7 +150,7 @@ func TestReachabilityRules(t *testing.T) {
 }
 
 // listPage 以 human 身份调用 workspace 消息列表，返回行与 next_cursor
-//（null 解析为空串，与 NewPage 语义对齐）。
+// （null 解析为空串，与 NewPage 语义对齐）。
 func listPage(t *testing.T, f *fixture, wsID, rawQuery string) ([]messageDTO, string) {
 	t.Helper()
 	req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/messages?"+rawQuery, nil)
