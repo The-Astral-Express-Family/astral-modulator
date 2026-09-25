@@ -59,7 +59,9 @@ security 定义与 auth 模块实现。
 - 乐观并发统一使用 body 内 `expected_revision`（裁决 D4）；冲突返回
   `409 REVISION_CONFLICT`，`details.current_revision` 携带当前值；
 - 支持 `Idempotency-Key` 的写操作集合见 openapi 各写端点标注；
-  同一 Actor + endpoint + key 在有效窗口内返回同一结果或明确冲突。
+  同一 Actor + endpoint + key 在有效窗口（24 小时）内重放**首次 2xx**
+  响应；4xx/5xx 不入缓存、可安全重试执行（重跑本就冲突的命令会再次
+  执行并可能累积冲突工件）。
 
 ## 5. SSE 事件流
 

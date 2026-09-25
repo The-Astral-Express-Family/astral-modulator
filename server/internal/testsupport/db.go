@@ -15,6 +15,22 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 )
 
+// AllModels 返回全部 GORM 模型。AutoMigrate 与 PG 侧的 model↔migration
+// 列对齐测试共用这份名单——新增模型只登记此处。
+func AllModels() []any {
+	return []any{
+		&model.ServerMeta{}, &model.Actor{}, &model.HumanAuth{},
+		&model.Workspace{}, &model.WorkspaceMember{},
+		&model.DeviceAuthorization{}, &model.Session{}, &model.Credential{},
+		&model.Task{}, &model.TaskLease{},
+		&model.Tag{}, &model.TagProposal{}, &model.TaskTag{},
+		&model.Document{}, &model.DocumentConflict{},
+		&model.OutboxEvent{}, &model.AuditEntry{},
+		&model.Presence{}, &model.Message{},
+		&model.IdempotencyKey{}, &model.Approval{}, &model.Invitation{},
+	}
+}
+
 // NewTestDB 返回独立文件型 sqlite 库（每测试隔离），已完成 AutoMigrate。
 func NewTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -27,17 +43,7 @@ func NewTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&model.ServerMeta{}, &model.Actor{}, &model.HumanAuth{},
-		&model.Workspace{}, &model.WorkspaceMember{},
-		&model.DeviceAuthorization{}, &model.Session{}, &model.Credential{},
-		&model.Task{}, &model.TaskLease{},
-		&model.Tag{}, &model.TagProposal{}, &model.TaskTag{},
-		&model.Document{}, &model.DocumentConflict{},
-		&model.OutboxEvent{}, &model.AuditEntry{},
-		&model.Presence{}, &model.Message{},
-		&model.IdempotencyKey{}, &model.Approval{}, &model.Invitation{},
-	); err != nil {
+	if err := db.AutoMigrate(AllModels()...); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
 	// Windows 下文件被连接池占用会导致 TempDir 清理失败；显式关闭。
