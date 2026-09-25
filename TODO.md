@@ -307,7 +307,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 项 | 状态 | 理由 / 重启条件 |
 |---|---|---|
 | SMTP 邮件邀请（原 §11 #19 / P4） | 裁剪 | invite_url 人工分发已闭环；出现真实邮件需求再启 |
-| CLI `astral register`（#18 / P3） | 移交 astral-cli 仓 | CLI 侧工作；协议快照刷新随其节奏 |
+| CLI `astral register`（#18 / P3） | ✅ 2026-09-26 落地（astral-cli 3822b29） | CLI 侧工作完成：默认衔接 device-flow login（`--no-login` 跳过），registration.md §5.2 按实装修订；协议快照刷新同步落地（astral-cli 377bc7d，v2.3） |
 | 服务端自动三方合并（diff3） | 关闭 | §1.2 P1；客户端本地合并后 resolve(merged) 提交 |
 | 文档 revision 历史表 | ✅ 第 41 轮落地 | §1.2 P3（触发条件成立后解冻，00017） |
 | config TOML（server.toml） | 裁剪 | 环境变量唯一通道，避免双配置源（deployment.md 本就只写了环境变量） |
@@ -398,7 +398,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 15. 【→ S3-1】fuzzy 0 分行剔除（§1.2 F1）
 16. 【✅ 第 29 轮】邀请注册 P1（server）
 17. 【✅ 第 30 轮】邀请注册 P2（web）
-18. 【→ §3 移交 astral-cli 仓】邀请注册 P3：`astral register`
+18. 【✅ 2026-09-26 astral-cli 3822b29】邀请注册 P3：`astral register`（默认衔接 device-flow login，`--no-login` 跳过）
 19. 【→ §3 裁剪】邀请注册 P4：SMTP 邮件邀请
 20. 【✅ 第 33 轮】平台角色基建（D16）
 21. 【✅ 第 34 轮】admin 用户管理

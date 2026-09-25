@@ -114,11 +114,18 @@ email 撞车：唯一约束在 `a` 步先挡，邀请不消耗。
 
 ### 5.2 CLI 注册
 
-- `astral register <server_url> [--invite-code CODE] [--email ... --password ...]`
-  （缺省项交互提示；`--json` 机器可读）；
-- **CLI 注册只建号不入会话**：CLI 的会话载体是 device flow 产出的凭证存储
-  （D12），与 web cookie 是不同通道。「注册即登录」仅指 web 会话——CLI 注册
-  成功后提示 `astral login <server_url>` 走设备流；
+> 2026-09-26 修订：P3 已落地（astral-cli 3822b29），本节按实装行为重写
+> （原文「CLI 注册只建号、提示手动 login」与实装不符——201 的会话载体是
+> web cookie，CLI 存不了，自动衔接 device flow 才能让一条命令完成注册+登录）。
+
+- `astral register <server_url> (--invite-code CODE | --bootstrap)
+  [--email ... --password ... --display-name ...] [--no-login]`：必填缺省项
+  仅 TTY 下交互补问（密码不回显，非 TTY 缺失即用法错误）；`--json` 机器可读；
+- **CLI 注册成功后默认自动衔接 device-flow login**：CLI 的会话载体是 device
+  flow 产出的凭证存储（D12），与 web cookie 是不同通道——「注册即登录」的
+  web 会话 CLI 消费不了，故 201 后复用既有设备流拿 token 对落盘；`--no-login`
+  跳过；自动登录失败时账号已建，保留退出码并提示 `astral login <server_url>`
+  重试；
 - web 与 CLI 共用同一个 `POST /auth/register`，CLI 不新增服务端面。
 
 ### 5.3 与 bootstrap 的关系
