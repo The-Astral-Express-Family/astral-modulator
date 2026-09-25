@@ -12,7 +12,7 @@ openapi-lint:
 
 # serve-db：起开发 PostgreSQL（docker compose，端口 5433）。goose 迁移由
 # server 启动时自动执行（store.Open 内嵌 goose up，幂等；ASTRAL_AUTO_MIGRATE
-# 开关见 config）。单独跑迁移的运维路径见 docs/deployment.md §14（goose CLI）。
+# 开关见 config）。生产显式执行 goose up 的运维要求见 docs/deployment.md §2。
 serve-db:
 	cd .. && docker compose up -d
 

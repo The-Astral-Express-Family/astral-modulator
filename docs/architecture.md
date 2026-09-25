@@ -722,8 +722,11 @@ updated_at
 当前版本不匹配一律落 `document_conflicts` 并返回 `409 DOCUMENT_CONFLICT`
 （含 conflict_id 与当前 revision/hash）；客户端可在本地合并后经
 `resolve(resolution=merged|manual, content=…)` 提交最终内容。删除为版本化
-tombstone（`DELETE ?base_revision=`，远端已变更同样落冲突工件）；不建文档
-revision 历史表（冲突行保存双方全文，audit 记录每次 push 的 hash）。
+tombstone（`DELETE ?base_revision=`，远端已变更同样落冲突工件）。历史版本表
+原判不建（冲突行保存双方全文，audit 记录每次 push 的 hash），round 41 修订
+落地 `document_versions`（migration 00017）：内容被取代前同事务归档全量
+快照，保留窗口 = TTL 30 天 + 每文档 50 版（`ASTRAL_DOC_HISTORY_*`），读端点
+`/document-versions`，恢复走 push + pinned base。
 语义细则见 [sync-semantics.md](sync-semantics.md)。
 
 服务端 path 必须 canonicalize 并阻止：
@@ -965,34 +968,43 @@ Web 不承担 CLI 多平台发行。
 /
 ├─ ARCHITECTURE.md
 ├─ README.md
-├─ TODO.md                        # 任务与契约登记中心（含轮次记录）
+├─ TODO.md                        # 任务与契约登记中心（轮次详录在 TODO-archive.md）
+├─ TODO-archive.md                # 登记簿历史卷（只增不改）
 ├─ MANIFEST.md
 ├─ docs/
 │  ├─ README.md                   # 文档索引
 │  ├─ requirements.md
+│  ├─ architecture.md
 │  ├─ protocol.md
 │  ├─ security.md
 │  ├─ sync-semantics.md
+│  ├─ registration.md
 │  ├─ deployment.md
 │  ├─ roadmap.md
+│  ├─ 看我看我.md                  # 人工维护的原始构想笔记（AI 协作者只读）
 │  └─ adr/
 ├─ server/
 │  ├─ cmd/astral-server/          # 入口：配置、依赖装配、生命周期
+│  ├─ cmd/astral-bootstrap/       # 交互式初始化向导（连库验证 → 迁移 → .env → 首管理员）
 │  ├─ internal/
 │  │  ├─ app/                     # 路由装配 + openapi/事件 契约测试门
 │  │  ├─ background/              # 周期任务统一 goroutine
+│  │  ├─ bootstrap/               # 向导装配（问答/写 .env/首管理员）
 │  │  ├─ config/
 │  │  ├─ httpx/                   # HTTP 契约层（错误 envelope/公共头/分页）
 │  │  ├─ idempotency/
 │  │  ├─ ids/
 │  │  ├─ model/                   # GORM 模型（与 migrations 手工同步）
+│  │  ├─ outbox/                  # 领域事件词表 + EmitTx（写侧）
 │  │  ├─ ptr/                     # ptr.Of 等取址小件
+│  │  ├─ ratelimit/               # 进程内 token bucket（四桶，S5）
 │  │  ├─ store/                   # 连接 + goose migration + server_meta
 │  │  ├─ testsupport/
 │  │  └─ modules/
-│  │     ├─ audit/  auth/  document/  event/  memory/
+│  │     ├─ admin/  audit/  auth/  document/  event/  memory/
 │  │     ├─ message/  presence/  tag/  task/  workspace/
 │  ├─ migrations/                 # goose 版本化 SQL（embed）
+│  ├─ webdist/                    # web/dist 构建产物 go:embed（同源托管，S6-1）
 │  └─ tests/                      # app 级 HTTP 集成测试
 ├─ web/
 ├─ api/
@@ -1071,8 +1083,9 @@ breaking change 直接升 protocol_version + 发布新快照，两仓库锁步�
 - Markdown sync；
 - conflict。
 
-> 状态（round 37）：契约与 501 桩已定稿（M1 已裁决，见 §6.5/§16 与
-> sync-semantics.md），实施计划见 TODO.md §2 S1-S2。
+> 状态（round 41）：S1-S2 已于 round 38 落地验收（documents 七端点实装，
+> 501 桩清零）；round 41 增补文档历史版本链 document_versions（00017，
+> 见 §16 与 sync-semantics.md §8）。
 
 ### Phase 6：Web GUI / hardening
 
@@ -1083,9 +1096,9 @@ breaking change 直接升 protocol_version + 发布新快照，两仓库锁步�
 - deployment；
 - cross-version contract test。
 
-> 状态（round 37）：登录/审批/任务树/裁决队列/admin 用户管理等视图已落地；
-> 余量（audit、rate limit、dist 托管、类型生成、其余 GUI 视图）实施计划见
-> TODO.md §2 S4-S7。config TOML 已裁决裁剪（环境变量唯一通道）。
+> 状态（round 38）：S4-S7 已全部落地验收——audit 双端点、rate limit、
+> webdist 同源托管、schema.d.ts 类型生成（CI drift 门）与 GUI 视图补全；
+> config TOML 已裁决裁剪（环境变量唯一通道）。
 
 ## 28. 明确不做
 

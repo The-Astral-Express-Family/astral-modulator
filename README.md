@@ -25,9 +25,10 @@ CLI（`astral`，C++20）在姊妹仓库 [astral-cli]，两仓库只通过本仓
 api/            公网协议契约（openapi.yaml + schemas/）—— 与 astral-cli 的唯一耦合点
 server/         Go 模块化单体（chi + GORM + goose）
   cmd/astral-server/
+  cmd/astral-bootstrap/
   internal/httpx/       错误 envelope / 稳定错误码 / 公共头中间件（契约层）
   internal/ids/         前缀 ID 生成（usr_/ws_/tsk_/evt_/...）
-  internal/modules/     auth workspace task tag memory document message presence event audit
+  internal/modules/     admin auth workspace task tag memory document message presence event audit
   migrations/           goose SQL（随二进制 embed）
 web/            Vue 3 + TS + Vite 控制台（api client/SSE 封装已就绪）
 docs/           需求/架构/协议/安全/部署等文档与 ADR
@@ -38,8 +39,8 @@ skills/         Agent 技能（astral-install / astral-cli / astral-collaboratio
 ## 快速开始（开发）
 
 前置：Go ≥ 1.27、Node ≥ 24。数据库可选（无 DB 时以桩模式启动：发现/能力/健康可用，
-受保护端点返回 401、readyz 返回 503；document/audit 端点为 501，memory 因 M1
-未裁决尚未注册路由）。
+受保护端点与 readyz 均返回 503 INTERNAL_ERROR；501 桩已于 round 38 全部清零，
+memory 无独立路由——M1 裁决：复用 documents 端点与 `memory/` 路径前缀）。
 
 ```bash
 # 1. 服务端（桩模式，监听 :8080）
@@ -95,10 +96,13 @@ go run ./cmd/astral-server
 ## 验证
 
 ```bash
-make check          # gofmt + vet + go test + openapi lint
-cd server && go test ./... -count=1
+cd server && go vet ./... && go test ./... -count=1   # 含三个契约门
+cd server && make openapi-lint                        # redocly lint api/openapi.yaml
 cd web && npm run build
 ```
+
+与 CI 三道门（`.github/workflows/ci.yml`：server / web / openapi）对应；web 门
+另含 `npm run gen:api` 后 `schema.d.ts` 逐字节一致的 drift 检查。
 
 ## 协议变更流程
 

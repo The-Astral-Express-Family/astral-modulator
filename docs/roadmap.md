@@ -10,8 +10,9 @@
 > **里程碑视图**，用里程碑名而非编号，避免与实施 Phase 混淆。
 >
 > **当前进度**以根目录 [TODO.md](../TODO.md) 为准（round 37 起 TODO.md 为
-> 一次性实施总纲：Phase 0-4 已落地；Phase 5 契约已定稿（M1 已裁决）待实施；
-> Phase 6 部分视图已落地，余量与实施顺序见 TODO.md §2 S1-S8）。
+> 一次性实施总纲：S1-S8 已于 round 38 全部落地验收——Phase 5 实装与
+> Phase 6 视图补全在内；round 41 增补文档历史版本链 document_versions
+> （00017）；后续工作按 TODO.md §3 触发条件重启）。
 
 ## 里程碑：Design Baseline（已完成）
 
@@ -25,7 +26,7 @@
 - `docs/sync-semantics.md`
 - `docs/security.md`
 - `docs/deployment.md`
-- ADR 0001–0007
+- ADR 0001–0008
 - 三个初始 Skills
 
 Exit criteria：

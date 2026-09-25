@@ -359,7 +359,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 2026-09-16 | 第 38 轮：**R7/R8 行为登记**——login 成功不写 audit（sessions 表即事实，与 A1' 同精神）；Idempotency-Key 并发同键进程内互斥（单实例 MVP，多实例边界同 store/db.go 触发条件） | 行为登记 | CLI |
 | 2026-09-16 | 第 38 轮：workspace audit 补 401/403 响应文档行；capabilities features += document_sync；S6-2 类型生成入库（web gen:api + CI drift 门）；S6-1 同源托管（webdist go:embed） | 契约文档 | CLI/Web |
 | 2026-09-16 | 第 38 轮 G4 补录：`CredentialCreate` 补声明可选 `workspace_id`（授权分流字段——服务端行为本就如此，契约补齐文档；Web MembersView 传当前 ws） | 契约文档 | CLI/Web |
-| 2026-09-25 | 第 41 轮：新增端点 `GET /workspaces/{id}/document-versions`（历史版本列表，path 必填 query，revision 降序游标分页）与 `GET /workspaces/{id}/document-versions/{revision}`（单版全量快照）；新增 schema DocumentVersion / DocumentVersionDetail；新增 ID 前缀 `dvh`；新增 env ASTRAL_DOC_HISTORY_MAX_PER_DOC / ASTRAL_DOC_HISTORY_TTL_HOURS；行为：每次内容被取代前同事务归档全量快照（§1.2 P3 解冻） | 补充 | CLI（history/get --revision 后续） / Web |
+| 2026-09-25 | 第 41 轮：新增端点 `GET /workspaces/{id}/document-versions`（历史版本列表，path 必填 query，revision 降序游标分页）与 `GET /workspaces/{id}/document-versions/{revision}`（单版全量快照）；新增 schema DocumentVersion / DocumentVersionDetail；新增 ID 前缀 `dvh`；新增 env ASTRAL_DOC_HISTORY_MAX_PER_DOC / ASTRAL_DOC_HISTORY_TTL_HOURS；行为：每次内容被取代前同事务归档全量快照（§1.2 P3 解冻） | 补充 | CLI 已跟进（history / get --revision / push --force 防盲推门，astral-cli 5c32909） / Web |
 
 ## 附录 A. 稳定锚点（原 §2 裁决表 / 原 §11 编号清单，编号不变）
 

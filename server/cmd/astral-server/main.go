@@ -125,11 +125,12 @@ func run() error {
 		// 过期租约清扫（architecture §17）。
 		taskMod.StartSweeper(ctx, 30*time.Second)
 	} else {
-		log.Warn("ASTRAL_DATABASE_DSN empty; running without storage (stub mode): protected endpoints will 401")
+		log.Warn("ASTRAL_DATABASE_DSN empty; running without storage (stub mode): protected endpoints will 503")
 		// 桩模式也装配一个无 DB 的 service，保证路由可注册、行为可预期（查询会失败）。
 		authSvc = auth.NewService(nil, log)
 		mods.Auth.Svc = authSvc
-		// 业务模块在桩模式不注册 DB 依赖 —— 路由仍注册（401 后才到 500），
+		// 业务模块在桩模式不注册 DB 依赖 —— 路由仍注册（鉴权层
+		// ResolvePrincipal 即因无库返回 503，到不了 handler），
 		// 文档化的行为以有数据库模式为准。
 		mods.Workspace = &workspace.Module{Auth: authSvc}
 		taskMod := &task.Module{Auth: authSvc}

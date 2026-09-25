@@ -29,7 +29,9 @@
 ## 客户端消费方式
 
 - CLI：以本目录快照为准生成/手写客户端与 contract test，不 import 服务端 Go 包。
-- Web：`web/src/api/types.ts` 手写对齐（TODO(phase-2): 换 openapi-typescript 生成，消除手工漂移）。
+- Web：`web/src/api/schema.d.ts` 由 openapi-typescript 生成（`npm run gen:api`，
+  CI drift 门校验与 openapi.yaml 一致）；`web/src/api/types.ts` 为存量手写别名层，
+  各视图迁移生成类型后逐步删除。
 
 ## Lint
 

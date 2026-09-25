@@ -20,10 +20,10 @@ ASTRAL_SERVER_ID='srv_dev_local' \
 go run ./cmd/astral-server
 ```
 
-无数据库也能启动（桩模式）：发现/能力/健康/SSE 可用，受保护端点返回 401；
-需要存储的端点在鉴权后返回 503 INTERNAL_ERROR；未实装端点返回 501
-（document/audit，phase-5/6）。memory 无独立路由（M1 裁决：复用 documents
-端点与 `memory/` 路径前缀，见 architecture §6.5）。
+无数据库也能启动（桩模式）：发现/能力/健康可用，受保护端点（含 SSE）与
+readyz 返回 503 INTERNAL_ERROR（501 桩已于 round 38 全部清零，全部端点已实装）。
+memory 无独立路由（M1 裁决：复用 documents 端点与 `memory/` 路径前缀，
+见 architecture §6.5）。
 环境变量全集见 `server/internal/config/config.go`。
 
 ### 小型自托管（推荐基线）
@@ -34,8 +34,9 @@ reverse proxy / TLS
   -> PostgreSQL
 ```
 
-不要求 Kubernetes。Web 控制台与 API 同源部署（server 托管 `web/dist`，phase-6），
-反向代理只需转发一个服务。
+不要求 Kubernetes。Web 控制台与 API 同源部署已落地（S6-1）：`make web-dist`
+把 `web/dist` 拷入 `server/webdist/dist` 随二进制 go:embed，根路径静态服务 +
+SPA fallback，反向代理只需转发一个服务。
 
 ### 二进制部署
 

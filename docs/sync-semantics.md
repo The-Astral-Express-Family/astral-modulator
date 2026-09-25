@@ -1,7 +1,8 @@
 # Markdown 工作区同步语义
 
 > 状态：Accepted（MVP 口径，round 37 裁决落档：无服务端自动合并 / tombstone
-> 删除 / 不建历史版本表；修订点在 §8/§9/§13/§14 就地标注）
+> 删除；「不建历史版本表」已于 round 41 修订——落地 document_versions
+> 历史链（00017），见 §8；修订点在 §8/§9/§13/§14 就地标注）
 >
 > 目标：确保多个 Agent/人类并发修改文本时不会静默丢数据。
 > REST 契约（端点与响应形状）以 `api/openapi.yaml` documents 段为准。
@@ -122,6 +123,10 @@ Hash 基于 canonical bytes。MVP 必须明确 newline 处理：建议 **不自�
 > TTL（默认 30 天）+ 每文档上限（默认 50 版），先到即剪。读端点
 > `/document-versions`（列表/详情，path 必填 query）；恢复不设写端点——取回
 > 旧内容后走 push + pinned base，恢复操作本身也过 CAS。历史从迁移上线起算。
+> **round 41 补记（CLI 侧）**：astral-cli 已配防盲推门——缺省 push 覆盖非空
+> 且内容不同的远端时本地拦截（指向 --force / pinned base / 先 get），显式
+> base、同内容、空远端不拦；`document history` 与 `get --revision` 消费
+> /document-versions。预防（门）与恢复（历史链）两侧齐备。
 
 ## 9. Push
 
