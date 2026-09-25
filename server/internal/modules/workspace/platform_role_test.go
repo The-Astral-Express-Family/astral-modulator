@@ -33,6 +33,7 @@ func credSetup(t *testing.T) *credFixture {
 	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	m := &Module{DB: db, Auth: svc, WebBaseURL: "https://app.example.com"}
 
 	adminActor := &model.Actor{ID: "usr_admin", Kind: "human", PlatformRole: "admin", DisplayName: "Admin"}

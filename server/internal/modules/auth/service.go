@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -39,6 +40,20 @@ type Service struct {
 	OnRevoke        func(actorID string)
 	DeviceTTL       time.Duration // 默认 10m
 	DevicePollEvery time.Duration // CLI 轮询间隔约定，默认 3s
+
+	// bgWrites 追踪 fire-and-forget 的后台写（credential last_used_at），
+	// DrainBackgroundWrites 等待其归零。测试清理必须先 drain 再关库：
+	// 否则迟到的 UPDATE 会在 TempDir 删除后重建 sqlite journal 文件，
+	// rmdir 报 ENOTEMPTY（task 包 tag 测试在 CI 上的偶发红即此竞态）。
+	bgWrites sync.WaitGroup
+}
+
+// DrainBackgroundWrites 等待在途的后台写完成（credential last_used_at 的
+// 异步 goroutine）。生产装配可在优雅停机时调用；测试 fixture 必须在
+// t.Cleanup 中先于关库/TempDir 清理调用（cleanup LIFO：注册晚于
+// NewTestDB 即先执行）。
+func (s *Service) DrainBackgroundWrites() {
+	s.bgWrites.Wait()
 }
 
 func NewService(db *gorm.DB, log *slog.Logger) *Service {
@@ -806,9 +821,12 @@ func (s *Service) authenticateCredential(ctx context.Context, secret string) (*P
 		return nil, &httpx.APIError{Status: 401, Code: httpx.CodeTokenRevoked, Message: "account disabled"}
 	}
 	// last_used 异步更新，失败不影响请求；按分钟节流，避免每请求一条
-	// UPDATE（高频 agent 场景下是纯写放大）。
+	// UPDATE（高频 agent 场景下是纯写放大）。goroutine 计入 bgWrites——
+	// 测试清理先 DrainBackgroundWrites 再关库，防迟到写打穿 TempDir 清理。
 	if cred.LastUsedAt == nil || time.Since(*cred.LastUsedAt) > time.Minute {
+		s.bgWrites.Add(1)
 		go func() {
+			defer s.bgWrites.Done()
 			bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			_ = s.DB.WithContext(bgCtx).Model(&model.Credential{}).Where("id = ?", cred.ID).Update("last_used_at", time.Now()).Error

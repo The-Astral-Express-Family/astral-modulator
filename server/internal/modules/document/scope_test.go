@@ -24,6 +24,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	wsID := "ws_scope"
 	if err := db.Create(&model.Workspace{ID: wsID, Name: "scope", Slug: "scope", CreatedBy: "usr_owner"}).Error; err != nil {
 		t.Fatal(err)

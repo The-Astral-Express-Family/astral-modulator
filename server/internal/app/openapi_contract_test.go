@@ -76,6 +76,7 @@ func collectChiRoutes(t *testing.T) map[string]bool {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, log)
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	hub := event.NewHub()
 	mods := &Modules{
 		Auth:      &auth.Module{Svc: svc, PublicURL: "https://astral.example.com"},

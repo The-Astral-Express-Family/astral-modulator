@@ -47,6 +47,7 @@ func newAuthedStreamServer(t *testing.T, wsID string) (*httptest.Server, *Hub, *
 	db := testsupport.NewTestDB(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(db, log)
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	member := &model.Actor{ID: "act_member", Kind: "human", DisplayName: "member"}
 	if err := db.Create(member).Error; err != nil {
 		t.Fatal(err)
@@ -208,6 +209,7 @@ func TestSSERejectsNonMember(t *testing.T) {
 	db := testsupport.NewTestDB(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(db, log)
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	member := &model.Actor{ID: "act_member", Kind: "human", DisplayName: "member"}
 	outsider := &model.Actor{ID: "act_outsider", Kind: "human", DisplayName: "outsider"}
 	for _, a := range []*model.Actor{member, outsider} {

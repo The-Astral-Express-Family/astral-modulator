@@ -33,6 +33,7 @@ func setup(t *testing.T) *fixture {
 	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	// listTaskThread 经 task.LoadForWorkspace 校验 task 主语，须接真实 task 模块。
 	tasks := &task.Module{DB: db, Auth: svc}
 	m := &Module{DB: db, Auth: svc, Tasks: tasks}

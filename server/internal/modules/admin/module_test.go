@@ -38,6 +38,7 @@ func newFixture(t *testing.T) *fixture {
 	ctx := context.Background()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, discardLogger())
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	m := &Module{DB: db, Auth: svc, Log: discardLogger()}
 
 	// 首个 human = 平台 admin（registerBootstrap 授予）。

@@ -29,6 +29,7 @@ func setup(t *testing.T) *fixture {
 	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, discardLogger())
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	m := &Module{DB: db, Auth: svc}
 
 	human := &model.Actor{ID: "usr_h1", Kind: "human", DisplayName: "H"}

@@ -37,6 +37,7 @@ func approvalSetup(t *testing.T) *approvalFixture {
 	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	hub := event.NewHub()
 	m := &Module{DB: db, Auth: svc}
 

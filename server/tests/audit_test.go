@@ -126,6 +126,7 @@ func newAuditFixture(t *testing.T) *auditFixture {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	svc := auth.NewService(db, log)
+	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
 	hub := event.NewHub()
 	mods := &app.Modules{
 		Idempotency: nil,
