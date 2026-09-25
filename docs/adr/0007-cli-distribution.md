@@ -1,6 +1,6 @@
 # ADR-0007: CLI 发行采用原生 Release Asset + 包管理器
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-06
 
 ## Context

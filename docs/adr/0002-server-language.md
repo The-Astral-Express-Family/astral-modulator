@@ -1,6 +1,6 @@
 # ADR-0002: 服务端首选 Go 模块化单体
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-06
 
 ## Context

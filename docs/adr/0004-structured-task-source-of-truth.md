@@ -1,6 +1,6 @@
 # ADR-0004: Task 使用结构化模型作为事实来源
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-06
 
 ## Context

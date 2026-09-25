@@ -1,6 +1,6 @@
 # ADR-0006: Human GUI 采用 Web-first
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-06
 
 ## Context

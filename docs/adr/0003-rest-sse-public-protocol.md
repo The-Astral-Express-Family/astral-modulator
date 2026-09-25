@@ -1,6 +1,6 @@
 # ADR-0003: 公网协议采用 REST/JSON + SSE
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-06
 
 ## Context

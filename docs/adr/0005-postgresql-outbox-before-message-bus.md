@@ -1,6 +1,6 @@
 # ADR-0005: MVP 使用 PostgreSQL + Transactional Outbox，不强制消息总线
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-06
 
 ## Context
