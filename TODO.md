@@ -319,7 +319,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | presence upsert ON CONFLICT 化 | 延期 | 现实现正确，无性能触发 |
 | managed path config（workspace include/exclude） | 移交 | round 38 R3：客户端约定，astral-cli 仓持有；服务端只保留固定黑名单（sync-semantics §3 已标注归属） |
 | 审批面扩展（workspace.delete / credential.create_privileged 等 §22 候选） | 触发式 | round 38 R5：architecture §22 本标"候选"；出现真实高风险操作再启 |
-| CLI/发行需求（FR-010/014/015、NFR-001/002/003/008、Distribution MVP） | 移交 | round 38 R6：整体归属 astral-cli 仓，本仓不登记其实现 |
+| CLI/发行需求（FR-010/014/015、NFR-001/002/003/008、Distribution MVP） | 移交 | round 38 R6：整体归属 astral-cli 仓，本仓不登记其实现；执行设计已定稿于 astral-cli docs/DISTRIBUTION.md（2026-09-26，R0-R5 分阶段） |
 | admin/users 分页 | 契约明示不做 | round 38 R9：契约即注明"平台用户量小，暂不分页"；规模触发再改契约 |
 | 开放注册 / 邮箱验证 / 服务器级邀请 / 邀请授 owner | 永不（MVP） | docs/registration.md §8 |
 
