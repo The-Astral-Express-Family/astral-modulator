@@ -50,6 +50,20 @@ type Config struct {
 	//（ASTRAL_TRUSTED_PROXY，默认 false = 直连 RemoteAddr）。仅作用于
 	// 限流 key 解析；见 docs/deployment.md §1。
 	TrustedProxy bool
+	// DocHistory 是文档历史版本保留窗口（00017；TODO §1.2 P3）：
+	// 两道闸先到即剪，直接构造 Config 零值 = 双 0 无限保留（测试口径）。
+	DocHistory DocHistoryConfig
+}
+
+// DocHistoryConfig 是 document_versions 保留窗口（internal/modules/document/
+// retention.go）。两项均可设 0 关闭对应维度。
+type DocHistoryConfig struct {
+	// MaxPerDoc 每文档保留的最大版本数（ASTRAL_DOC_HISTORY_MAX_PER_DOC，
+	// 默认 50；hutao 实测重度协同最热文档 13 版/天，50 版 ≈ 4 天余量）。
+	MaxPerDoc int
+	// TTLHours 版本最短保留时长（ASTRAL_DOC_HISTORY_TTL_HOURS，默认
+	// 720 = 30 天）。
+	TTLHours int
 }
 
 // RateLimitConfig 是四类限流桶的每分钟令牌数（internal/ratelimit：
@@ -85,6 +99,10 @@ func Load() Config {
 			SSEPerMin:       envInt("ASTRAL_RATELIMIT_SSE_PER_MIN", 30),
 		},
 		TrustedProxy: envBool("ASTRAL_TRUSTED_PROXY", false),
+		DocHistory: DocHistoryConfig{
+			MaxPerDoc: envInt("ASTRAL_DOC_HISTORY_MAX_PER_DOC", 50),
+			TTLHours:  envInt("ASTRAL_DOC_HISTORY_TTL_HOURS", 720),
+		},
 	}
 	switch strings.ToLower(os.Getenv("ASTRAL_LOG_LEVEL")) {
 	case "debug":
@@ -105,9 +123,10 @@ func (c Config) Describe() string {
 	if c.DatabaseDSN != "" {
 		db = "postgres"
 	}
-	return fmt.Sprintf("addr=%s public_url=%s web_base_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v ratelimit=sensitive:%d/poll:%d/api:%d/sse:%d trusted_proxy=%v",
+	return fmt.Sprintf("addr=%s public_url=%s web_base_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v ratelimit=sensitive:%d/poll:%d/api:%d/sse:%d trusted_proxy=%v doc_history=max:%d/ttl:%dh",
 		c.HTTPAddr, c.PublicURL, c.WebBaseURL, db, c.ServerID, c.AutoMigrate, c.DevCORSOrigins,
-		c.RateLimit.SensitivePerMin, c.RateLimit.PollPerMin, c.RateLimit.APIPerMin, c.RateLimit.SSEPerMin, c.TrustedProxy)
+		c.RateLimit.SensitivePerMin, c.RateLimit.PollPerMin, c.RateLimit.APIPerMin, c.RateLimit.SSEPerMin, c.TrustedProxy,
+		c.DocHistory.MaxPerDoc, c.DocHistory.TTLHours)
 }
 
 func env(key, def string) string {

@@ -87,6 +87,8 @@ go run ./cmd/astral-server
 | `ASTRAL_DATABASE_DSN` / `DATABASE_URL` | — | PostgreSQL DSN；空 = 桩模式 |
 | `ASTRAL_SERVER_ID` | 随机 | 稳定服务器身份；首启固化进 server_meta，此后库中值优先 |
 | `ASTRAL_AUTO_MIGRATE` | `true` | 启动时 goose up；**生产多实例必须关闭** |
+| `ASTRAL_DOC_HISTORY_MAX_PER_DOC` | `50` | 文档历史版本保留窗口：每文档上限（0 = 不限；与 TTL 先到即剪） |
+| `ASTRAL_DOC_HISTORY_TTL_HOURS` | `720` | 文档历史版本保留窗口：最短保留时长，小时（0 = 不限） |
 | `ASTRAL_DEV_CORS_ORIGINS` | — | 开发期浏览器跨域白名单（生产同源应留空） |
 | `ASTRAL_LOG_LEVEL` | `info` | slog 级别（debug/info/warn/error） |
 

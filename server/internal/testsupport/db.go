@@ -24,7 +24,7 @@ func AllModels() []any {
 		&model.DeviceAuthorization{}, &model.Session{}, &model.Credential{},
 		&model.Task{}, &model.TaskLease{},
 		&model.Tag{}, &model.TagProposal{}, &model.TaskTag{},
-		&model.Document{}, &model.DocumentConflict{},
+		&model.Document{}, &model.DocumentConflict{}, &model.DocumentVersion{},
 		&model.OutboxEvent{}, &model.AuditEntry{},
 		&model.Presence{}, &model.Message{},
 		&model.IdempotencyKey{}, &model.Approval{}, &model.Invitation{},

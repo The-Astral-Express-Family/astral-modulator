@@ -123,10 +123,10 @@ func (m *Module) push(w http.ResponseWriter, r *http.Request) {
 }
 
 // pushDoc 是 push 的事务核心：单事务内完成 R1 大小写检查 → 行分类 →
-// 创建/快进/复活/落冲突 → audit + outbox 三件套。分类骨架与冲突分支留在
-// 本函数，三类成功路径下沉到 createDocTx / reviveDocTx / fastForwardTx。
-// 冲突分支经 conflictOutcome 在事务提交后转 409（工件必须落地）；
-// 400/500 分支无写入，回滚无害。hash 由 handler 一次算好传入复用。
+// 创建/快进/复活/落冲突 → 版本归档 + audit + outbox 四件套。分类骨架与
+// 冲突分支留在本函数，三类成功路径下沉到 createDocTx / reviveDocTx /
+// fastForwardTx。冲突分支经 conflictOutcome 在事务提交后转 409（工件必须
+// 落地）；400/500 分支无写入，回滚无害。hash 由 handler 一次算好传入复用。
 func (m *Module) pushDoc(ctx context.Context, p *auth.Principal, wsID, path string, in pushInput, hash string) (*model.Document, *httpx.APIError) {
 	ours := conflictSide{Content: in.Content, ContentHash: hash, ActorID: p.ActorID}
 	var out *model.Document
@@ -237,9 +237,10 @@ func createDocTx(tx *gorm.DB, p *auth.Principal, wsID, path, content, hash strin
 }
 
 // reviveDocTx 是 push 的复活分支：tombstone + base_revision=0 → 写入新内容
-// （revision 续增、deleted_at=NULL）+ audit + document.updated 收尾。
+// （revision 续增、deleted_at=NULL）；被取代的 tombstone 版本先归档
+// （kind=revive，快照 deleted=true）+ audit + document.updated 收尾。
 func reviveDocTx(tx *gorm.DB, p *auth.Principal, wsID string, row *model.Document, content, hash string) (*model.Document, error) {
-	fresh, err := applyContentTx(tx, row, content, hash, p.ActorID)
+	fresh, err := applyContentTx(tx, row, content, hash, p.ActorID, versionKindRevive)
 	if err != nil {
 		return nil, err
 	}
@@ -250,8 +251,9 @@ func reviveDocTx(tx *gorm.DB, p *auth.Principal, wsID string, row *model.Documen
 }
 
 // fastForwardTx 是 push 的快进分支：条件更新（id+revision+hash+未删）防并发
-// 覆盖 + audit + document.updated 收尾。RowsAffected=0 即行被并发推进，重读后
-// 按失配落冲突工件（onConflict，由 pushDoc 注入）。
+// 覆盖；成功后归档被取代版本 + audit + document.updated 收尾。RowsAffected=0
+// 即行被并发推进（未发生取代，不归档），重读后按失配落冲突工件（onConflict，
+// 由 pushDoc 注入）。
 func fastForwardTx(tx *gorm.DB, p *auth.Principal, wsID, path string, row *model.Document, content, hash string, onConflict func(tx *gorm.DB, doc *model.Document) error) (*model.Document, error) {
 	now := time.Now()
 	res := tx.Model(&model.Document{}).
@@ -270,6 +272,9 @@ func fastForwardTx(tx *gorm.DB, p *auth.Principal, wsID, path string, row *model
 			return nil, e
 		}
 		return nil, onConflict(tx, fresh)
+	}
+	if err := archiveVersionTx(tx, p.ActorID, row, versionKindPush); err != nil {
+		return nil, err
 	}
 	row.Content, row.ContentHash, row.UpdatedBy, row.UpdatedAt = content, hash, p.ActorID, now
 	row.Revision++
@@ -345,6 +350,9 @@ func (m *Module) deleteDoc(ctx context.Context, p *auth.Principal, wsID, path st
 				}
 				return recordDeleteConflict(tx, p, fresh, base, &pending)
 			}
+			if err := archiveVersionTx(tx, p.ActorID, row, versionKindDelete); err != nil {
+				return err
+			}
 			row.DeletedAt, row.UpdatedBy, row.UpdatedAt = &now, p.ActorID, now
 			row.Revision++
 			if err := audit.RecordInTx(tx, audit.Entry{
@@ -389,6 +397,29 @@ func recordDeleteConflict(tx *gorm.DB, p *auth.Principal, doc *model.Document, b
 }
 
 // ---- 事务内共享小件 ----
+
+// 版本归档的 kind 取值（00017 CHECK 约束同源）：取代原因而非写入内容。
+const (
+	versionKindPush    = "push"    // push 快进覆盖
+	versionKindResolve = "resolve" // 冲突裁决落地（内容或 tombstone）
+	versionKindRevive  = "revive"  // tombstone 复活（快照 deleted=true）
+	versionKindDelete  = "delete"  // 直删进 tombstone
+)
+
+// archiveVersionTx 把被取代的文档行归档为一条全量快照（00017；sync-semantics
+// §8 的有限 revision window）。快照保留行当时的 content/hash/revision 与
+// tombstone 状态。仅在内容确定被取代的成功分支调用——创建与冲突分支无取代
+// 发生，不归档；(document_id, revision) 唯一约束是取代恰好一次的库层兜底。
+func archiveVersionTx(tx *gorm.DB, actorID string, row *model.Document, kind string) error {
+	version := &model.DocumentVersion{
+		ID: ids.New(ids.DocumentVersion), WorkspaceID: row.WorkspaceID,
+		DocumentID: row.ID, Path: row.Path,
+		Revision: row.Revision, ContentHash: row.ContentHash, Content: row.Content,
+		Kind: kind, Deleted: row.DeletedAt != nil, ActorID: actorID,
+		CreatedAt: time.Now(),
+	}
+	return tx.Create(version).Error
+}
 
 // recordConflictTx 落一条冲突工件并同事务完成 audit + document.conflict 事件。
 // 只写不判——409 响应由调用方在事务提交后经 conflictOutcome 构造。
@@ -455,8 +486,9 @@ func emitUpdatedTx(tx *gorm.DB, wsID, actorID string, doc *model.Document, delet
 // applyContentTx 落一份新内容：revision+1；行是 tombstone 时顺带复活
 // （deleted_at=NULL）。用于 push 复活与 resolve 的内容落地。重读行后写入，
 // 以 resolve 的仲裁语义落到最新 revision 之上（resolve 稀有且为显式人工决策，
-// 与 push 快进的严格条件更新互补）。
-func applyContentTx(tx *gorm.DB, doc *model.Document, content, hash, actorID string) (*model.Document, error) {
+// 与 push 快进的严格条件更新互补）。写入成功后归档被取代版本（kind 由调用
+// 方区分 revive / resolve）。
+func applyContentTx(tx *gorm.DB, doc *model.Document, content, hash, actorID, kind string) (*model.Document, error) {
 	fresh := *doc
 	if err := tx.First(&fresh, "id = ?", doc.ID).Error; err != nil {
 		return nil, err
@@ -472,6 +504,9 @@ func applyContentTx(tx *gorm.DB, doc *model.Document, content, hash, actorID str
 	if err := tx.Model(&model.Document{}).Where("id = ?", fresh.ID).Updates(updates).Error; err != nil {
 		return nil, err
 	}
+	if err := archiveVersionTx(tx, actorID, &fresh, kind); err != nil {
+		return nil, err
+	}
 	fresh.Content, fresh.ContentHash, fresh.UpdatedBy, fresh.UpdatedAt = content, hash, actorID, now
 	fresh.Revision++
 	fresh.DeletedAt = nil
@@ -479,7 +514,8 @@ func applyContentTx(tx *gorm.DB, doc *model.Document, content, hash, actorID str
 }
 
 // applyTombstoneTx 落 tombstone（resolve 的 ours=delete 意图分支）；
-// 行已是 tombstone 时幂等无操作。
+// 行已是 tombstone 时幂等无操作（不归档）。实际落 tombstone 前归档被取代
+// 版本（kind=resolve——取代原因是冲突裁决而非直改）。
 func applyTombstoneTx(tx *gorm.DB, doc *model.Document, actorID string) (*model.Document, error) {
 	fresh := *doc
 	if err := tx.First(&fresh, "id = ?", doc.ID).Error; err != nil {
@@ -487,6 +523,9 @@ func applyTombstoneTx(tx *gorm.DB, doc *model.Document, actorID string) (*model.
 	}
 	if fresh.DeletedAt != nil {
 		return &fresh, nil
+	}
+	if err := archiveVersionTx(tx, actorID, &fresh, versionKindResolve); err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	if err := tx.Model(&model.Document{}).Where("id = ?", fresh.ID).Updates(map[string]any{

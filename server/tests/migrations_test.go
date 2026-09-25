@@ -59,7 +59,7 @@ func TestMigrationsUpFromScratch(t *testing.T) {
 		"server_meta", "human_auth", "actors", "workspaces", "workspace_members",
 		"device_authorizations", "sessions", "credentials",
 		"tasks", "task_leases", "tags", "tag_proposals",
-		"documents", "document_conflicts", "outbox", "audit_log", "presence", "messages",
+		"documents", "document_conflicts", "document_versions", "outbox", "audit_log", "presence", "messages",
 	} {
 		var exists bool
 		if err := db.QueryRowContext(ctx,

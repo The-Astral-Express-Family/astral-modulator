@@ -228,7 +228,7 @@ func applyResolutionTx(tx *gorm.DB, p *auth.Principal, doc *model.Document, ours
 				emit = true
 			}
 		} else {
-			fresh, err = applyContentTx(tx, doc, ours.Content, ours.ContentHash, p.ActorID)
+			fresh, err = applyContentTx(tx, doc, ours.Content, ours.ContentHash, p.ActorID, versionKindResolve)
 			if err != nil {
 				return nil, false, err
 			}
@@ -238,7 +238,7 @@ func applyResolutionTx(tx *gorm.DB, p *auth.Principal, doc *model.Document, ours
 		fresh = doc // 远端版本即裁决：不动行、不发事件
 	default: // merged | manual
 		hash := contentHash(*content)
-		fresh, err = applyContentTx(tx, doc, *content, hash, p.ActorID)
+		fresh, err = applyContentTx(tx, doc, *content, hash, p.ActorID, versionKindResolve)
 		if err != nil {
 			return nil, false, err
 		}

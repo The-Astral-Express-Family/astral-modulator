@@ -13,7 +13,7 @@ var idShape = regexp.MustCompile(`^[a-z]{2,3}_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{
 func validShape(id string) bool { return idShape.MatchString(strings.ToLower(id)) }
 
 func TestNewShape(t *testing.T) {
-	for _, p := range []Prefix{User, Agent, Workspace, Task, TagProposal, Event, Message} {
+	for _, p := range []Prefix{User, Agent, Workspace, Task, TagProposal, Event, Message, Conflict, DocumentVersion} {
 		id := New(p)
 		if !strings.HasPrefix(id, string(p)+"_") {
 			t.Errorf("%s: bad prefix in %q", p, id)

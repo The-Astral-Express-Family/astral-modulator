@@ -114,6 +114,14 @@ Hash 基于 canonical bytes。MVP 必须明确 newline 处理：建议 **不自�
 
 > **round 37 裁决**：MVP 不建 revision 历史表——冲突行（document_conflicts）
 > 已保存双方全文，audit 记录每次 push 的 hash；历史窗口需求出现再扩展。
+>
+> **round 41 修订**：窗口需求已出现——CLI 缺省 push 是「GET 当前行 → 以最新
+> revision 为 base」的读改写，盲推会静默覆盖他人内容且不产生冲突行（被覆盖
+> 内容无处留存）。落地 document_versions（00017）：内容被取代（push 快进 /
+> resolve 落地 / 复活 / tombstone）前同事务归档全量快照；保留窗口 =
+> TTL（默认 30 天）+ 每文档上限（默认 50 版），先到即剪。读端点
+> `/document-versions`（列表/详情，path 必填 query）；恢复不设写端点——取回
+> 旧内容后走 push + pinned base，恢复操作本身也过 CAS。历史从迁移上线起算。
 
 ## 9. Push
 

@@ -1,18 +1,20 @@
 // Package document 模块：受管 Markdown 同步（architecture §16、sync-semantics.md；
 // round 38 T4 实装，替换 round 37 铺设的 501 桩）。
 //
-// 七端点：manifest / get / push / delete / conflicts 列表 / 详情 / resolve。
-// 核心语义（TODO.md §1.3、§2 S1-2/S1-3/S1-5）：
+// 九端点：manifest / get / push / delete / conflicts 列表 / 详情 / resolve /
+// 版本列表 / 版本详情。核心语义（TODO.md §1.3、§2 S1-2/S1-3/S1-5）：
 //   - 乐观并发：push/delete 携带 base_revision(+base_hash)，失配一律落
 //     document_conflicts 工件 + 409 DOCUMENT_CONFLICT（P1：不做服务端自动合并，
 //     客户端本地合并后经 resolve(merged|manual) 提交）；
 //   - 删除是版本化 tombstone（P2）：行保留、revision 续增、可复活；
-//   - 每次成功写 = 领域行 + audit + outbox 同事务三件套（硬约束 §1-4）；
+//   - 每次成功写 = 领域行 + 版本归档 + audit + outbox 同事务四件套
+//     （硬约束 §1-4 + 00017 版本链）；
 //   - 授权按路径前缀切轴（M1）：memory/ → memory:*，其余 → document:*，
 //     单点在 scope.go。
 //
-// 文件拆分：module.go（路由 + manifest/get）、push.go（push/delete 事务核心）、
-// conflicts.go（冲突三端点）、store.go（单行查询出口）、dto.go（wire 层）。
+// 文件拆分：module.go（路由 + manifest/get）、push.go（push/delete 事务核心，
+// 含版本归档小件）、conflicts.go（冲突三端点）、versions.go（版本读两端点）、
+// retention.go（版本保留窗口清扫）、store.go（单行查询出口）、dto.go（wire 层）。
 package document
 
 import (
@@ -50,6 +52,10 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Get("/workspaces/{workspace_id}/conflicts", m.listConflicts)
 	r.Get("/workspaces/{workspace_id}/conflicts/{conflict_id}", m.getConflict)
 	r.Post("/workspaces/{workspace_id}/conflicts/{conflict_id}/resolve", m.resolveConflict)
+	// 版本子资源无法挂在 /documents/{path}/versions 下（path 是尾通配），
+	// 独立成 /document-versions（path 必填 query 参数）；见 versions.go 头注释。
+	r.Get("/workspaces/{workspace_id}/document-versions", m.listVersions)
+	r.Get("/workspaces/{workspace_id}/document-versions/{revision}", m.getVersion)
 }
 
 // chiWorkspaceID 是七端点共用的路径参数提取小件。

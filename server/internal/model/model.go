@@ -233,6 +233,27 @@ type DocumentConflict struct {
 
 func (DocumentConflict) TableName() string { return "document_conflicts" }
 
+// DocumentVersion 见 00017_document_versions.sql：被取代文档版本的全量快照链。
+// 内容变更（push 快进 / resolve 落地 / 复活 / tombstone）在同事务归档被取代
+// 行；当前版本仍以 documents 行为准。Kind ∈ push|resolve|revive|delete（取代
+// 原因，PG CHECK 钉死）；Deleted 是快照时刻行的 tombstone 状态（复活前身与
+// resolve 落到 tombstone 之上时为 true）。保留窗口由 retention 清扫器执行。
+type DocumentVersion struct {
+	ID          string `gorm:"primaryKey;size:40"` // dvh_ 前缀
+	WorkspaceID string `gorm:"index:idx_document_versions_workspace;size:40"`
+	DocumentID  string `gorm:"uniqueIndex:uq_document_versions_doc_rev;index:idx_document_versions_doc;size:40"`
+	Path        string
+	Revision    int64  `gorm:"uniqueIndex:uq_document_versions_doc_rev"`
+	ContentHash string // 'sha256:<hex>'，与被取代行的 content_hash 一致
+	Content     string // 全量快照；delta 压缩是后续演进（存储评估 2026-09-25）
+	Kind        string // push|resolve|revive|delete（取代原因）
+	Deleted     bool   // 快照时刻行的 tombstone 状态
+	ActorID     string `gorm:"size:40"`
+	CreatedAt   time.Time
+}
+
+func (DocumentVersion) TableName() string { return "document_versions" }
+
 // OutboxEvent 见 00006_outbox.sql / architecture §19。
 // 业务事务内 INSERT；dispatcher 读取后置 sent_at 并推给 SSE hub。
 type OutboxEvent struct {

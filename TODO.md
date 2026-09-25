@@ -114,7 +114,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | T1 | task 删除/取消 | MVP **不提供 DELETE task**；取消走 status=cancelled（既有）；cancelled 非硬终态，允许显式改回（乐观并发保护乱序） |
 | P1 | push 双改处理 | **不做服务端自动三方合并**（diff3 选型关闭）：base 不匹配一律落 document_conflicts + 409 DOCUMENT_CONFLICT；客户端本地合并后经 resolve(merged/manual) 提交最终内容 |
 | P2 | 文档删除 | 版本化 tombstone：`DELETE ?base_revision=N`；远端已变更 → conflict artifact（delete-vs-edit）；对已删行且 base 匹配 → 幂等 204；对 tombstone push 且 base_revision=0 → 复活（revision 续增） |
-| P3 | 文档历史版本 | MVP 不建 revision 历史表：conflict 行已含双方全文，audit 记录每次 push 的 hash；历史窗口需求出现再扩 |
+| P3 | 文档历史版本 | ~~MVP 不建 revision 历史表~~ **第 41 轮解冻落地**（00017）：内容被取代前同事务归档全量快照到 document_versions（kind=push/resolve/revive/delete）；保留窗口 = TTL 30d + 每文档 50 版（ASTRAL_DOC_HISTORY_*，先到即剪）；读端点 /document-versions 列表+详情；恢复走 push + pinned base 不设写端点。触发条件：CLI 缺省 push 读改写语义可静默覆盖他人内容且不产生冲突行 |
 | L1 | 长度校验单位 | 口径统一 = UTF-8 字节数。**既有端点上限数值与口径不动**（避免破坏合法输入），新端点一律字节口径并在协议文档标注 |
 | E1 | 错误码配对 | 400 VALIDATION_FAILED=形状/约束；403 INSUFFICIENT_SCOPE=权限；409+专用码=状态/唯一性冲突；一次性码错误维持现状（tag confirm 403 / 过期 409）。新端点一律按此表 |
 | A1' | message.send 审计 | **豁免**：messages 表自身即完整事实（作者/目标/时间）；audit 只记治理与安全动作（与 architecture §6.10 一致） |
@@ -309,7 +309,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | SMTP 邮件邀请（原 §11 #19 / P4） | 裁剪 | invite_url 人工分发已闭环；出现真实邮件需求再启 |
 | CLI `astral register`（#18 / P3） | 移交 astral-cli 仓 | CLI 侧工作；协议快照刷新随其节奏 |
 | 服务端自动三方合并（diff3） | 关闭 | §1.2 P1；客户端本地合并后 resolve(merged) 提交 |
-| 文档 revision 历史表 | 延期 | §1.2 P3 |
+| 文档 revision 历史表 | ✅ 第 41 轮落地 | §1.2 P3（触发条件成立后解冻，00017） |
 | config TOML（server.toml） | 裁剪 | 环境变量唯一通道，避免双配置源（deployment.md 本就只写了环境变量） |
 | pg_trgm / SQL 搜索回迁 | 触发式 | D7：单 workspace 万级任务或搜索延迟 SLO |
 | 平台角色可选项（#22：注册开关/全 ws 可见/平台 agent/web 全局 403 出口/CLI me 消费） | 触发式 | D16 延伸清单，出现需求再做 |
@@ -359,6 +359,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 2026-09-16 | 第 38 轮：**R7/R8 行为登记**——login 成功不写 audit（sessions 表即事实，与 A1' 同精神）；Idempotency-Key 并发同键进程内互斥（单实例 MVP，多实例边界同 store/db.go 触发条件） | 行为登记 | CLI |
 | 2026-09-16 | 第 38 轮：workspace audit 补 401/403 响应文档行；capabilities features += document_sync；S6-2 类型生成入库（web gen:api + CI drift 门）；S6-1 同源托管（webdist go:embed） | 契约文档 | CLI/Web |
 | 2026-09-16 | 第 38 轮 G4 补录：`CredentialCreate` 补声明可选 `workspace_id`（授权分流字段——服务端行为本就如此，契约补齐文档；Web MembersView 传当前 ws） | 契约文档 | CLI/Web |
+| 2026-09-25 | 第 41 轮：新增端点 `GET /workspaces/{id}/document-versions`（历史版本列表，path 必填 query，revision 降序游标分页）与 `GET /workspaces/{id}/document-versions/{revision}`（单版全量快照）；新增 schema DocumentVersion / DocumentVersionDetail；新增 ID 前缀 `dvh`；新增 env ASTRAL_DOC_HISTORY_MAX_PER_DOC / ASTRAL_DOC_HISTORY_TTL_HOURS；行为：每次内容被取代前同事务归档全量快照（§1.2 P3 解冻） | 补充 | CLI（history/get --revision 后续） / Web |
 
 ## 附录 A. 稳定锚点（原 §2 裁决表 / 原 §11 编号清单，编号不变）
 

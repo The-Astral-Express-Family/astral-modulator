@@ -736,6 +736,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/document-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 文档历史版本列表（revision 降序游标分页；path 必填 query）
+         * @description 历史只含被取代版本——当前版本仍在文档行，走 get。每次内容被取代 （push 快进 / resolve 落地 / 复活 / tombstone）前同事务归档一条全量 快照。恢复不设写端点：取回旧内容后走 push + pinned base。
+         */
+        get: operations["listDocumentVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/document-versions/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 单版本取回（含完整内容） */
+        get: operations["getDocumentVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/events": {
         parameters: {
             query?: never;
@@ -951,7 +988,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * @description 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/prs/msg/evt/cred/ses/dev/req/aud/apv/inv。
+         * @description 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/dvh/prs/msg/evt/cred/ses/dev/req/aud/apv/inv。
          * @example ws_0192ab34-56cd-7ef8-9a01-234567890abc
          */
         Id: string;
@@ -1377,6 +1414,34 @@ export interface components {
             resolution: "ours" | "theirs" | "merged" | "manual";
             /** @description resolution=merged/manual 时的最终内容 */
             content?: string;
+        };
+        /** @description 被取代文档版本的全量快照（列表形状，全文见详情端点） */
+        DocumentVersion: {
+            path: string;
+            /**
+             * Format: int64
+             * @description 被取代时的版本号
+             */
+            revision: number;
+            content_hash: string;
+            /** @description content 的 UTF-8 字节数 */
+            size: number;
+            /**
+             * @description 该版本被取代的原因
+             * @enum {string}
+             */
+            kind: "push" | "resolve" | "revive" | "delete";
+            /** @description 快照时刻行的 tombstone 状态 */
+            deleted: boolean;
+            /** @description 造成取代的 actor */
+            actor_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description 版本详情 = 列表形状 + 完整内容 */
+        DocumentVersionDetail: components["schemas"]["DocumentVersion"] & {
+            /** @description 快照完整内容（≤1MiB） */
+            content: string;
         };
         AgentCreate: {
             display_name: string;
@@ -2944,6 +3009,66 @@ export interface operations {
                     "application/json": components["schemas"]["Document"];
                 };
             };
+        };
+    };
+    listDocumentVersions: {
+        parameters: {
+            query: {
+                /** @description 已 canonicalize 的文档路径 */
+                path: string;
+                limit?: components["parameters"]["Limit"];
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 版本列表（游标 = 末行 revision，查询 revision < cursor） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: components["schemas"]["DocumentVersion"][];
+                        next_cursor?: string | null;
+                    };
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getDocumentVersion: {
+        parameters: {
+            query: {
+                /** @description 已 canonicalize 的文档路径 */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 版本全量快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentVersionDetail"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     streamEvents: {

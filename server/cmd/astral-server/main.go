@@ -119,6 +119,9 @@ func run() error {
 		// 幂等键保留窗口清理（同 24h）。
 		idem.DB = gormDB
 		idempotency.StartCleanup(ctx, gormDB, log, time.Hour)
+		// 文档历史版本保留窗口清扫（00017：TTL + 每文档上限，先到即剪）。
+		document.StartVersionRetention(ctx, gormDB, log, time.Hour,
+			cfg.DocHistory.MaxPerDoc, time.Duration(cfg.DocHistory.TTLHours)*time.Hour)
 		// 过期租约清扫（architecture §17）。
 		taskMod.StartSweeper(ctx, 30*time.Second)
 	} else {
