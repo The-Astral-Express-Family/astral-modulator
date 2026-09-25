@@ -7,8 +7,8 @@
 - `TODO.md` — 实施总纲：硬约束与验证命令、决策速查（D/A/M/T/S 系列）、S1-S8 一次性实施计划、契约变更登记。
 - `TODO-archive.md` — 登记簿历史卷（轮次详录、旧登记簿全文，只增不改）。
 - `docker-compose.yml` — 开发用 PostgreSQL。
-- `Makefile` — 常用开发命令。
 - `redocly.yaml` — openapi lint 配置（CI 契约门）。
+- `icons/` — 参数化生成的品牌 Logo SVG 资产（generate.mjs + 概念目录 + 预览页）。
 - `LICENSE`、`.github/workflows/`（CI）。
 
 ## 契约（与 astral-cli 的唯一耦合点）
@@ -19,7 +19,8 @@
 
 ## 服务端与 Web
 
-- `server/` — Go 模块化单体（chi + GORM + goose；模块布局见 server/internal）。
+- `server/` — Go 模块化单体（chi + GORM + goose；模块布局见 server/internal，
+  构建辅助目标见 server/Makefile：web-dist / openapi-lint / serve-db）。
 - `web/` — Vue 3 控制台。
 
 ## 文档
@@ -45,6 +46,7 @@
 - `docs/adr/0005-postgresql-outbox-before-message-bus.md`
 - `docs/adr/0006-web-first-gui.md`
 - `docs/adr/0007-cli-distribution.md`
+- `docs/adr/0008-invite-registration.md`
 
 ## Skills source
 
