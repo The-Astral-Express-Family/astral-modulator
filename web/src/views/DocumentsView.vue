@@ -11,7 +11,9 @@
        不可见（未加入 / 服务端未铺）→ 说明文案（见下方 ORG_MEMORY_NOTE）。
      - R4 文档活动栏：SSE document.updated / document.conflict 事件流小面板
        （最近 20 条：path+revision+deleted / conflict_id），点击可跳详情或
-       冲突视图；document.updated 同时防抖静默刷新清单与已选文档。 -->
+       冲突视图；document.updated 同时防抖静默刷新清单与已选文档。
+     - 内容渲染：默认走 MarkdownDoc 渲染视图（marked 解析 + DOMPurify 清洗，
+       可切回源码、偏好 localStorage 记忆），见 components/shared/MarkdownDoc。 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -26,6 +28,7 @@ import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { fmtTime } from '@/lib/format'
 import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import MarkdownDoc from '@/components/shared/MarkdownDoc.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -392,7 +395,7 @@ watch([workspaceId], () => {
                 该文档已打 tombstone（版本化删除）：行保留、revision 继续递增；对它的下
                 一次 push（base_revision=0）会将其复活。
               </p>
-              <pre class="bg-muted/40 max-h-[28rem] overflow-auto rounded-lg p-3 font-mono text-xs whitespace-pre-wrap break-all">{{ doc.content }}</pre>
+              <MarkdownDoc :content="doc.content" />
             </template>
             <Empty v-else class="border">
               <EmptyHeader>

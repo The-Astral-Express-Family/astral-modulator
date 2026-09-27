@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, MenuIcon, PlusIcon, UsersRoundIcon } from '@lucide/vue'
+import { FileTextIcon, GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, MenuIcon, PlusIcon, UsersRoundIcon } from '@lucide/vue'
 import CreateWorkspaceDialog from '@/components/layout/CreateWorkspaceDialog.vue'
 import SessionBox from '@/components/layout/SessionBox.vue'
 import SidebarLink from '@/components/layout/SidebarLink.vue'
@@ -90,6 +90,11 @@ watch(() => route.fullPath, () => {
             label="裁决队列"
             :icon="GavelIcon"
             :to="`/workspaces/${workspaceId}/approvals`"
+          />
+          <SidebarLink
+            label="文档"
+            :icon="FileTextIcon"
+            :to="`/workspaces/${workspaceId}/documents`"
           />
         </div>
         <p v-else class="px-3 text-xs text-muted-foreground">选择工作区查看其页面。</p>
