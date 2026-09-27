@@ -441,7 +441,7 @@ func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pI
 		// 平台级审计：workspace_id 留空（服务器级记录，/admin/audit 可见）。
 		if err := audit.RecordInTx(tx, audit.Entry{
 			ActorID: actor.ID,
-			Action: "invite.redeem", Outcome: "allowed",
+			Action:  "invite.redeem", Outcome: "allowed",
 			TargetType: "invitation", TargetID: pInv.ID,
 			Details: map[string]any{"scope": "platform"},
 		}); err != nil {
@@ -449,7 +449,7 @@ func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pI
 		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			ActorID: actor.ID,
-			Action: "auth.register", Outcome: "allowed",
+			Action:  "auth.register", Outcome: "allowed",
 			TargetType: "actor", TargetID: actor.ID,
 		}); err != nil {
 			return err
