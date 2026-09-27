@@ -1,10 +1,11 @@
 <!-- 全局侧边栏：品牌 + workspace 上下文导航（切换器 + 子导航）+ 全局导航 +
      底部工具（设备授权）与会话框。配色走 sidebar 语义 token。
-     演示身份（mock 模式）不消费真实 API，workspace 段整体隐藏。 -->
+     演示身份（mock 模式）不消费真实 API，workspace 段整体隐藏。
+     移动端（<lg）收纳为抽屉：路由跳转即自动收起。 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, PlusIcon, UsersRoundIcon } from '@lucide/vue'
+import { GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, MenuIcon, PlusIcon, UsersRoundIcon } from '@lucide/vue'
 import CreateWorkspaceDialog from '@/components/layout/CreateWorkspaceDialog.vue'
 import SessionBox from '@/components/layout/SessionBox.vue'
 import SidebarLink from '@/components/layout/SidebarLink.vue'
@@ -20,10 +21,39 @@ const workspaceId = computed(() =>
 )
 
 const createOpen = ref(false)
+const drawerOpen = ref(false)
+
+// 移动端抽屉：路由变化即收起（导航后不留残影）。
+watch(() => route.fullPath, () => {
+  drawerOpen.value = false
+})
 </script>
 
 <template>
-  <aside class="flex w-56 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
+  <!-- 移动端顶栏（<lg）：汉堡开抽屉。桌面端不渲染。 -->
+  <header class="fixed inset-x-0 top-0 z-40 flex h-12 items-center gap-3 border-b bg-sidebar px-4 text-sidebar-foreground lg:hidden">
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label="打开导航菜单"
+      @click="drawerOpen = true"
+    >
+      <MenuIcon />
+    </Button>
+    <h1 class="text-base font-semibold">Astral</h1>
+  </header>
+
+  <!-- 遮罩：抽屉开时挡住内容，点击关闭。 -->
+  <div
+    v-if="drawerOpen"
+    class="fixed inset-0 z-40 bg-black/40 lg:hidden"
+    @click="drawerOpen = false"
+  />
+
+  <aside
+    class="fixed inset-y-0 left-0 z-50 flex w-56 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground transition-transform duration-200 lg:static lg:translate-x-0"
+    :class="drawerOpen ? 'translate-x-0' : '-translate-x-full'"
+  >
     <div class="px-4 py-5">
       <h1 class="text-lg font-semibold">Astral</h1>
     </div>

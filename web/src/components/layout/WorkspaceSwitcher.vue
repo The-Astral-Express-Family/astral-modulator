@@ -14,6 +14,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select'
 import { useWorkspacesStore } from '@/stores/workspaces'
 
@@ -79,11 +80,16 @@ function onSelect(value: unknown): void {
 
 <template>
   <Select :model-value="currentId || undefined" @update:model-value="onSelect">
+    <!-- SelectValue 必须有：reka-ui 的 item-aligned 定位依赖 valueElement
+         （只由 SelectValue 挂载时注入），缺失时弹层静默不定位、落在视口外，
+         表现为「点击没反应」。as-child 让现有 span 原样成为 value 元素。 -->
     <SelectTrigger class="w-full" aria-label="切换工作区">
       <FolderOpenIcon class="size-4 shrink-0 text-muted-foreground" />
-      <span class="min-w-0 flex-1 truncate text-left">
-        {{ current?.name ?? '选择工作区' }}
-      </span>
+      <SelectValue as-child>
+        <span class="min-w-0 flex-1 truncate text-left">
+          {{ current?.name ?? '选择工作区' }}
+        </span>
+      </SelectValue>
     </SelectTrigger>
     <SelectContent>
       <SelectItem v-for="w in store.items" :key="w.id" :value="w.id">

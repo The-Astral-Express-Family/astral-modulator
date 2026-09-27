@@ -102,7 +102,7 @@ func run() error {
 		mods.Presence = presMod
 		mods.Tag = tagMod
 		mods.Document = &document.Module{DB: gormDB, Auth: authSvc}
-		mods.Admin = &admin.Module{DB: gormDB, Auth: authSvc, Log: log}
+		mods.Admin = &admin.Module{DB: gormDB, Auth: authSvc, Log: log, WebBaseURL: cfg.WebBaseURL, PublicURL: cfg.PublicURL}
 		// audit 查询端点的授权注入：audit 包不能直接 import auth（auth 写审计
 		// 反向依赖 audit，会成环），见 audit.WorkspaceAuthorizer。
 		mods.Audit = &audit.Module{DB: gormDB, Authorize: func(r *http.Request, workspaceID string) *httpx.APIError {

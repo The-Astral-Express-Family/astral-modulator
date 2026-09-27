@@ -10,7 +10,9 @@ const route = useRoute()
 <template>
   <div class="flex min-h-screen">
     <AppSidebar />
-    <main class="flex-1 p-6 lg:p-8">
+    <!-- 移动端顶栏（h-12）占位：侧栏在 <lg 收纳为抽屉，内容下移避免被遮挡。 -->
+    <div class="h-12 lg:hidden" aria-hidden="true"></div>
+    <main class="min-w-0 flex-1 p-4 lg:p-8">
       <div
         class="mx-auto flex w-full flex-col gap-6"
         :class="route.meta.wide ? 'max-w-7xl' : 'max-w-5xl'"
