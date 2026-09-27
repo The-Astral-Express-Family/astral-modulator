@@ -7,6 +7,8 @@ import { setUnauthorizedHandler } from './api/client'
 import { loginLocation } from './lib/redirect'
 import { useSessionStore } from './stores/session'
 import './assets/index.css'
+// 等宽字体自托管（Cascadia Mono，OFL）：local() 优先、woff2 兑底，详见 fonts.css。
+import './assets/fonts.css'
 
 // pinia 先于 router 安装：路由守卫在首次导航时要能取到 session store。
 const pinia = createPinia()
