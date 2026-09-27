@@ -373,3 +373,20 @@ type Invitation struct {
 }
 
 func (Invitation) TableName() string { return "workspace_invitations" }
+
+// PlatformInvitation 见 00018_platform_invitations.sql：平台级注册邀请。
+// 只管「允许注册」：无 workspace/role 维度，兑换后是普通 user，不入任何
+// workspace。存储与兑换语义（仅存 hash、expired 派生、条件更新抢状态）
+// 与 workspace 邀请同构，独立成表避免两套生命周期互相干扰。
+type PlatformInvitation struct {
+	ID         string `gorm:"primaryKey;size:40"`
+	CodeHash   string `gorm:"uniqueIndex;size:128"`
+	CreatedBy  string `gorm:"size:40"`
+	Status     string `gorm:"index:idx_platform_invitations_status_id;size:16"`
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	RedeemedBy *string `gorm:"size:40"`
+	RedeemedAt *time.Time
+}
+
+func (PlatformInvitation) TableName() string { return "platform_invitations" }

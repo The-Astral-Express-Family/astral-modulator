@@ -24,6 +24,10 @@ type Module struct {
 	DB   *gorm.DB
 	Auth *auth.Service
 	Log  *slog.Logger
+	// WebBaseURL/PublicURL 供邀请注册链接拼装（回退链同 device flow，
+	// 见 auth.ResolveWebBaseURL）；可留空（兑底请求 Host）。
+	WebBaseURL string
+	PublicURL  string
 }
 
 // RegisterRoutes 挂载 /admin/* 端点（受保护组内；scope 不足 403 INSUFFICIENT_SCOPE）。
@@ -33,6 +37,9 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/users/{actor_id}/enable", m.enableUser)
 	r.Post("/admin/users/{actor_id}/role", m.changeRole)
 	r.Get("/admin/audit", m.listAudit)
+	r.Post("/admin/invitations", m.createPlatformInvitation)
+	r.Get("/admin/invitations", m.listPlatformInvitations)
+	r.Post("/admin/invitations/{invitation_id}/revoke", m.revokePlatformInvitation)
 }
 
 // listAudit 是 GET /admin/audit（round 38 T5 / TODO.md S4-2）：平台级审计
