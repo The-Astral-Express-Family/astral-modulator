@@ -13,7 +13,9 @@ import {
 } from '@/api/modules/admin'
 import type { AdminUser, PlatformRole } from '@/api/types'
 import { fmtTime } from '@/lib/format'
+import CreateInvitationDialog from '@/components/admin/CreateInvitationDialog.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import { Plus } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -43,6 +45,7 @@ const session = useSessionStore()
 // null = 加载中；false = 无权访问（403/404）；true = 正常渲染。
 const canAccess = ref<boolean | null>(null)
 const users = ref<AdminUser[]>([])
+const showInviteDialog = ref(false)
 const busyId = ref<string | null>(null)
 const { run } = useApiAction()
 
@@ -107,6 +110,15 @@ async function changeRole(u: AdminUser, role: HumanRole): Promise<void> {
       title="用户管理"
       description="平台级账号列表、停用/恢复与角色变更（仅管理员可见）"
     />
+
+    <div class="flex justify-end">
+      <Button @click="showInviteDialog = true">
+        <Plus class="size-4" />
+        生成邀请
+      </Button>
+    </div>
+
+    <CreateInvitationDialog v-model:open="showInviteDialog" />
 
     <div v-if="canAccess === null" class="flex justify-center py-16">
       <Spinner class="size-6" />
