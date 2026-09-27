@@ -1,0 +1,29 @@
+/* 等宽字体自托管（Cascadia Mono，SIL OFL，许可见同目录 CascadiaMono.ofl.txt）：
+   - local() 优先链：用户本机已有任一等宽字体则零下载（woff2 仅兜底）；
+   - woff2 为整字无损转换（非子集化），保留全部字形，避免符号缺失；
+   - font-display: swap —— 本地命中时无感知，兜底下载期间以系统等宽顶替。
+   如需更保守（完全不发货字体），删除下方 @font-face 块即可，
+   local() 链与 --font-mono 依然生效。 */
+@font-face {
+  font-family: 'Cascadia Mono';
+  src:
+    local('Cascadia Mono'),
+    local('Cascadia Mono Regular'),
+    local('JetBrains Mono'),
+    local('Fira Code'),
+    local('Menlo'),
+    local('Consolas'),
+    url('./fonts/CascadiaMono.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FB01-FB02;
+}
+
+/* 覆写 mono token：编辑器 / 源码视图 / md 渲染 code 块三处共用。
+   放在 @layer base 确保 @theme 的默认值让位（@theme inline 不含 --font-mono，
+   故此处即最终权威定义）。 */
+@layer base {
+  :root {
+    --font-mono: 'Cascadia Mono', ui-monospace, 'SFMono-Regular', 'Menlo', 'Consolas', monospace;
+  }
+}
