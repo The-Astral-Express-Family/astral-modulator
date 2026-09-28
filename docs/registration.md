@@ -16,10 +16,14 @@
 3. 复用既有模型：邀请绑定 workspace 与角色，兑换即入伙；不新增服务器级
    管理员角色、不新增授权面。
 
+> 2026-09-28 修订：平台级注册邀请（不绑 workspace，platform admin 签发，
+> 兑换后为不入任何 workspace 的普通 user）已随 00018 落地——见 §8 决策表
+> 与 §4.5；上述「不新增服务器级管理员角色」仍然成立（授权复用既有
+> `platform:users:manage`，未新增角色或授权面）。
+
 **非目标（MVP 明确不做，见 §8）**
 
 - 邮箱验证（email 在 MVP 里只是登录名）；
-- 未绑定 workspace 的服务器级邀请；
 - 已有账号者凭邀请码自助加入第二个 workspace；
 - 邀请直接授予 owner 角色。
 
@@ -99,6 +103,23 @@
 并发同码：条件更新只允许一个事务成功，输家整体回滚（actor 不残留）。
 email 撞车：唯一约束在 `a` 步先挡，邀请不消耗。
 
+### 4.5 平台级邀请分支（00018，2026-09-28 增补）
+
+平台邀请（`platform_invitations` 表）走同一条 `/auth/register` 管线，
+兑换事务与 §4 的差异仅在：code 命中 `platform_invitations` 时，`b`/`c`
+两步换成「条件更新平台邀请行」，**不写 workspace_members**——账号是
+不入任何 workspace 的普通 user，后续经 workspace 邀请/addMember 进组。
+
+管理面（platform admin，复用 `platform:users:manage`，无新角色）：
+
+| 端点 | 行为 |
+|---|---|
+| `POST /admin/invitations` | 签发；code 明文仅签发响应一次（invite_url 已拼好）；TTL 默认 7d 上限 30d，与 workspace 邀请同规 |
+| `GET /admin/invitations` | 列表（id 降序游标分页）；不回传 code |
+| `POST /admin/invitations/{id}/revoke` | 撤销；重复撤销幂等 204 |
+
+audit/outbox 与 workspace 邀请同构（security.invite.* 一族）。
+
 ## 5. 三个入口的流程
 
 ### 5.1 Web 注册
@@ -165,7 +186,7 @@ email 撞车：唯一约束在 `a` 步先挡，邀请不消耗。
 
 | 项 | 状态 | 理由 / 重启条件 |
 |----|------|----------------|
-| 服务器级（不绑 workspace）邀请 | 不做 | 需要引入「服务器管理员」概念；账号零权限所以绑定式邀请已覆盖真实需求。出现「先建号后找组织」的真实场景再裁决 |
+| 服务器级（不绑 workspace）邀请 | ✅ 2026-09-28 落地（00018，平台级注册邀请） | 原「不做」裁决被「先建号后找组织」场景推翻：平台 admin（复用 `platform:users:manage`，无新角色）经 `/admin/invitations` 三端点签发；兑换走既有 `/auth/register`，账号为不入任何 workspace 的普通 user。端点与语义见 §4.5 |
 | 已有账号凭码自助加入 | 不做 | 与 addMember（按 actor_id 直加）职责重叠；作为邀请链接的 v2 体验项 |
 | 邀请授予 owner | 永不 | 见 §6.3 |
 | 邮箱验证 | P4 后评估 | MVP 邮箱仅登录名，危害上限低（§6.5） |
