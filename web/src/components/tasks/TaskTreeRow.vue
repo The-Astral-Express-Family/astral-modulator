@@ -1,6 +1,5 @@
 <!-- 树行：深度缩进 + 折叠箭头（children_count>0 才显示）+ 状态/优先级/标签/负责人。
-     整行点击选中，箭头只管折叠。v2 行内不带 lease（仅 get/claim 响应填充），租约
-     倒计时在详情面板展示。 -->
+     整行点击选中，箭头只管折叠。 -->
 <script setup lang="ts">
 import { ChevronDown, ChevronRight } from '@lucide/vue'
 import type { Actor, Task } from '@/api/types'
