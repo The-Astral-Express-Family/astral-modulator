@@ -127,15 +127,17 @@ watch(
       <Skeleton class="h-24 w-full" />
       <Skeleton class="h-5 w-2/3" />
     </div>
-    <!-- 内容经 DOMPurify 清洗后插入（v-html 的唯一受控使用点） -->
+    <!-- 内容经 DOMPurify 清洗后插入（v-html 的唯一受控使用点）。
+         animate-in fade-in：内容首次挂载淡入（元素跨内容更新复用，不会逐键
+         重放动画），替换骨架时不硬蹦。 -->
     <div
       v-else-if="showRendered && html"
-      class="markdown-body"
+      class="markdown-body animate-in fade-in duration-300"
       v-html="html"
     />
     <pre
       v-else
-      class="bg-muted/40 max-h-[28rem] overflow-auto rounded-lg p-3 font-mono text-xs whitespace-pre-wrap break-all"
+      class="bg-muted/40 max-h-[70vh] animate-in fade-in duration-300 overflow-auto rounded-lg p-3 font-mono text-xs whitespace-pre-wrap break-all"
       >{{ content }}</pre
     >
   </div>
