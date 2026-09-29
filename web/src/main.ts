@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { toast } from 'vue-sonner'
+import 'vue-sonner/style.css'
 import App from './App.vue'
 import { router } from './router'
 import { setUnauthorizedHandler } from './api/client'
