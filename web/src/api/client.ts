@@ -42,6 +42,12 @@ export function formatApiError(e: unknown): string {
   return e instanceof AstralApiError ? `${e.code}: ${e.message}` : String(e)
 }
 
+/** UI 判定「这个错误是不是某个稳定错误码」的唯一出口（AstralApiError
+ * 本身不导出——UI 只需要码判断，不需要碰载体）。 */
+export function isApiErrorCode(e: unknown, code: ClientErrorCode): boolean {
+  return e instanceof AstralApiError && e.code === code
+}
+
 /** 模块函数的可选尾参：标记该次调用为后台请求（失败不弹全局 toast）。 */
 export interface CallOpts {
   silent?: boolean

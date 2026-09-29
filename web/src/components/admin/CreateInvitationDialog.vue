@@ -115,7 +115,7 @@ async function copy(text: string, what: string): Promise<void> {
       <DialogHeader>
         <DialogTitle>生成注册邀请</DialogTitle>
         <DialogDescription>
-          平台级邀请：兑换者注册为普通用户，不自动加入任何工作区。邀请码明文仅生成时显示一次。
+          注册邀请码仅用于创建账号（唯一注册资格来源），不含任何工作区资格——加入工作区需另行兑换工作区邀请码。明文仅生成时显示一次。
         </DialogDescription>
       </DialogHeader>
 
@@ -152,7 +152,7 @@ async function copy(text: string, what: string): Promise<void> {
             <Spinner v-if="listLoading" class="size-3.5" />
           </div>
           <p v-if="recent.length === 0 && !listLoading" class="text-xs text-muted-foreground">
-            还没有平台邀请。生成第一个邀请码后，被邀请人即可通过链接注册。
+            还没有注册邀请。生成第一个邀请码后，收到的人即可通过链接注册账号。
           </p>
           <ul v-else class="flex flex-col gap-1.5">
             <li
