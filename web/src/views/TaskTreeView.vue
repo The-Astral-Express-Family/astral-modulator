@@ -218,7 +218,7 @@ function containerCount(containerId: string): number {
     : (childrenByContainer.value.get(containerId)?.length ?? 0)
 }
 
-// task.* 事件高频场景（lease 清扫器批量过期等）防抖合并为一次重载。
+// task.* 事件高频场景（批量操作逐任务 emit 等）防抖合并为一次重载。
 function scheduleReload(): void {
   if (reloadTimer) clearTimeout(reloadTimer)
   reloadTimer = setTimeout(() => {
@@ -518,7 +518,7 @@ async function removeFromRow(task: Task): Promise<void> {
 
 const moveTarget = ref<Task | null>(null)
 
-// ---- 拖拽换父 / 兄弟重排（协议 2.2 move position；原生 HTML5 DnD）----
+// ---- 拖拽换父 / 兄弟重排（协议 2.4 move position；原生 HTML5 DnD）----
 // 落点三态：行上 30% / 下 30% = 兄弟插入线（插入到该行所在兄弟列表），
 // 中段 = 挂为该行子任务（追加尾部）。行间空白 = 移到根层。
 
@@ -565,7 +565,7 @@ function onDragLeave(e: DragEvent, row: FlatRow): void {
   if (dropIndicator.value?.taskId === row.task.id) dropIndicator.value = null
 }
 
-// 插入线落点 → move 项：position = 摘除前列表中目标行下标（服务端 2.2 语义，
+// 插入线落点 → move 项：position = 摘除前列表中目标行下标（服务端 2.4 语义，
 // 兄弟列表即服务端返回序）；目标行不在已载列表时缺省追加。
 function dropItem(drag: Task, mode: DropMode, target: Task): TaskMoveItem {
   if (mode === 'child') {

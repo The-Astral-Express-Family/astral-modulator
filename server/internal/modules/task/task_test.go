@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"sync"
 	"testing"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -14,7 +14,6 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/testsupport"
 )
 
@@ -103,7 +102,7 @@ func TestClaimRaceIsAtomic(t *testing.T) {
 		go func(s string) {
 			defer wg.Done()
 			p := principal(t, f, s)
-			_, _, err := f.m.Claim(context.Background(), p, "tsk_race", nil, 300)
+			_, err := f.m.Claim(context.Background(), p, "tsk_race", nil)
 			results <- err
 		}(secret)
 	}
@@ -127,17 +126,17 @@ func TestClaimRaceIsAtomic(t *testing.T) {
 	}
 }
 
-// TestSequentialClaimRejected：已持有租约时他人 claim 失败；holder 重复 claim 幂等。
+// TestSequentialClaimRejected：已认领时他人 claim 失败；claimant 重复 claim 幂等。
 func TestSequentialClaimRejected(t *testing.T) {
 	f := setup(t)
 	createTask(t, f, "tsk_seq", "seq")
 	pa := principal(t, f, f.credA)
 	pb := principal(t, f, f.credB)
 
-	if _, _, err := f.m.Claim(context.Background(), pa, "tsk_seq", nil, 300); err != nil {
+	if _, err := f.m.Claim(context.Background(), pa, "tsk_seq", nil); err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
-	_, _, err := f.m.Claim(context.Background(), pb, "tsk_seq", nil, 300)
+	_, err := f.m.Claim(context.Background(), pb, "tsk_seq", nil)
 	if err == nil {
 		t.Fatal("second claim should fail")
 	}
@@ -145,31 +144,78 @@ func TestSequentialClaimRejected(t *testing.T) {
 		t.Fatalf("want TASK_ALREADY_CLAIMED, got %v", apiErr.Code)
 	}
 	// holder 重复 claim：幂等续占。
-	if _, _, err := f.m.Claim(context.Background(), pa, "tsk_seq", nil, 300); err != nil {
+	if _, err := f.m.Claim(context.Background(), pa, "tsk_seq", nil); err != nil {
 		t.Fatalf("holder re-claim: %v", err)
 	}
 }
 
-// TestLeaseExpiryAllowsReclaim：租约过期后他人可接管。
-func TestLeaseExpiryAllowsReclaim(t *testing.T) {
+// TestReleaseFreesTaskForReclaim：claimant 释放后任务回 open、他人可认领；
+// 非 claimant 且无 task:override 的释放被拒（死 agent 的回收路径 = 人工
+// task:override，无时间自动过期，TODO.md §9 2026-09-30）。
+func TestReleaseFreesTaskForReclaim(t *testing.T) {
 	f := setup(t)
-	createTask(t, f, "tsk_exp", "expiry")
+	createTask(t, f, "tsk_rel", "release")
 	pa := principal(t, f, f.credA)
 	pb := principal(t, f, f.credB)
 
-	if _, _, err := f.m.Claim(context.Background(), pa, "tsk_exp", nil, 300); err != nil {
+	if _, err := f.m.Claim(context.Background(), pa, "tsk_rel", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.Model(&model.TaskLease{}).Where("task_id = ?", "tsk_exp").
-		Update("expires_at", time.Now().Add(-time.Second)).Error; err != nil {
+	// B 无 task:override：释放他人认领被拒。
+	err := f.m.Release(context.Background(), pb, "tsk_rel")
+	apiErr, ok := err.(*httpx.APIError)
+	if !ok || apiErr.Status != http.StatusForbidden {
+		t.Fatalf("want 403, got %v", err)
+	}
+	// A 主动释放：assignee 清空、in_progress 回退 open。
+	if err := f.m.Release(context.Background(), pa, "tsk_rel"); err != nil {
 		t.Fatal(err)
 	}
-	fresh, lease, err := f.m.Claim(context.Background(), pb, "tsk_exp", nil, 300)
+	var t0 model.Task
+	if err := f.db.First(&t0, "id = ?", "tsk_rel").Error; err != nil {
+		t.Fatal(err)
+	}
+	if t0.AssigneeActorID != nil || t0.Status != "open" {
+		t.Fatalf("assignee=%v status=%s", t0.AssigneeActorID, t0.Status)
+	}
+	// B 现在可认领。
+	fresh, err := f.m.Claim(context.Background(), pb, "tsk_rel", nil)
 	if err != nil {
-		t.Fatalf("reclaim after expiry: %v", err)
+		t.Fatalf("claim after release: %v", err)
 	}
-	if lease.HolderActorID != f.agentB.ID || fresh.Status != "in_progress" {
-		t.Fatalf("holder=%s status=%s", lease.HolderActorID, fresh.Status)
+	if fresh.AssigneeActorID == nil || *fresh.AssigneeActorID != f.agentB.ID || fresh.Status != "in_progress" {
+		t.Fatalf("assignee=%v status=%s", fresh.AssigneeActorID, fresh.Status)
+	}
+}
+
+// TestForceReleaseByOverride：task:override 凭证（human 干预路径）可释放
+// 他人的认领——自动过期移除后的唯一回收手段。
+func TestForceReleaseByOverride(t *testing.T) {
+	f := setup(t)
+	createTask(t, f, "tsk_force", "force release")
+	pa := principal(t, f, f.credA)
+
+	if _, err := f.m.Claim(context.Background(), pa, "tsk_force", nil); err != nil {
+		t.Fatal(err)
+	}
+	issued, err := f.svc.IssueCredential(context.Background(), auth.CreateCredentialInput{
+		ActorID: f.agentB.ID, Kind: "agent",
+		Scopes:    []string{auth.ScopeTaskRead, auth.ScopeTaskClaim, auth.ScopeTaskOverride},
+		Workspace: &f.wsID, CreatedBy: f.human.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	po := principal(t, f, issued.Secret)
+	if err := f.m.Release(context.Background(), po, "tsk_force"); err != nil {
+		t.Fatalf("override release: %v", err)
+	}
+	var t0 model.Task
+	if err := f.db.First(&t0, "id = ?", "tsk_force").Error; err != nil {
+		t.Fatal(err)
+	}
+	if t0.AssigneeActorID != nil || t0.Status != "open" {
+		t.Fatalf("assignee=%v status=%s", t0.AssigneeActorID, t0.Status)
 	}
 }
 
@@ -180,47 +226,9 @@ func TestClaimRevisionCheck(t *testing.T) {
 	pa := principal(t, f, f.credA)
 
 	bad := int64(99)
-	_, _, err := f.m.Claim(context.Background(), pa, "tsk_rev", &bad, 300)
+	_, err := f.m.Claim(context.Background(), pa, "tsk_rev", &bad)
 	apiErr, ok := err.(*httpx.APIError)
 	if !ok || apiErr.Code != httpx.CodeRevisionConflict {
 		t.Fatalf("want REVISION_CONFLICT, got %v", err)
-	}
-}
-
-// TestSweeperExpiresLeases：清扫器回收过期租约并发 task.lease.expired。
-func TestSweeperExpiresLeases(t *testing.T) {
-	f := setup(t)
-	createTask(t, f, "tsk_sweep", "sweep")
-	pa := principal(t, f, f.credA)
-
-	events, unsub := f.hub.Subscribe(event.Subscription{})
-	defer unsub()
-	if _, _, err := f.m.Claim(context.Background(), pa, "tsk_sweep", nil, 300); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.db.Model(&model.TaskLease{}).Where("task_id = ?", "tsk_sweep").
-		Update("expires_at", time.Now().Add(-time.Second)).Error; err != nil {
-		t.Fatal(err)
-	}
-	f.m.sweepOnce(context.Background())
-	// 事件走 outbox（同事务写入），手动投递一次到 hub。
-	event.PollOnce(context.Background(), f.db, f.hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case env := <-events:
-			if env.Type == outbox.TypeTaskLeaseExpired {
-				goto done // 跳过先前 claim 事件，找到目标事件
-			}
-		case <-deadline:
-			t.Fatal("no lease.expired event emitted")
-		}
-	}
-done:
-	var count int64
-	f.db.Model(&model.TaskLease{}).Where("task_id = ?", "tsk_sweep").Count(&count)
-	if count != 0 {
-		t.Fatal("expired lease not swept")
 	}
 }

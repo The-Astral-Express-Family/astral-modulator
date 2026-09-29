@@ -23,7 +23,7 @@ import (
 
 // Service 承载全部认证/授权业务（device flow、session、credential、scope）。
 // Handler 层薄；测试直接打 Service（sqlite 内存库）。
-// 只承载 auth 领域的时长配置；task lease / presence TTL 归各自模块。
+// 只承载 auth 领域的时长配置；presence TTL 归其模块。
 type Service struct {
 	DB  *gorm.DB
 	Log *slog.Logger

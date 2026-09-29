@@ -12,10 +12,10 @@ Coordinate through explicit state. Do not infer ownership from conversation alon
 1. Read the current Workspace state, relevant messages, and Task details.
 2. Synchronize relevant managed documents before editing.
 3. Claim exactly the Task you intend to work on.
-4. Confirm the claim/lease succeeded before doing significant work.
+4. Confirm the claim succeeded before doing significant work.
 5. Set Presence to the factual current state and link the current Task.
 6. Perform the work within granted scopes.
-7. During long work, renew heartbeat/lease and read new messages/events.
+7. During long work, renew heartbeat and read new messages/events.
 8. Before publishing results, sync again and resolve any document conflict explicitly.
 9. Finish as `done`, `review`, or `blocked`; include a concise result/blocker summary.
 10. Release ownership when work is no longer active and set Presence appropriately.
@@ -25,7 +25,7 @@ Read [references/rules.md](references/rules.md) for conflict, messaging, securit
 ## Non-Negotiable Rules
 
 - Claim before work when Task ownership is available.
-- Never treat Presence as ownership; a valid Task Lease is ownership.
+- Never treat Presence as ownership; a valid Task claim is ownership.
 - Never steal/force-release another Actor's Task without explicit authorization.
 - Never silently overwrite a Document conflict.
 - Never send or store credentials in Task text, messages, or Markdown.

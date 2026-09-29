@@ -4,7 +4,7 @@
 
 import { apiFetch, apiPath } from '../client'
 import type { CallOpts } from '../client'
-import type { Lease, Page, Task, TaskPriority, TaskSearchHit } from '../types'
+import type { Page, Task, TaskPriority, TaskSearchHit } from '../types'
 
 export interface TaskFilterParams {
   status?: string
@@ -46,7 +46,7 @@ export function searchTasks(
   return apiFetch(apiPath(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/task-search`, params))
 }
 
-// 详情响应填充 lease（tags/children_count 集合响应也带，详情另有 lease）。
+// tags/children_count 集合响应也恒填充。
 // 详情面板的写路径统一 silent（冲突/租约过期由面板按语义提示），回源刷新亦 silent；
 // 用户主动点开的详情查询走全局 toast。
 export function getTask(taskId: string, opts: CallOpts = {}): Promise<Task> {
@@ -100,12 +100,13 @@ export function updateTask(
   })
 }
 
-// 认领：事务内条件更新抢租约；竞争失败 409 TASK_ALREADY_CLAIMED。
+// 认领：事务内 assignee 条件更新（持有至释放/完成，无时间自动过期）；
+// 竞争失败 409 TASK_ALREADY_CLAIMED。
 export function claimTask(
   taskId: string,
-  payload: { expected_revision: number; lease_seconds?: number },
+  payload: { expected_revision: number },
   opts: CallOpts = {},
-): Promise<{ task: Task; lease: Lease }> {
+): Promise<{ task: Task }> {
   return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/claim`, {
     method: 'POST',
     body: payload,
@@ -113,7 +114,7 @@ export function claimTask(
   })
 }
 
-// ---- 移动 / 重排（协议 2.2）----
+// ---- 移动 / 重排（协议 2.4）----
 
 export interface TaskMoveItem {
   task_id: string
@@ -138,21 +139,9 @@ export function moveTasks(
   })
 }
 
-export function renewLease(
-  taskId: string,
-  leaseSeconds?: number,
-  opts: CallOpts = {},
-): Promise<Lease> {
-  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/lease/renew`, {
-    method: 'POST',
-    body: leaseSeconds ? { lease_seconds: leaseSeconds } : {},
-    ...opts,
-  })
-}
-
-// 释放：仅 holder（或 task:override）；清租约 + 清 assignee + in_progress→open。
-export function releaseLease(taskId: string, opts: CallOpts = {}): Promise<void> {
-  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/lease`, { method: 'DELETE', ...opts })
+// 释放认领：claimant 本人（或 task:override 强制）；清 assignee + in_progress→open。
+export function releaseClaim(taskId: string, opts: CallOpts = {}): Promise<void> {
+  return apiFetch(`/api/v1/tasks/${encodeURIComponent(taskId)}/claim`, { method: 'DELETE', ...opts })
 }
 
 // attach 幂等：已关联时返回当前 Task、不 bump revision。

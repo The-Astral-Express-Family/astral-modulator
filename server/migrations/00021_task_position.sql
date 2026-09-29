@@ -1,4 +1,4 @@
--- 00019_task_position: 任务兄弟排序键（协议 2.2，TODO.md §9 2026-09-30）。
+-- 00021_task_position: 任务兄弟排序键（协议 2.4，TODO.md §9 2026-09-30）。
 -- tasks.position = 同一父容器子层内 0 起的序位；children 集合按
 -- (position ASC, id DESC) 返回。老数据回填 = 创建正序（此前展示序为 id 倒序，
 -- 回填后统一收敛为 position 序，此后创建一律追加兄弟尾部）。

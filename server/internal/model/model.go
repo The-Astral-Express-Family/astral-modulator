@@ -115,7 +115,7 @@ type Credential struct {
 
 func (Credential) TableName() string { return "credentials" }
 
-// Task 见 00003_task_tree.sql / 00019_task_position.sql / architecture §12。
+// Task 见 00003_task_tree.sql / 00021_task_position.sql / architecture §12。
 // Revision 由应用层在 UPDATE 中显式 +1（TODO.md D5）；乐观并发用
 // UPDATE ... WHERE revision = expected（冲突 0 行 → REVISION_CONFLICT）。
 // Position = 同一父容器子层内 0 起的兄弟序位（协议 2.2）：应用层在创建/移动
@@ -139,17 +139,19 @@ type Task struct {
 
 func (Task) TableName() string { return "tasks" }
 
-// TaskLease 见 00003_task_tree.sql。读路径必须把 expires_at < now 视为无主；
-// 过期清扫由 task 模块 sweeper 负责（发 task.lease.expired）。
-type TaskLease struct {
-	TaskID        string `gorm:"primaryKey;size:40"`
-	HolderActorID string `gorm:"size:40"`
-	ExpiresAt     time.Time
-	RenewedAt     time.Time
-	CreatedAt     time.Time
+// TaskDependency 见 00020_task_dependencies.sql。from = 依赖方（等待者），
+// to = 被依赖方（blocker）；kind=blocks 为硬阻塞（写入时沿 blocks 边防环），
+// kind=relates 为对称关联。边变更两端任务各 bump revision + task.updated
+// （D11 tag 语义）。
+type TaskDependency struct {
+	FromTaskID string `gorm:"primaryKey;size:40"`
+	ToTaskID   string `gorm:"primaryKey;size:40"`
+	Kind       string `gorm:"primaryKey;size:16"`
+	CreatedBy  string `gorm:"size:40"`
+	CreatedAt  time.Time
 }
 
-func (TaskLease) TableName() string { return "task_leases" }
+func (TaskDependency) TableName() string { return "task_dependencies" }
 
 // Tag 见 00004_tags.sql / architecture §14。
 // NormalizedName = trim + NFC + case-fold，由应用层在写路径统一计算。

@@ -242,10 +242,11 @@ func (m *Module) enrichFlat(ctx context.Context, created []model.Task) []taskTre
 	}
 	tagsByTask := m.tagsForTasks(ctx, all)
 	counts := m.childCounts(ctx, all)
+	views := m.depViewsForTasks(ctx, all)
 	dtos := make([]taskTreeNodeDTO, len(created))
 	for i := range created {
 		dtos[i] = taskTreeNodeDTO{
-			Task:     toTaskDTO(created[i], nil, tagsByTask[created[i].ID], counts[created[i].ID]),
+			Task:     toTaskDTO(created[i], tagsByTask[created[i].ID], counts[created[i].ID], views[created[i].ID]),
 			Children: []taskTreeNodeDTO{},
 		}
 	}
@@ -356,7 +357,7 @@ func (m *Module) moveTasks(w http.ResponseWriter, r *http.Request) {
 // 子孙随 parent 语义自然跟随；被移动任务的租约不随父变化（租约挂在任务上）。
 // 校验全批通过后才落库：revision 冲突/环/跨 ws 任一命中 → 整批不生效。
 // 批内互移参与统一环检测（override 视图模拟最终 parent 状态）。
-// position（2.2）：同一次调用完成换父与兄弟内重排——插入到目标列表摘除前
+// position（2.4）：同一次调用完成换父与兄弟内重排——插入到目标列表摘除前
 // 下标处（同父且原位在下标之前则等效下标 -1），越界收敛到末尾；缺省追加。
 // items 按请求顺序生效；兄弟位移不 bump 兄弟 revision，仅被移动任务自身 bump。
 func (m *Module) MoveTasks(ctx context.Context, p *auth.Principal, wsID string, in taskMoveIn) (taskBatchOut, error) {

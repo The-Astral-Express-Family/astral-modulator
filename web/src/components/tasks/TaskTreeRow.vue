@@ -1,6 +1,5 @@
 <!-- 树行：深度缩进 + 折叠箭头（children_count>0 才显示）+ 状态/优先级/标签/负责人。
-     整行点击选中，箭头只管折叠。v2 行内不带 lease（仅 get/claim 响应填充），租约
-     倒计时在详情面板展示。行根节点 draggable（原生 DnD）：dragstart/dragover 等
+     整行点击选中，箭头只管折叠。行根节点 draggable（原生 DnD）：dragstart/dragover 等
      监听由父视图透传（未声明即落到根 button）；拖拽悬停时按父视图给的模式渲染
      插入线（before/after）或子容器高亮（child）。 -->
 <script setup lang="ts">

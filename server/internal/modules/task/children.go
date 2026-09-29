@@ -49,7 +49,7 @@ func (m *Module) listTaskChildren(w http.ResponseWriter, r *http.Request) {
 }
 
 // listChildren 容器集合查询核心。parentID == nil 表示 workspace 根层。
-// 排序（2.2）：兄弟排序键 position 升序、同位 id 降序兜底；cursor 分页沿用
+// 排序（2.4）：兄弟排序键 position 升序、同位 id 降序兜底；cursor 分页沿用
 // 键集语义，cursor 编码 <position>:<id>（对客户端不透明），谓词越过游标行。
 func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID string, parentID *string) {
 	q := r.URL.Query()
@@ -59,9 +59,11 @@ func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID strin
 	} else {
 		query = query.Where("tasks.parent_id = ?", *parentID)
 	}
-	// status/tag/assignee 三件套与 task-search 共用同一实现（filters.go）。
+	// status/tag/assignee 三件套 + 2.2 依赖过滤（blocked/blocked_by），
+	// 与 task-search 共用同一实现（filters.go）。
 	query, apiErr := applyTaskFilters(query, taskFilters{
 		Status: q.Get("status"), Tag: q.Get("tag"), Assignee: q.Get("assignee"),
+		Blocked: q.Get("blocked") == "true", BlockedBy: q.Get("blocked_by"),
 	})
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
@@ -204,7 +206,7 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 		return taskDTO{}, err
 	}
 
-	// 兄弟序位（2.2）：创建一律追加尾部 = 当前兄弟数。计数在事务外完成——
+	// 兄弟序位（2.4）：创建一律追加尾部 = 当前兄弟数。计数在事务外完成——
 	// sqlite deferred 事务「先读后写」升锁会无视 busy_timeout 直接 SQLITE_BUSY，
 	// 事务内首条语句必须是写（并发创建撞位由 position 升序 + id 降序兜底收敛）。
 	var pos int64
@@ -239,7 +241,7 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 	if err != nil {
 		return taskDTO{}, err
 	}
-	return toTaskDTO(t, nil, m.loadTaskTags(ctx, t.ID), 0), nil
+	return toTaskDTO(t, m.loadTaskTags(ctx, t.ID), 0, depViews{}), nil
 }
 
 // resolveTagNames 按规范化名解析 workspace 内既有 tag；未知名字 → 404
@@ -281,9 +283,10 @@ func (m *Module) enrichTasks(ctx context.Context, rows []model.Task) []taskDTO {
 	}
 	tagsByTask := m.tagsForTasks(ctx, ids)
 	counts := m.childCounts(ctx, ids)
+	views := m.depViewsForTasks(ctx, ids)
 	items := make([]taskDTO, 0, len(rows))
 	for i := range rows {
-		items = append(items, toTaskDTO(rows[i], nil, tagsByTask[rows[i].ID], counts[rows[i].ID]))
+		items = append(items, toTaskDTO(rows[i], tagsByTask[rows[i].ID], counts[rows[i].ID], views[rows[i].ID]))
 	}
 	return items
 }
