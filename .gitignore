@@ -76,6 +76,7 @@ Testing/
 # ---- Go server ----
 server/astral-server
 server/astral-server.exe
+server/astral-server-linux
 server/*.test
 server/coverage.out
 # webdist 构建产物（make web-dist 拷入；.gitkeep 占位必须入库，勿删）
@@ -91,6 +92,9 @@ web/*.local
 .env
 .env.*
 !.env.example
+
+# ---- astral CLI 本机绑定（server URL 因机器而异，凭证在 ~/.astral-cli）----
+.astral/
 
 # ---- editors/tooling ----
 .idea/
