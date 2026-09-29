@@ -521,6 +521,51 @@ export interface paths {
         patch: operations["updateTask"];
         trace?: never;
     };
+    "/tasks/{task_id}/dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        /** 任务依赖边列表（双向：作为依赖方与作为 blocker 的全部边） */
+        get: operations["listTaskDependencies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/dependencies/{dependency_task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                /** @description 被依赖方（blocker）；必须与 task_id 同 workspace */
+                dependency_task_id: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 增加依赖边（task_id 依赖 dependency_task_id；body.kind 缺省 blocks）。
+         *     blocks 边写入时沿依赖链防环；同边已存在则幂等 200 不 bump。
+         *     边变更两端任务各 revision+1 并发 task.updated（data.dep_change）。
+         */
+        put: operations["addTaskDependency"];
+        post?: never;
+        /** 删除依赖边（?kind= 缺省 blocks；边不存在幂等 204） */
+        delete: operations["removeTaskDependency"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/claim": {
         parameters: {
             query?: never;
@@ -1363,10 +1408,30 @@ export interface components {
              * @description 直接子任务数（UI 展开徽标；恒填充）
              */
             children_count: number;
+            /** @description 本任务依赖（等待）的任务 id 列表（2.2；blocks 边出向；恒填充） */
+            blocked_by: components["schemas"]["Id"][];
+            /** @description 依赖本任务（被本任务阻塞）的任务 id 列表（2.2；blocks 边入向；恒填充） */
+            blocks: components["schemas"]["Id"][];
+            /** @description 与本任务关联（relates 边）的任务 id 列表（2.2；恒填充） */
+            related: components["schemas"]["Id"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        DependencyEdge: {
+            from_task_id: components["schemas"]["Id"];
+            to_task_id: components["schemas"]["Id"];
+            /**
+             * @description from 依赖 to（blocks = to 完成前 from 处于阻塞语义）
+             * @enum {string}
+             */
+            kind: "blocks" | "relates";
+            /** Format: date-time */
+            created_at: string;
+        };
+        DependencyList: {
+            items: components["schemas"]["DependencyEdge"][];
         };
         TaskTreeNode: {
             title: string;
@@ -1756,6 +1821,13 @@ export interface components {
         TaskStatusFilter: components["schemas"]["TaskStatus"];
         TaskTagFilter: string;
         TaskAssigneeFilter: string;
+        /**
+         * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+         *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+         */
+        TaskBlockedFilter: boolean;
+        /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+        TaskBlockedByFilter: string;
         TaskRegexFilter: string;
         TaskFuzzyFilter: string;
         /**
@@ -2441,6 +2513,13 @@ export interface operations {
                 status?: components["parameters"]["TaskStatusFilter"];
                 tag?: components["parameters"]["TaskTagFilter"];
                 assignee?: components["parameters"]["TaskAssigneeFilter"];
+                /**
+                 * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+                 *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+                 */
+                blocked?: components["parameters"]["TaskBlockedFilter"];
+                /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+                blocked_by?: components["parameters"]["TaskBlockedByFilter"];
                 limit?: components["parameters"]["Limit"];
                 cursor?: components["parameters"]["Cursor"];
             };
@@ -2503,6 +2582,13 @@ export interface operations {
                 status?: components["parameters"]["TaskStatusFilter"];
                 tag?: components["parameters"]["TaskTagFilter"];
                 assignee?: components["parameters"]["TaskAssigneeFilter"];
+                /**
+                 * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+                 *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+                 */
+                blocked?: components["parameters"]["TaskBlockedFilter"];
+                /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+                blocked_by?: components["parameters"]["TaskBlockedByFilter"];
                 limit?: components["parameters"]["Limit"];
                 cursor?: components["parameters"]["Cursor"];
             };
@@ -2642,6 +2728,13 @@ export interface operations {
                 tag?: components["parameters"]["TaskTagFilter"];
                 status?: components["parameters"]["TaskStatusFilter"];
                 assignee?: components["parameters"]["TaskAssigneeFilter"];
+                /**
+                 * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+                 *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+                 */
+                blocked?: components["parameters"]["TaskBlockedFilter"];
+                /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+                blocked_by?: components["parameters"]["TaskBlockedByFilter"];
                 limit?: components["parameters"]["Limit"];
                 cursor?: components["parameters"]["Cursor"];
             };
@@ -2789,6 +2882,101 @@ export interface operations {
                 };
             };
             409: components["responses"]["Error"];
+        };
+    };
+    listTaskDependencies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 依赖边全量（边数有界，单任务每方向上限 50，不分页） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyList"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    addTaskDependency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                /** @description 被依赖方（blocker）；必须与 task_id 同 workspace */
+                dependency_task_id: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description blocks = 硬阻塞（防环校验）；relates = 对称关联
+                     * @default blocks
+                     * @enum {string}
+                     */
+                    kind?: "blocks" | "relates";
+                };
+            };
+        };
+        responses: {
+            /** @description 边已存在（幂等，不 bump） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyEdge"];
+                };
+            };
+            /** @description 已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyEdge"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    removeTaskDependency: {
+        parameters: {
+            query?: {
+                kind?: "blocks" | "relates";
+            };
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                /** @description 被依赖方（blocker）；必须与 task_id 同 workspace */
+                dependency_task_id: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除（或边本不存在） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     claimTask: {

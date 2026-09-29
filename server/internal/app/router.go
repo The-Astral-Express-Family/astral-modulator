@@ -127,10 +127,11 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 			// document_sync：documents/conflicts 七端点已实装（round 38 T4；
 			// memory 无独立 feature——复用 documents 端点，M1 裁决）。
 			// task_batch：批量树创建/move/batch-update 已实装（协议 2.1）。
+			// task_dependencies：依赖边（blocked_by/blocks/related）已实装（协议 2.2）。
 			httpx.WriteOK(w, req, http.StatusOK, Capabilities{
 				ProtocolVersion:   httpx.ProtocolVersion,
 				MinimumCliVersion: "0.1.0",
-				Features:          []string{"task_claim", "document_sync", "task_batch"},
+				Features:          []string{"task_claim", "document_sync", "task_batch", "task_dependencies"},
 			})
 		})
 

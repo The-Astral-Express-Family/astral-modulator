@@ -334,3 +334,92 @@ func TestTaskBatchV2(t *testing.T) {
 		t.Fatalf("revision conflict: %d %v", code, errBody)
 	}
 }
+
+// TestTaskDependenciesV2：依赖边三端点的 HTTP 集成（协议 2.2）——PUT 幂等、
+// 视图字段恒填充、blocked/blocked_by 过滤、环 400、删除幂等 204。
+func TestTaskDependenciesV2(t *testing.T) {
+	ts := newTestServer(t)
+	cookie := loginHuman(t, ts, "deps@example.com")
+	api := "/api/v1"
+	code, ws := doAuthed(t, ts, cookie, "POST", api+"/workspaces", map[string]any{"name": "deps-demo"})
+	if code != 201 {
+		t.Fatalf("create ws: %d %v", code, ws)
+	}
+	wsID := ws["id"].(string)
+	mkTask := func(title string) string {
+		code, out := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/children",
+			map[string]any{"title": title})
+		if code != 201 {
+			t.Fatalf("create %s: %d %v", title, code, out)
+		}
+		return out["id"].(string)
+	}
+	a := mkTask("A") // 依赖 B
+	b := mkTask("B")
+	c := mkTask("C") // 无依赖
+
+	// 1. PUT 建边：A 依赖 B → 201；重复 PUT → 200 幂等。
+	depPath := func(from, to string) string {
+		return api + "/tasks/" + from + "/dependencies/" + to
+	}
+	code, out := doAuthed(t, ts, cookie, "PUT", depPath(a, b), map[string]any{"kind": "blocks"})
+	if code != 201 {
+		t.Fatalf("put dep: %d %v", code, out)
+	}
+	code, out = doAuthed(t, ts, cookie, "PUT", depPath(a, b), map[string]any{})
+	if code != 200 {
+		t.Fatalf("idempotent put dep: %d %v", code, out)
+	}
+
+	// 2. Task 视图恒填充：A.blocked_by=[B]。
+	code, out = doAuthed(t, ts, cookie, "GET", api+"/tasks/"+a, nil)
+	if code != 200 {
+		t.Fatalf("get A: %d %v", code, out)
+	}
+	if bb, ok := out["blocked_by"].([]any); !ok || len(bb) != 1 || bb[0] != b {
+		t.Fatalf("A.blocked_by = %v", out["blocked_by"])
+	}
+	if blocks, ok := out["blocks"].([]any); !ok || len(blocks) != 0 {
+		t.Fatalf("A.blocks = %v", out["blocks"])
+	}
+
+	// 3. 过滤：blocked=true 只回 A；blocked_by=B 只回 A。
+	code, page := doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children?blocked=true", nil)
+	if code != 200 || len(items(t, page)) != 1 {
+		t.Fatalf("blocked filter: %d %v", code, page)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children?blocked_by="+b, nil)
+	if code != 200 || len(items(t, page)) != 1 {
+		t.Fatalf("blocked_by filter: %d %v", code, page)
+	}
+
+	// 4. 环：B 依赖 A → 400。
+	code, errBody := doAuthed(t, ts, cookie, "PUT", depPath(b, a), map[string]any{})
+	if code != 400 || errCode(t, errBody) != "VALIDATION_FAILED" {
+		t.Fatalf("cycle: %d %v", code, errBody)
+	}
+
+	// 5. 依赖边列表。
+	code, out = doAuthed(t, ts, cookie, "GET", api+"/tasks/"+a+"/dependencies", nil)
+	if code != 200 {
+		t.Fatalf("list deps: %d %v", code, out)
+	}
+	if edges, ok := out["items"].([]any); !ok || len(edges) != 1 {
+		t.Fatalf("dep list = %v", out)
+	}
+
+	// 6. DELETE 幂等 204；再查 blocked 过滤为空。
+	code, _ = doAuthed(t, ts, cookie, "DELETE", depPath(a, b)+"?kind=blocks", nil)
+	if code != 204 {
+		t.Fatalf("delete dep: %d", code)
+	}
+	code, _ = doAuthed(t, ts, cookie, "DELETE", depPath(a, b)+"?kind=blocks", nil)
+	if code != 204 {
+		t.Fatalf("idempotent delete dep: %d", code)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children?blocked=true", nil)
+	if code != 200 || len(items(t, page)) != 0 {
+		t.Fatalf("blocked filter after delete: %d %v", code, page)
+	}
+	_ = c
+}

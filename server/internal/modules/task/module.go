@@ -51,6 +51,10 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Delete("/tasks/{task_id}/claim", m.release)
 	r.Put("/tasks/{task_id}/tags/{tag_id}", m.attachTag)
 	r.Delete("/tasks/{task_id}/tags/{tag_id}", m.detachTag)
+	// 依赖边（协议 2.2 task_dependencies）：from=依赖方 to=blocker（dependencies.go）。
+	r.Get("/tasks/{task_id}/dependencies", m.listDependencies)
+	r.Put("/tasks/{task_id}/dependencies/{dependency_task_id}", m.addDependency)
+	r.Delete("/tasks/{task_id}/dependencies/{dependency_task_id}", m.removeDependency)
 	// 批量管理（协议 2.1 task_batch）：整批单事务全有或全无（batch.go）。
 	r.Post("/workspaces/{workspace_id}/task-trees", m.createRootTrees)
 	r.Post("/tasks/{task_id}/task-trees", m.createChildTrees)
@@ -72,15 +76,28 @@ type taskDTO struct {
 	Revision        int64        `json:"revision"`
 	Tags            []tag.TagDTO `json:"tags"`
 	ChildrenCount   int64        `json:"children_count"`
+	BlockedBy       []string     `json:"blocked_by"`
+	Blocks          []string     `json:"blocks"`
+	Related         []string     `json:"related"`
 	CreatedAt       string       `json:"created_at"`
 	UpdatedAt       string       `json:"updated_at"`
 }
 
 // toTaskDTO 组装任务响应。v2（D15 修订 D11）：tags 恒填充（nil 兜底为空数组）、
-// children_count 恒填充。
-func toTaskDTO(t model.Task, tags []tag.TagDTO, childCount int64) taskDTO {
+// children_count 恒填充；2.2 起依赖视图（blocked_by/blocks/related）恒填充
+// （调用方以 depViewsForTasks 批量装填，无边时空切片在此兜底）。
+func toTaskDTO(t model.Task, tags []tag.TagDTO, childCount int64, deps depViews) taskDTO {
 	if tags == nil {
 		tags = []tag.TagDTO{}
+	}
+	if deps.blockedBy == nil {
+		deps.blockedBy = []string{}
+	}
+	if deps.blocks == nil {
+		deps.blocks = []string{}
+	}
+	if deps.related == nil {
+		deps.related = []string{}
 	}
 	return taskDTO{
 		ID: t.ID, WorkspaceID: t.WorkspaceID, ParentID: t.ParentID,
@@ -88,6 +105,7 @@ func toTaskDTO(t model.Task, tags []tag.TagDTO, childCount int64) taskDTO {
 		Status: t.Status, Priority: t.Priority,
 		AssigneeActorID: t.AssigneeActorID, Revision: t.Revision,
 		Tags: tags, ChildrenCount: childCount,
+		BlockedBy: deps.blockedBy, Blocks: deps.blocks, Related: deps.related,
 		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -132,14 +150,16 @@ func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results, next, apiErr := m.Search(r.Context(), wsID, SearchParams{
-		Regex:    q.Get("regex"),
-		Fuzzy:    q.Get("fuzzy"),
-		ParentID: q.Get("parent_id"),
-		Tag:      q.Get("tag"),
-		Status:   q.Get("status"),
-		Assignee: q.Get("assignee"),
-		Limit:    httpx.ParseLimit(q.Get("limit"), 50, 200),
-		Cursor:   q.Get("cursor"),
+		Regex:     q.Get("regex"),
+		Fuzzy:     q.Get("fuzzy"),
+		ParentID:  q.Get("parent_id"),
+		Tag:       q.Get("tag"),
+		Status:    q.Get("status"),
+		Assignee:  q.Get("assignee"),
+		Blocked:   q.Get("blocked") == "true",
+		BlockedBy: q.Get("blocked_by"),
+		Limit:     httpx.ParseLimit(q.Get("limit"), 50, 200),
+		Cursor:    q.Get("cursor"),
 	})
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
@@ -154,7 +174,8 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*t, m.loadTags(r, t.ID), m.childCount(r.Context(), t.ID)))
+	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*t, m.loadTags(r, t.ID),
+		m.childCount(r.Context(), t.ID), m.depView(r.Context(), t.ID)))
 }
 
 func (m *Module) update(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +281,8 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, m.loadTags(r, t.ID), m.childCount(r.Context(), t.ID)))
+	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, m.loadTags(r, t.ID),
+		m.childCount(r.Context(), t.ID), m.depView(r.Context(), t.ID)))
 }
 
 // checkCycle 沿 newParent 向上遍历祖先链，返回是否形成环。
@@ -374,7 +396,8 @@ func (m *Module) claim(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	dto := toTaskDTO(*fresh, m.loadTags(r, taskID), m.childCount(r.Context(), taskID))
+	dto := toTaskDTO(*fresh, m.loadTags(r, taskID),
+		m.childCount(r.Context(), taskID), m.depView(r.Context(), taskID))
 	httpx.WriteOK(w, r, http.StatusOK, map[string]any{"task": dto})
 }
 

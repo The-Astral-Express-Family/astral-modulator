@@ -22,7 +22,7 @@ func AllModels() []any {
 		&model.ServerMeta{}, &model.Actor{}, &model.HumanAuth{},
 		&model.Workspace{}, &model.WorkspaceMember{},
 		&model.DeviceAuthorization{}, &model.Session{}, &model.Credential{},
-		&model.Task{},
+		&model.Task{}, &model.TaskDependency{},
 		&model.Tag{}, &model.TagProposal{}, &model.TaskTag{},
 		&model.Document{}, &model.DocumentConflict{}, &model.DocumentVersion{},
 		&model.OutboxEvent{}, &model.AuditEntry{},
