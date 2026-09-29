@@ -2,11 +2,12 @@
 // token bucket（仅标准库）+ map[key]*bucket + mutex + 惰性清理，时钟可注入。
 //
 // 桶配置（TODO.md S5-2，env 可覆盖，见 config.RateLimitConfig）：
-//   - 敏感桶 SensitivePerMin/min/IP：login、register、token/refresh、
+//   - 敏感桶 SensitivePerMin/min/IP：login、register、
 //     POST+GET /auth/device/authorizations（user_code 防枚举）、approve/deny；
 //   - 轮询桶 PollPerMin/min/IP：POST /auth/device/authorizations/{code}/token
 //     （CLI interval=3s 轮询必须容纳，故独立于敏感桶）；
-//   - 通用桶 APIPerMin/min/actor：其余 /api/v1；
+//   - 通用桶 APIPerMin/min/actor：其余 /api/v1；Public 段的
+//     token/refresh、logout 与 meta/capabilities 按 IP 记入此桶；
 //   - SSE 桶 SSEPerMin/min/actor：GET /workspaces/{id}/events 连接建立
 //     （独立桶，重连风暴不占通用桶）。
 //
@@ -317,9 +318,14 @@ func classifyPublic(method, path string) bucketClass {
 	case method == http.MethodPost &&
 		((len(segs) == 2 && segs[1] == "login") ||
 			(len(segs) == 2 && segs[1] == "register") ||
-			(len(segs) == 3 && segs[1] == "token" && segs[2] == "refresh") ||
 			(len(segs) == 3 && segs[1] == "device" && segs[2] == "authorizations")):
 		return classSensitive
+	case method == http.MethodPost &&
+		len(segs) == 3 && segs[1] == "token" && segs[2] == "refresh":
+		// refresh 携带的是高熵轮换 Cookie（非口令猜测面，重放另有家族吊销），
+		// 入通用桶：登录后紧跟的静默续期不再与 login/register 抢敏感桶配额
+		// （原 10/min 下一次登录即双扣，续期 429 且前端不可见）。
+		return classAPI
 	case method == http.MethodPost &&
 		len(segs) == 5 && segs[1] == "device" && segs[2] == "authorizations" &&
 		segs[4] == "token":
