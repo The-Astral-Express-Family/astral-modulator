@@ -36,7 +36,7 @@ onMounted(() => {
   if (session.isLoggedIn && !session.isDemo) void workspaces.load()
 })
 
-// 邀请码直达：主页收到的 ?code= 原样带给 /register（它从自身 query 预填）。
+// 注册码直达：主页收到的 ?code= 原样带给 /register（它从自身 query 预填）。
 const registerLocation = computed(() => {
   const code = route.query.code
   return typeof code === 'string' && code ? { path: '/register', query: { code } } : { path: '/register' }
@@ -79,7 +79,7 @@ const personalLinks = computed(() => {
       <CardHeader>
         <CardTitle>人与 agent 协作的任务工作台</CardTitle>
         <CardDescription>
-          登录后管理你的工作区与任务；收到邀请的用户可用邀请码注册，注册即加入对应工作区。
+          登录后管理你的工作区与任务；收到注册邀请码的用户可注册账号，加入工作区另行兑换工作区邀请码。
         </CardDescription>
       </CardHeader>
       <CardContent class="flex flex-wrap items-center gap-3">
@@ -87,7 +87,7 @@ const personalLinks = computed(() => {
           <RouterLink to="/login">登录</RouterLink>
         </Button>
         <Button variant="outline" as-child>
-          <RouterLink :to="registerLocation">邀请码注册</RouterLink>
+          <RouterLink :to="registerLocation">注册码注册</RouterLink>
         </Button>
         <p class="text-muted-foreground w-full text-xs">
           CLI 用户运行 <code>astral login</code> 登录，批准入口在登录后的「设备管理」页。

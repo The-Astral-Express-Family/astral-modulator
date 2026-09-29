@@ -161,7 +161,7 @@ export const useSessionStore = defineStore('session', () => {
     await adoptMeAndRenew(await authApi.login(email, password))
   }
 
-  /** 注册（A5）：invite_code 非空走邀请兑换，为空则是 bootstrap；成功即建立会话。 */
+  /** 注册（A5/ADR-0009）：registration_code 非空走注册码兑换（仅建号），为空则是 bootstrap；成功即建立会话。 */
   async function register(input: authApi.RegisterInput): Promise<void> {
     await adoptMeAndRenew(await authApi.register(input))
   }

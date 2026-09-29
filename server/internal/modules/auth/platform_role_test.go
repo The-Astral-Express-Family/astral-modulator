@@ -52,10 +52,10 @@ func TestFirstHumanIsPlatformAdmin(t *testing.T) {
 func TestInviteRegistrationPlatformRoleUser(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	code, _ := seedInviteWorld(t, s, "contributor", nil)
+	code := seedRegistrationInvite(t, s, nil)
 
 	actor, _, err := s.Register(ctx, RegisterInput{
-		Email: "invited@example.com", Password: "hunter2safe", InviteCode: code,
+		Email: "invited@example.com", Password: "hunter2safe", RegistrationCode: code,
 	}, "ip", "ua")
 	if err != nil {
 		t.Fatalf("register: %v", err)

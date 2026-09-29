@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 邀请码注册页（TODO.md A5 / docs/registration.md §5.1）。独立布局（不套 MainLayout），
-// 与 /login、/device 同构，便于从邮件/聊天链接直达。匿名专属：已登录由路由守卫弹走。
-// ?code= 预填邀请码（invite_url 直达场景），也支持手动输入；注册成功即登录
-// （服务端已建会话），跳回 from 或总览。CLI 用户注册后请用 astral login 走设备流。
+// 注册码注册页（TODO.md A5 / docs/registration.md §5.1 / ADR-0009 双轨分离）。
+// 独立布局（不套 MainLayout），与 /login、/device 同构，便于从邮件/聊天链接直达。
+// 匿名专属：已登录由路由守卫弹走。?code= 预填注册邀请码（注册邀请链接直达场景），
+// 也支持手动输入；注册只建号不入伙——加入工作区需另行兑换工作区邀请码
+// （登录后侧栏「加入工作区」）。注册成功即登录（服务端已建会话），跳回 from 或总览。
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApiAction } from '@/composables/useApiAction'
@@ -21,7 +22,7 @@ const router = useRouter()
 const { consumeRedirect } = useLoginRedirect()
 const { busy, run } = useApiAction()
 
-const inviteCode = ref(typeof route.query.code === 'string' ? route.query.code : '')
+const registrationCode = ref(typeof route.query.code === 'string' ? route.query.code : '')
 const email = ref('')
 const password = ref('')
 const displayName = ref('')
@@ -32,7 +33,7 @@ async function submit(): Promise<void> {
       email: email.value,
       password: password.value,
       display_name: displayName.value || undefined,
-      invite_code: inviteCode.value || undefined,
+      registration_code: registrationCode.value || undefined,
     }),
   )
   if (ok) void router.push(consumeRedirect() ?? '/')
@@ -42,16 +43,16 @@ async function submit(): Promise<void> {
 <template>
   <div class="flex min-h-screen items-center justify-center px-4">
     <div class="flex w-full max-w-md flex-col gap-4">
-      <PageHeader title="注册" description="注册即加入邀请所属的工作区，并自动登录。" />
+      <PageHeader title="注册" description="使用注册邀请码创建账号并自动登录。" />
       <Card>
         <CardContent>
           <form class="flex flex-col gap-4" @submit.prevent="submit">
             <FieldGroup>
               <Field>
-                <FieldLabel for="invite-code">邀请码</FieldLabel>
+                <FieldLabel for="registration-code">注册邀请码</FieldLabel>
                 <Input
-                  id="invite-code"
-                  v-model="inviteCode"
+                  id="registration-code"
+                  v-model="registrationCode"
                   class="font-mono"
                   placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
                   autocomplete="off"
@@ -85,8 +86,9 @@ async function submit(): Promise<void> {
         </CardContent>
         <CardFooter>
           <p class="text-muted-foreground text-sm">
-            邀请码由工作区管理员签发，一次性有效（失效/已用/撤销均同提示）。无邀请码时本页仅在
-            服务器还没有任何账号时可用（bootstrap）；CLI 登录请用
+            注册邀请码由平台管理员签发，一次性有效（失效/已用/撤销均同提示）。注册只创建账号，
+            不加入任何工作区——加入工作区请在登录后用侧栏「加入工作区」兑换工作区邀请码。
+            无注册码时本页仅在服务器还没有任何账号时可用（bootstrap）；CLI 登录请用
             <code>astral login</code>（设备授权流程）。
           </p>
         </CardFooter>

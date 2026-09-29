@@ -47,7 +47,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 注册 Human（A5）：带 invite_code 走邀请兑换；不带则为 bootstrap（仅当服务器无 human） */
+        /** 注册 Human（A5/ADR-0009）：带 registration_code 走注册码兑换（仅注册，不入伙）；不带则为 bootstrap（仅当服务器无 human） */
         post: operations["register"];
         delete?: never;
         options?: never;
@@ -1730,8 +1730,8 @@ export interface operations {
                     /** @description 需含字母与数字 */
                     password: string;
                     display_name?: string;
-                    /** @description 一次性邀请码（XXXXX-XXXXX-XXXXX-XXXXX，比对前归一化：去分隔符+大写）。 兑换即建号 + 入伙 + 建立 web 会话（docs/registration.md §4）。 */
-                    invite_code?: string;
+                    /** @description 一次性注册邀请码（XXXXX-XXXXX-XXXXX-XXXXX，比对前归一化：去分隔符+大写）。 兑换即建号 + 建立 web 会话，不加入任何 workspace——入伙走 POST /invitations/redeem（docs/registration.md §4，ADR-0009）。 */
+                    registration_code?: string;
                 };
             };
         };
