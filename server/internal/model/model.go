@@ -148,6 +148,20 @@ type TaskLease struct {
 
 func (TaskLease) TableName() string { return "task_leases" }
 
+// TaskDependency 见 00020_task_dependencies.sql。from = 依赖方（等待者），
+// to = 被依赖方（blocker）；kind=blocks 为硬阻塞（写入时沿 blocks 边防环），
+// kind=relates 为对称关联。边变更两端任务各 bump revision + task.updated
+// （D11 tag 语义）。
+type TaskDependency struct {
+	FromTaskID string `gorm:"primaryKey;size:40"`
+	ToTaskID   string `gorm:"primaryKey;size:40"`
+	Kind       string `gorm:"primaryKey;size:16"`
+	CreatedBy  string `gorm:"size:40"`
+	CreatedAt  time.Time
+}
+
+func (TaskDependency) TableName() string { return "task_dependencies" }
+
 // Tag 见 00004_tags.sql / architecture §14。
 // NormalizedName = trim + NFC + case-fold，由应用层在写路径统一计算。
 type Tag struct {
