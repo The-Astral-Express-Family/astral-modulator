@@ -22,7 +22,7 @@ Astral Modulator 是一个 **CLI 优先的多智能体协作中枢**。它为人
 - 创建、分配、重排、暂停或撤销任务；
 - 阅读消息和工作区 Markdown；
 - 解决同步冲突；
-- 撤销 Agent Token 或 Task Lease；
+- 撤销 Agent Token 或强制释放任务认领；
 - 查询审计日志；
 - 通过 GUI 进行高频观察和调度。
 
@@ -135,11 +135,14 @@ Task 必须至少包含：
 - timestamps。
 
 状态枚举以 openapi 的 TaskStatus 为准：`open | in_progress | blocked |
-review | done | cancelled`（claim 是 lease 语义，不是 status）。
+review | done | cancelled`（claim/release 是所有权语义，不是 status）。
 
-### FR-006 Claim Lease
+### FR-006 Claim（认领）
 
-Task Claim 必须是原子的，并具备 Lease/TTL，以避免多个 Agent 长时间互相阻塞。
+Task Claim 必须是原子的（他人持有 → 409 TASK_ALREADY_CLAIMED），认领持有至
+release 或任务完成；不设时间自动过期——小团队形态下「不抢任务」优先于
+「自动回收」，死 agent 的认领由人工 task:override 强制释放（TODO.md §9
+2026-09-30 拆除租约时间维度，FR-006 原 Lease/TTL 要求废止）。
 
 ### FR-007 Presence
 
@@ -231,7 +234,7 @@ CLI 必须支持：
 
 - CLI unit/integration tests；
 - API contract tests；
-- Task Lease 并发测试；
+- Task Claim 并发测试；
 - Document conflict 测试；
 - 三端 build smoke test；
 - auth/token revoke 测试。
@@ -259,8 +262,8 @@ MVP 不做：
 4. Agent A 修改 Markdown 并同步；
 5. Agent B 同时改同一文件时产生可见冲突，而不是丢数据；
 6. 两个 Agent 可互发消息；
-7. Agent A 失联后 lease/presence 按策略过期；
-8. Human 可撤销其 Token/Lease；
+7. Agent A 失联后 presence 按策略过期；其任务认领由人工强制释放；
+8. Human 可撤销其 Token / 强制释放任务认领；
 9. Audit 能完整复盘上述动作；
 10. Windows/macOS/Linux CLI 都能安装并执行相同 JSON 契约。
 
@@ -270,7 +273,6 @@ MVP 不做：
 - Task 是否需要层级/epic/subtask？
 - Human 是否允许多个身份提供商？
 - Agent 默认 Credential TTL 是小时、天还是长期可撤销？
-- Task Lease 默认 TTL 和心跳频率？
 - Markdown 允许管理哪些路径？是否默认排除 secrets/隐藏文件？
 - GUI 首版是否需要 Markdown 编辑器，还是只读 + 冲突解决？
 - “Pause Agent” 是仅撤销 Astral 操作权限，还是还要通过 Runtime adapter 停止外部进程？

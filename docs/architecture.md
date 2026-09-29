@@ -67,7 +67,7 @@ flowchart LR
     API --> MEM[Memory Workspace]
     API --> DOC[Document Sync]
     API --> MSG[Messaging]
-    API --> PRES[Presence & Lease]
+    API --> PRES[Presence & Claim]
     API --> EVT[Events]
     API --> AUDIT[Audit]
 
@@ -123,7 +123,7 @@ TODO 同时需要：
 - 树形父子关系；
 - Tag 多对多；
 - Workspace 权限隔离；
-- Claim/Lease 原子更新；
+- Claim 原子互斥（assignee 条件更新）；
 - 审计；
 - 事务；
 - 正则筛选；
@@ -178,7 +178,7 @@ Workspace 是权限隔离边界，但登录不是 Workspace 级凭证。
 - Task CRUD；
 - `parent_id`；
 - 状态；
-- Claim Lease；
+- Claim（认领持有至释放/完成）；
 - revision；
 - dependency（后续）；
 - tree/path 查询；
@@ -246,9 +246,9 @@ Memory Agent 只能根据服务端授予 scope 工作，不拥有数据库超级
 - Task thread；
 - 持久消息历史。
 
-### 6.8 Presence & Lease
+### 6.8 Presence & Claim
 
-Presence 是短生命周期展示状态；Task Lease 是任务所有权事实，两者分离。
+Presence 是短生命周期展示状态；Task claim（assignee 所有权，持有至释放/完成）是任务所有权事实，两者分离。
 
 ### 6.9 Events
 
@@ -738,16 +738,13 @@ tombstone（`DELETE ?base_revision=`，远端已变更同样落冲突工件）�
 
 ## 17. Task Claim 与 Presence
 
-Task Lease：
+Task 认领（claim）= `tasks.assignee_actor_id` 所有权事实，持有至 release 或
+任务完成，**无时间自动过期**（TODO.md §9 2026-09-30：小团队「不抢任务」
+优先于「自动回收」，死 agent 由人工 task:override 强制释放）。
 
-```text
-task_id
-holder_actor_id
-expires_at
-renewed_at
-```
-
-Claim 使用数据库事务与条件更新保证原子性。
+Claim 使用数据库事务与条件更新保证原子性：
+`WHERE revision = ? AND (assignee_actor_id IS NULL OR assignee_actor_id = ?)`，
+他人持有 → 409 TASK_ALREADY_CLAIMED，仅 revision 漂移 → REVISION_CONFLICT。
 
 Presence：
 
@@ -953,7 +950,7 @@ Web GUI 首版至少支持：
 - TODO tree；
 - Tag 管理与 proposal；
 - Agent presence；
-- Task claim/lease；
+- Task claim/release；
 - Message/activity；
 - Memory 文档查看；
 - Document conflict；
@@ -1067,7 +1064,7 @@ breaking change 直接升 protocol_version + 发布新快照，两仓库锁步�
 - recursive queries；
 - regex -> fuzzy（应用层 RE2 + trigram，D7；pg_trgm 仅是规模触发后的回迁路径）；
 - tag proposal/confirm；
-- claim lease。
+- claim/release。
 
 ### Phase 4：Presence / Message / Event
 
