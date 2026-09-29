@@ -200,6 +200,9 @@ function createInContainer(parentId: string | null, payload: TaskCreatePayload):
     revision: 1,
     tags: resolvedTags.map(clone),
     children_count: 0,
+    blocked_by: [],
+    blocks: [],
+    related: [],
     created_at: now,
     updated_at: now,
   }

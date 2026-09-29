@@ -220,6 +220,9 @@ function emptyTask(): TaskSearchHit {
     revision: 1,
     tags: [],
     children_count: 0,
+    blocked_by: [],
+    blocks: [],
+    related: [],
     created_at: '',
     updated_at: '',
   }

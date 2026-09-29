@@ -120,6 +120,9 @@ function buildTask(def: TaskDef): Task {
     priority: def.priority ?? 'normal',
     assignee_actor_id: def.assignee?.id ?? null,
     revision: 1 + (def.status !== 'open' ? 1 : 0),
+    blocked_by: [],
+    blocks: [],
+    related: [],
     tags: (def.tags ?? []).map((name) => {
       const t = DEMO_TAGS.find((cand) => cand.name === name)
       if (!t) throw new Error(`fixture: unknown tag ${name}`)
