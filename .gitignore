@@ -104,3 +104,7 @@ redocly.ignore
 # ---- agent skills ----
 # 真身在 .agents/skills/（入库，pi/zcode 直接扫）；.claude 下是给 Claude Code 的本机符号链接
 .claude/skills/repo-hygiene
+
+# ---- agent session state ----
+# 会话工作计划是一次性产物，不入库（曾被误提交，2026-09 清理）
+.zcode/plans/
