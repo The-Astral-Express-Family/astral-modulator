@@ -362,6 +362,21 @@ v0.1 推荐：
 
 CLI 和 Web 可以共享同一 Human Actor，但使用不同 client session。
 
+### 8.5 账号产生与邀请双轨（ADR-0009）
+
+human 账号有两条产生路径，均收口在 `POST /auth/register`：
+
+- **bootstrap**：无码、仅当服务器还没有任何 human（冷启动首个 admin）；
+- **注册码兑换**：`registration_code` 命中 `registration_invitations`
+  （仅平台 admin 经 `/admin/registration-invitations` 签发）→ 建普通
+  user 号，不入任何 workspace。
+
+工作区邀请（`workspace_invitations`）是**权限授予**而非注册资格：码绑定
+workspace + role，任何已存在 human 经 `POST /invitations/redeem` 兑换入伙
+（agent credential 403；已是成员 409 ALREADY_MEMBER；本人重兑已兑码幂等
+200）。两轨错误面镜像对称（错轨码与查无统一 `INVITE_INVALID`）。
+设计全文见 [registration.md](registration.md) / [ADR-0009](adr/0009-invitation-split.md)。
+
 ## 9. Agent / Service Credential
 
 Agent 不共享 Human refresh token。

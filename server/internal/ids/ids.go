@@ -12,7 +12,7 @@ import (
 // 前缀注册表。基础前缀 usr/agt/svc/ws/tsk/msg/evt 见 openapi Id schema；
 // 以下为服务端内部资源补充的前缀（变更须经 TODO.md「契约变更登记」）：
 //
-//	srv req dev ses cred tgp tag doc cfl dvh prs aud apv inv
+//	srv req dev ses cred tgp tag doc cfl dvh prs aud apv inv reg
 type Prefix string
 
 const (

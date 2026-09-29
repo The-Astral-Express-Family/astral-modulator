@@ -1,6 +1,7 @@
 # ADR-0008: Human 注册采用一次性邀请码
 
-- Status: Accepted
+- Status: Accepted（「邀请绑定 workspace、注册即入伙」部分已被
+  [ADR-0009](0009-invitation-split.md) 取代——注册/工作区邀请双轨分离）
 - Date: 2026-09-13
 
 ## Context

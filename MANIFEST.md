@@ -47,6 +47,7 @@
 - `docs/adr/0006-web-first-gui.md`
 - `docs/adr/0007-cli-distribution.md`
 - `docs/adr/0008-invite-registration.md`
+- `docs/adr/0009-invitation-split.md`
 
 ## Skills source
 

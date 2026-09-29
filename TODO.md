@@ -321,7 +321,9 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 审批面扩展（workspace.delete / credential.create_privileged 等 §22 候选） | 触发式 | round 38 R5：architecture §22 本标"候选"；出现真实高风险操作再启 |
 | CLI/发行需求（FR-010/014/015、NFR-001/002/003/008、Distribution MVP） | 移交 | round 38 R6：整体归属 astral-cli 仓，本仓不登记其实现；执行设计已定稿于 astral-cli docs/DISTRIBUTION.md（2026-09-26，R0-R5 分阶段） |
 | admin/users 分页 | 契约明示不做 | round 38 R9：契约即注明"平台用户量小，暂不分页"；规模触发再改契约 |
-| 开放注册 / 邮箱验证 / 服务器级邀请 / 邀请授 owner | 永不（MVP） | docs/registration.md §8 |
+| 开放注册 / 邮箱验证 / 邀请授 owner | 永不（MVP） | docs/registration.md §8（「服务器级邀请」项已被 ADR-0009 吸收为注册轨） |
+| 邀请配对签发 / 站内通知发邀请 | 否决（ADR-0009） | 破坏注册资格稀缺性 / 需 per-actor 事件通道；重启条件见 registration.md §8 |
+| CLI `astral join <code>` | 移交 | astral-cli 仓；CLI 入组需求薄，出现需求再做（redeem 端点已就绪） |
 
 ## 4. 代码内 TODO(phase-x) 处置映射
 
@@ -361,6 +363,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 2026-09-16 | 第 38 轮 G4 补录：`CredentialCreate` 补声明可选 `workspace_id`（授权分流字段——服务端行为本就如此，契约补齐文档；Web MembersView 传当前 ws） | 契约文档 | CLI/Web |
 | 2026-09-25 | 第 41 轮：新增端点 `GET /workspaces/{id}/document-versions`（历史版本列表，path 必填 query，revision 降序游标分页）与 `GET /workspaces/{id}/document-versions/{revision}`（单版全量快照）；新增 schema DocumentVersion / DocumentVersionDetail；新增 ID 前缀 `dvh`；新增 env ASTRAL_DOC_HISTORY_MAX_PER_DOC / ASTRAL_DOC_HISTORY_TTL_HOURS；行为：每次内容被取代前同事务归档全量快照（§1.2 P3 解冻） | 补充 | CLI 已跟进（history / get --revision / push --force 防盲推门，astral-cli 5c32909） / Web |
 | 2026-09-28 | 平台级注册邀请（8c25bd0）：新增端点 `POST /admin/invitations`（签发，code 明文仅一次）`GET /admin/invitations`（id 降序游标分页，不回传 code）`POST /admin/invitations/{id}/revoke`（幂等 204）；migration 00018 platform_invitations；授权复用 `platform:users:manage`（无新角色）；兑换走既有 `/auth/register`（命中平台邀请则不写 membership，账号为不入任何 workspace 的普通 user）；**推翻 registration.md §8「服务器级邀请不做」原裁决**（该文档 §1/§4.5/§8 已按实装修订）；Web AdminUsersView 签发入口 | 补充 | Web（CLI/协议快照未跟进——快照下次刷新携带） |
+| 2026-09-29 | **邀请双轨分离（ADR-0009，00019）**：`POST /auth/register` 字段 `invite_code`→`registration_code` 且只查注册码表（工作区码注册=400 INVITE_INVALID，删除双表回退）；新增 `POST /invitations/redeem {code}`（已登录 human 兑工作区码入伙；幂等重试 200；已是成员 409 新错误码 `ALREADY_MEMBER`；agent 403）；`/admin/invitations*`→`/admin/registration-invitations*`（schema PlatformInvitation*→RegistrationInvitation*）；migration 00019 platform_invitations→registration_invitations（rename 保数据）+ 新 ID 前缀 `reg`（登记于 openapi Id schema 说明与本表）；工作区邀请链接 `/register?code=`→`/join?ws=`；audit `platform.invite.*`→`registration.invite.*`、事件 scope `platform`→`registration`；Web 新增 /join 路由+侧栏兑码对话框 | **破坏性** | Web + CLI（astral-cli register 字段/flag 与协议快照同批刷新） |
 
 ## 附录 A. 稳定锚点（原 §2 裁决表 / 原 §11 编号清单，编号不变）
 

@@ -1040,7 +1040,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * @description 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/dvh/prs/msg/evt/cred/ses/dev/req/aud/apv/inv。
+         * @description 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/dvh/prs/msg/evt/cred/ses/dev/req/aud/apv/inv/reg（reg=注册邀请，00019；存量注册邀请行残留 inv）。
          * @example ws_0192ab34-56cd-7ef8-9a01-234567890abc
          */
         Id: string;
