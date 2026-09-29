@@ -12,6 +12,7 @@ import { EyeIcon, PencilIcon, SaveIcon, TriangleAlertIcon, UndoIcon } from '@luc
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import MarkdownDoc from '@/components/shared/MarkdownDoc.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import { formatApiError } from '@/api/client'
 import { pushDocument } from '@/api/modules/documents'
 import type { DocumentDto } from '@/api/modules/documents'
@@ -160,16 +161,24 @@ async function save(): Promise<void> {
     <div v-show="previewing">
       <MarkdownDoc :content="draft" />
     </div>
-    <div v-show="!previewing" class="flex min-h-72 flex-col">
-      <component
-        :is="MarkdownEditor"
-        v-model="draft"
-        @save="save"
-      />
-    </div>
-    <div v-if="!MarkdownEditor" class="flex flex-col gap-2">
-      <Skeleton class="h-5 w-1/2" />
-      <Skeleton class="h-56 w-full" />
-    </div>
+    <!-- 编辑器 chunk 惰性加载：骨架期占位与编辑器同高（min-h-[60vh]），
+         到位时经 LoadSwap 交叉淡换，高度零跳动。v-show 保证预览态只剩渲染视图。 -->
+    <LoadSwap :loading="!MarkdownEditor" class="min-h-[60vh]">
+      <template #skeleton>
+        <div class="flex flex-col gap-2">
+          <Skeleton class="h-5 w-1/2" />
+          <Skeleton class="h-56 w-full" />
+        </div>
+      </template>
+      <template #default>
+        <div v-show="!previewing" class="flex min-h-[60vh] flex-col">
+          <component
+            :is="MarkdownEditor"
+            v-model="draft"
+            @save="save"
+          />
+        </div>
+      </template>
+    </LoadSwap>
   </div>
 </template>
