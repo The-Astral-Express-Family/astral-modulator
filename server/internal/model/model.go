@@ -136,18 +136,6 @@ type Task struct {
 
 func (Task) TableName() string { return "tasks" }
 
-// TaskLease 见 00003_task_tree.sql。读路径必须把 expires_at < now 视为无主；
-// 过期清扫由 task 模块 sweeper 负责（发 task.lease.expired）。
-type TaskLease struct {
-	TaskID        string `gorm:"primaryKey;size:40"`
-	HolderActorID string `gorm:"size:40"`
-	ExpiresAt     time.Time
-	RenewedAt     time.Time
-	CreatedAt     time.Time
-}
-
-func (TaskLease) TableName() string { return "task_leases" }
-
 // Tag 见 00004_tags.sql / architecture §14。
 // NormalizedName = trim + NFC + case-fold，由应用层在写路径统一计算。
 type Tag struct {
