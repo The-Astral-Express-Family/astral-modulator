@@ -17,19 +17,21 @@ import { ListTree, Plus } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { notifyApiError } from '../api/client'
 import { taskApi } from '../api/taskSource'
-import type { TaskCreatePayload, TaskSearchParams } from '../api/modules/task'
+import type { TaskCreatePayload, TaskMoveItem, TaskSearchParams } from '../api/modules/task'
 import type {
   EventEnvelope,
   Member,
   Page,
   Tag,
   Task,
+  TaskPriority,
   TaskSearchHit,
   TaskStatus,
 } from '../api/types'
 import { TASKS_MOCK } from '../lib/mockMode'
 import { useTaskLiveEvents } from '../composables/useTaskLiveEvents'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -40,9 +42,12 @@ import EventSimulator from '@/components/tasks/EventSimulator.vue'
 import TaskCreateDialog from '@/components/tasks/TaskCreateDialog.vue'
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel.vue'
 import TaskFilters from '@/components/tasks/TaskFilters.vue'
+import TaskMoveDialog from '@/components/tasks/TaskMoveDialog.vue'
 import TaskPriorityIcon from '@/components/tasks/TaskPriorityIcon.vue'
+import TaskRowContextMenu from '@/components/tasks/TaskRowContextMenu.vue'
 import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
 import TaskTreeRow from '@/components/tasks/TaskTreeRow.vue'
+import { TASK_PRIORITY_META, TASK_STATUS_META } from '@/components/tasks/taskMeta'
 import { SSE_VARIANTS } from '../lib/sse'
 
 const route = useRoute()
@@ -447,6 +452,185 @@ function onStale(): void {
   void refreshDetail()
 }
 
+// ---- 行级右键动作（状态/优先级/认领/移除；写路径行 revision 过期 → 409
+//      由拦截器 toast + 重载对齐，mock 抛错不走 axios 需手动出口）----
+
+function afterWrite(task: Task): void {
+  if (selected.value?.id === task.id) selected.value = task
+  scheduleReload()
+}
+
+async function setStatus(task: Task, status: TaskStatus): Promise<void> {
+  if (task.status === status) return
+  try {
+    const updated = await taskApi.updateTask(task.id, { expected_revision: task.revision, status })
+    toast.success(`「${task.title}」已置为「${TASK_STATUS_META[status].label}」。`)
+    afterWrite(updated)
+  } catch (e) {
+    if (TASKS_MOCK) notifyApiError(e)
+    scheduleReload()
+  }
+}
+
+async function setPriority(task: Task, priority: TaskPriority): Promise<void> {
+  if (task.priority === priority) return
+  try {
+    const updated = await taskApi.updateTask(task.id, {
+      expected_revision: task.revision,
+      priority,
+    })
+    toast.success(`「${task.title}」优先级已置为「${TASK_PRIORITY_META[priority].label}」。`)
+    afterWrite(updated)
+  } catch (e) {
+    if (TASKS_MOCK) notifyApiError(e)
+    scheduleReload()
+  }
+}
+
+async function claimFromRow(task: Task): Promise<void> {
+  try {
+    const { task: updated } = await taskApi.claimTask(task.id, { expected_revision: task.revision })
+    toast.success(`已认领「${task.title}」，租约已启动。`)
+    afterWrite(updated)
+  } catch (e) {
+    if (TASKS_MOCK) notifyApiError(e)
+    scheduleReload()
+  }
+}
+
+// 移除 = 软删除（协议无 DELETE，T1 裁决：取消走 status=cancelled）；已取消则恢复。
+async function removeFromRow(task: Task): Promise<void> {
+  const restoring = task.status === 'cancelled'
+  try {
+    const updated = await taskApi.updateTask(task.id, {
+      expected_revision: task.revision,
+      status: restoring ? 'open' : 'cancelled',
+    })
+    toast.success(restoring ? `「${task.title}」已恢复为待办。` : `「${task.title}」已移除（设为取消）。`)
+    afterWrite(updated)
+  } catch (e) {
+    if (TASKS_MOCK) notifyApiError(e)
+    scheduleReload()
+  }
+}
+
+// ---- 移动到…（右键入口；懒加载树选择器）----
+
+const moveTarget = ref<Task | null>(null)
+
+// ---- 拖拽换父 / 兄弟重排（协议 2.2 move position；原生 HTML5 DnD）----
+// 落点三态：行上 30% / 下 30% = 兄弟插入线（插入到该行所在兄弟列表），
+// 中段 = 挂为该行子任务（追加尾部）。行间空白 = 移到根层。
+
+type DropMode = 'before' | 'after' | 'child'
+const dragging = ref<Task | null>(null)
+const dropIndicator = ref<{ taskId: string; mode: DropMode } | null>(null)
+
+function onDragStart(e: DragEvent, task: Task): void {
+  dragging.value = task
+  e.dataTransfer?.setData('text/plain', task.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+// targetId 是否在已加载的 rootId 子树内（防自挂/挂到子孙的前端预拦；
+// 未展开的层级服务端环检测兜底 400）。
+function inLoadedSubtree(rootId: string, targetId: string): boolean {
+  if (rootId === targetId) return true
+  for (const kid of childrenByContainer.value.get(rootId) ?? []) {
+    if (inLoadedSubtree(kid.id, targetId)) return true
+  }
+  return false
+}
+
+function onDragOver(e: DragEvent, row: FlatRow): void {
+  if (!dragging.value || row.kind !== 'task' || !e.dataTransfer) return
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const ratio = (e.clientY - rect.top) / rect.height
+  const mode: DropMode = ratio < 0.3 ? 'before' : ratio > 0.7 ? 'after' : 'child'
+  // before/after 落进该行所在兄弟列表（parent_id=null = 根层）；child 落进该行。
+  const containerId = mode === 'child' ? row.task.id : row.task.parent_id
+  if (containerId && inLoadedSubtree(dragging.value.id, containerId)) return // 成环：不放行
+  e.preventDefault()
+  e.stopPropagation()
+  e.dataTransfer.dropEffect = 'move'
+  if (dropIndicator.value?.taskId !== row.task.id || dropIndicator.value.mode !== mode) {
+    dropIndicator.value = { taskId: row.task.id, mode }
+  }
+}
+
+function onDragLeave(e: DragEvent, row: FlatRow): void {
+  if (row.kind !== 'task') return
+  const next = e.relatedTarget as Node | null
+  if (next && (e.currentTarget as HTMLElement).contains(next)) return
+  if (dropIndicator.value?.taskId === row.task.id) dropIndicator.value = null
+}
+
+// 插入线落点 → move 项：position = 摘除前列表中目标行下标（服务端 2.2 语义，
+// 兄弟列表即服务端返回序）；目标行不在已载列表时缺省追加。
+function dropItem(drag: Task, mode: DropMode, target: Task): TaskMoveItem {
+  if (mode === 'child') {
+    return { task_id: drag.id, parent_id: target.id, expected_revision: drag.revision }
+  }
+  const list = target.parent_id
+    ? (childrenByContainer.value.get(target.parent_id) ?? [])
+    : roots.value
+  const idx = list.findIndex((t) => t.id === target.id)
+  return {
+    task_id: drag.id,
+    parent_id: target.parent_id,
+    expected_revision: drag.revision,
+    ...(idx >= 0 ? { position: mode === 'before' ? idx : idx + 1 } : {}),
+  }
+}
+
+async function onDrop(e: DragEvent, row: FlatRow): Promise<void> {
+  e.preventDefault()
+  e.stopPropagation()
+  const drag = dragging.value
+  const ind = dropIndicator.value
+  dragging.value = null
+  dropIndicator.value = null
+  if (!drag || row.kind !== 'task' || !ind || ind.taskId !== row.task.id) return
+  try {
+    await taskApi.moveTasks(workspaceId.value, [dropItem(drag, ind.mode, row.task)])
+    toast.success(ind.mode === 'child' ? `已移动为「${row.task.title}」的子任务。` : '顺序已更新。')
+  } catch {
+    // 拦截器已 toast（环/revision 冲突整批不生效）；重载对齐视图。
+  }
+  scheduleReload()
+  if (selected.value) void refreshDetail()
+}
+
+function onBackgroundDragOver(e: DragEvent): void {
+  if (!dragging.value) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+}
+
+async function onBackgroundDrop(e: DragEvent): Promise<void> {
+  const drag = dragging.value
+  dragging.value = null
+  dropIndicator.value = null
+  if (!drag) return
+  e.preventDefault()
+  if (drag.parent_id === null) return // 已在根层
+  try {
+    await taskApi.moveTasks(workspaceId.value, [
+      { task_id: drag.id, parent_id: null, expected_revision: drag.revision },
+    ])
+    toast.success('已移到根层。')
+  } catch {
+    // 拦截器已 toast。
+  }
+  scheduleReload()
+  if (selected.value) void refreshDetail()
+}
+
+function onDragEnd(): void {
+  dragging.value = null
+  dropIndicator.value = null
+}
+
 // ---- 行更新闪烁：revision 变化的可见行走一次底色动画（SSE/模拟事件可感知）----
 
 watch(rows, (next) => {
@@ -528,126 +712,170 @@ onUnmounted(() => {
     />
 
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
-      <!-- 左栏：树 / 搜索结果 -->
+      <!-- 左栏：树 / 搜索结果。空白区 = 拖拽的根层落点（移到根层末尾）。 -->
       <Card class="flex min-h-[60vh] flex-col overflow-hidden">
-        <CardContent class="min-h-0 flex-1 overflow-y-auto p-2">
-          <!-- 初始加载骨架（整树） -->
-          <div v-if="loading && !rows.length && mode === 'tree'" class="flex flex-col gap-2 p-2">
-            <Skeleton v-for="i in 8" :key="i" class="h-8" :style="{ width: `${95 - i * 6}%` }" />
-          </div>
-
-          <!-- 搜索骨架 -->
-          <div v-else-if="loading && mode === 'search' && !hits.length" class="flex flex-col gap-2 p-2">
-            <Skeleton v-for="i in 6" :key="i" class="h-9 w-full" />
-          </div>
-
-          <!-- 搜索结果模式 -->
-          <template v-else-if="mode === 'search'">
-            <p class="text-muted-foreground px-2 py-1 text-xs">
-              查询结果（{{ hits.length }} 条<template v-if="searchCursor">，尚有更多</template>）——「返回树」恢复树模式。
-            </p>
-            <TransitionGroup v-if="hits.length" tag="div" name="tree-row" class="relative flex flex-col">
-              <button
-                v-for="hit in hits"
-                :key="hit.id"
-                type="button"
-                class="hover:bg-muted/60 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
-                :class="[
-                  selected?.id === hit.id ? 'bg-muted' : '',
-                  flashIds.has(hit.id) ? 'task-row-flash' : '',
-                ]"
-                @click="openDetail(hit)"
-              >
-                <TaskStatusBadge :status="hit.status" show-label class="w-[62px] shrink-0" />
-                <TaskPriorityIcon :priority="hit.priority" />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-sm">{{ hit.title }}</span>
-                  <span class="text-muted-foreground block truncate text-xs">
-                    {{ memberName(hit.assignee_actor_id) }}
-                  </span>
-                </span>
-                <Badge
-                  v-for="t in hit.tags.slice(0, 2)"
-                  :key="t.id"
-                  variant="outline"
-                  class="hidden shrink-0 lg:inline-flex"
-                >
-                  {{ t.name }}
-                </Badge>
-                <Badge v-if="hit.score !== undefined" variant="outline" class="shrink-0">
-                  匹配 {{ Math.round(hit.score * 100) }}%
-                </Badge>
-              </button>
-            </TransitionGroup>
-            <!-- 搜索续拉（S7-1）：还有剩余页时出现 -->
-            <div v-if="searchCursor" class="px-2 py-1.5">
-              <Button
-                variant="outline"
-                size="sm"
-                class="w-full"
-                :disabled="searchLoadingMore"
-                @click="loadSearchMore"
-              >
-                <Spinner v-if="searchLoadingMore" data-icon="inline-start" />
-                {{ searchLoadingMore ? '加载中…' : `加载更多（已显示 ${hits.length} 条）` }}
-              </Button>
-            </div>
-            <Empty v-if="!loading && !hits.length">
-              <EmptyHeader>
-                <EmptyTitle>没有匹配的任务。</EmptyTitle>
-                <EmptyDescription>放宽过滤条件，或换一个关键词。</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          </template>
-
-          <!-- 树模式 -->
-          <template v-else>
-            <TransitionGroup v-if="rows.length" tag="div" name="tree-row" class="relative flex flex-col">
-              <!-- 子节点必须单根：template v-for 的多根 fragment 会让 TransitionGroup
-                   的 vnode 追踪错位（离开页面卸载时 unmount 崩溃 → 路由视图卡死）。 -->
-              <div v-for="row in rows" :key="rowKey(row)">
-                <template v-if="row.kind === 'task'">
-                  <TaskTreeRow
-                    :row="row"
-                    :selected="selected?.id === row.task.id"
-                    :assignee="membersById.get(row.task.assignee_actor_id ?? '') ?? null"
-                    :flash="flashIds.has(row.task.id)"
-                    @select="openDetail(row.task)"
-                    @toggle="toggle(row.task)"
-                  />
-                  <!-- 展开容器的子层懒加载骨架 -->
-                  <div
-                    v-if="expandingIds.has(row.task.id)"
-                    class="mb-1 flex flex-col gap-1 py-1"
-                    :style="{ paddingLeft: `${(row.depth + 1) * 18 + 6}px` }"
-                  >
-                    <Skeleton class="h-7 w-1/2" />
-                    <Skeleton class="h-7 w-1/3" />
-                  </div>
-                </template>
-                <!-- 容器剩余页（S7-1）：出现在该容器子层末尾 -->
-                <button
-                  v-else
-                  type="button"
-                  class="hover:bg-muted/60 text-muted-foreground flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                  :style="{ paddingLeft: `${row.depth * 18 + 24}px` }"
-                  :disabled="loadingMoreContainer !== null"
-                  @click="loadTreeMore(row.containerId)"
-                >
-                  <Spinner v-if="loadingMoreContainer === row.containerId" class="size-3.5" />
-                  {{ loadingMoreContainer === row.containerId
-                    ? '加载中…'
-                    : `加载更多（该层已显示 ${containerCount(row.containerId)} 项）` }}
-                </button>
+        <CardContent
+          class="min-h-0 flex-1 overflow-y-auto p-2"
+          @dragover="onBackgroundDragOver"
+          @drop="onBackgroundDrop"
+        >
+          <!-- 骨架 ⇄ 内容平滑交换：树骨架 5 行（原 8 行，任务少时 矮→高→矮
+               跳动明显）、搜索骨架 4 行，行高与真实行（h-8 一档）对齐。 -->
+          <LoadSwap
+            :loading="(loading && !rows.length && mode === 'tree') || (loading && mode === 'search' && !hits.length)"
+          >
+            <template #skeleton>
+              <div v-if="mode === 'search'" class="flex flex-col gap-2 p-2">
+                <Skeleton v-for="i in 4" :key="i" class="h-8 w-full" />
               </div>
-            </TransitionGroup>
-            <Empty v-if="!loading && !rows.length">
-              <EmptyHeader>
-                <EmptyTitle>没有任务。</EmptyTitle>
-                <EmptyDescription>当前过滤条件下无结果，或工作区还没有任务。</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          </template>
+              <div v-else class="flex flex-col gap-2 p-2">
+                <Skeleton v-for="i in 5" :key="i" class="h-8" :style="{ width: `${95 - i * 6}%` }" />
+              </div>
+            </template>
+
+            <template #default>
+              <!-- 搜索结果模式 -->
+              <template v-if="mode === 'search'">
+                <p class="text-muted-foreground px-2 py-1 text-xs">
+                  查询结果（{{ hits.length }} 条<template v-if="searchCursor">，尚有更多</template>）——「返回树」恢复树模式。
+                </p>
+                <TransitionGroup v-if="hits.length" tag="div" name="tree-row" class="relative flex flex-col">
+                  <!-- 单根 keyed div 包裹：ContextMenu 可能渲染多根 fragment，
+                       直接作为 TransitionGroup 子节点会让 vnode 追踪错位（同树模式）。 -->
+                  <div v-for="hit in hits" :key="hit.id">
+                    <TaskRowContextMenu
+                      :task="hit"
+                      @open-detail="openDetail(hit)"
+                      @create-subtask="openCreate(null)"
+                      @status="(s) => setStatus(hit, s)"
+                      @priority="(p) => setPriority(hit, p)"
+                      @claim="claimFromRow(hit)"
+                      @move="moveTarget = hit"
+                      @remove="removeFromRow(hit)"
+                    >
+                      <button
+                        type="button"
+                        class="hover:bg-muted/60 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
+                        :class="[
+                          selected?.id === hit.id ? 'bg-muted' : '',
+                          flashIds.has(hit.id) ? 'task-row-flash' : '',
+                        ]"
+                        @click="openDetail(hit)"
+                      >
+                        <TaskStatusBadge :status="hit.status" show-label class="w-[62px] shrink-0" />
+                        <TaskPriorityIcon :priority="hit.priority" />
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate text-sm">{{ hit.title }}</span>
+                          <span class="text-muted-foreground block truncate text-xs">
+                            {{ memberName(hit.assignee_actor_id) }}
+                          </span>
+                        </span>
+                        <Badge
+                          v-for="t in hit.tags.slice(0, 2)"
+                          :key="t.id"
+                          variant="outline"
+                          class="hidden shrink-0 lg:inline-flex"
+                        >
+                          {{ t.name }}
+                        </Badge>
+                        <Badge v-if="hit.score !== undefined" variant="outline" class="shrink-0">
+                          匹配 {{ Math.round(hit.score * 100) }}%
+                        </Badge>
+                      </button>
+                    </TaskRowContextMenu>
+                  </div>
+                </TransitionGroup>
+                <!-- 搜索续拉（S7-1）：还有剩余页时出现 -->
+                <div v-if="searchCursor" class="px-2 py-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="w-full"
+                    :disabled="searchLoadingMore"
+                    @click="loadSearchMore"
+                  >
+                    <Spinner v-if="searchLoadingMore" data-icon="inline-start" />
+                    {{ searchLoadingMore ? '加载中…' : `加载更多（已显示 ${hits.length} 条）` }}
+                  </Button>
+                </div>
+                <Empty v-if="!loading && !hits.length">
+                  <EmptyHeader>
+                    <EmptyTitle>没有匹配的任务。</EmptyTitle>
+                    <EmptyDescription>放宽过滤条件，或换一个关键词。</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              </template>
+
+              <!-- 树模式 -->
+              <template v-else>
+                <TransitionGroup v-if="rows.length" tag="div" name="tree-row" class="relative flex flex-col">
+                  <!-- 子节点必须单根：template v-for 的多根 fragment 会让 TransitionGroup
+                       的 vnode 追踪错位（离开页面卸载时 unmount 崩溃 → 路由视图卡死）。 -->
+                  <div v-for="row in rows" :key="rowKey(row)">
+                    <template v-if="row.kind === 'task'">
+                      <TaskRowContextMenu
+                        :task="row.task"
+                        :has-children="row.hasChildren"
+                        :expanded="row.expanded"
+                        @open-detail="openDetail(row.task)"
+                        @toggle="toggle(row.task)"
+                        @create-subtask="openCreate(row.task)"
+                        @status="(s) => setStatus(row.task, s)"
+                        @priority="(p) => setPriority(row.task, p)"
+                        @claim="claimFromRow(row.task)"
+                        @move="moveTarget = row.task"
+                        @remove="removeFromRow(row.task)"
+                      >
+                        <TaskTreeRow
+                          :row="row"
+                          :selected="selected?.id === row.task.id"
+                          :assignee="membersById.get(row.task.assignee_actor_id ?? '') ?? null"
+                          :flash="flashIds.has(row.task.id)"
+                          :drop-mode="dropIndicator?.taskId === row.task.id ? dropIndicator.mode : null"
+                          @select="openDetail(row.task)"
+                          @toggle="toggle(row.task)"
+                          @dragstart="onDragStart($event, row.task)"
+                          @dragover="onDragOver($event, row)"
+                          @dragleave="onDragLeave($event, row)"
+                          @drop="onDrop($event, row)"
+                          @dragend="onDragEnd"
+                        />
+                      </TaskRowContextMenu>
+                      <!-- 展开容器的子层懒加载骨架 -->
+                      <div
+                        v-if="expandingIds.has(row.task.id)"
+                        class="mb-1 flex flex-col gap-1 py-1"
+                        :style="{ paddingLeft: `${(row.depth + 1) * 18 + 6}px` }"
+                      >
+                        <Skeleton class="h-7 w-1/2" />
+                        <Skeleton class="h-7 w-1/3" />
+                      </div>
+                    </template>
+                    <!-- 容器剩余页（S7-1）：出现在该容器子层末尾 -->
+                    <button
+                      v-else
+                      type="button"
+                      class="hover:bg-muted/60 text-muted-foreground flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                      :style="{ paddingLeft: `${row.depth * 18 + 24}px` }"
+                      :disabled="loadingMoreContainer !== null"
+                      @click="loadTreeMore(row.containerId)"
+                    >
+                      <Spinner v-if="loadingMoreContainer === row.containerId" class="size-3.5" />
+                      {{ loadingMoreContainer === row.containerId
+                        ? '加载中…'
+                        : `加载更多（该层已显示 ${containerCount(row.containerId)} 项）` }}
+                    </button>
+                  </div>
+                </TransitionGroup>
+                <Empty v-if="!loading && !rows.length">
+                  <EmptyHeader>
+                    <EmptyTitle>没有任务。</EmptyTitle>
+                    <EmptyDescription>当前过滤条件下无结果，或工作区还没有任务。</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              </template>
+            </template>
+          </LoadSwap>
         </CardContent>
         <div class="text-muted-foreground border-t px-3 py-1.5 text-xs">
           {{
@@ -718,6 +946,16 @@ onUnmounted(() => {
       :tags="tagDict"
       :parent-title="createParent.title"
       @submit="handleCreate"
+    />
+
+    <TaskMoveDialog
+      :open="moveTarget !== null"
+      :task="moveTarget"
+      :workspace-id="workspaceId"
+      @update:open="(v) => {
+        if (!v) moveTarget = null
+      }"
+      @moved="afterWrite"
     />
 
     <EventSimulator

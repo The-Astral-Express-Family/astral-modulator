@@ -12,7 +12,13 @@ import type { Lease, Member, Page, Tag, Task, TaskSearchHit } from './types'
 import { TASKS_MOCK } from '../lib/mockMode'
 import { mockTaskApi, subscribeMockEvents } from '../mocks/taskMock'
 
-export type { TaskCreatePayload, TaskFilterParams, TaskSearchParams, TaskUpdatePayload } from './modules/task'
+export type {
+  TaskCreatePayload,
+  TaskFilterParams,
+  TaskMoveItem,
+  TaskSearchParams,
+  TaskUpdatePayload,
+} from './modules/task'
 
 export interface TaskApi {
   listWorkspaceChildren(
@@ -30,6 +36,12 @@ export interface TaskApi {
     payload: { expected_revision: number; lease_seconds?: number },
     opts?: CallOpts,
   ): Promise<{ task: Task; lease: Lease }>
+  // 批量移动 / 兄弟重排（协议 2.2）：拖拽落点与右键「移动到」共用。
+  moveTasks(
+    workspaceId: string,
+    items: realTask.TaskMoveItem[],
+    opts?: CallOpts,
+  ): Promise<{ items: Task[] }>
   renewLease(taskId: string, leaseSeconds?: number, opts?: CallOpts): Promise<Lease>
   releaseLease(taskId: string, opts?: CallOpts): Promise<void>
   attachTaskTag(taskId: string, tagId: string, expectedRevision?: number, opts?: CallOpts): Promise<Task>

@@ -113,6 +113,31 @@ export function claimTask(
   })
 }
 
+// ---- 移动 / 重排（协议 2.2）----
+
+export interface TaskMoveItem {
+  task_id: string
+  /** null = 移到根层 */
+  parent_id: string | null
+  expected_revision: number
+  /** 目标兄弟序位（0 起，插入到该下标当前元素之前）；缺省 = 追加末尾 */
+  position?: number
+}
+
+// 批量移动（同调用完成换父与兄弟内重排）：整批单事务全有或全无；
+// 环/自挂/revision 冲突任一命中整批不生效。拖拽落点、右键「移动到」共用。
+export function moveTasks(
+  workspaceId: string,
+  items: TaskMoveItem[],
+  opts: CallOpts = {},
+): Promise<{ items: Task[] }> {
+  return apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks/move`, {
+    method: 'POST',
+    body: { items },
+    ...opts,
+  })
+}
+
 export function renewLease(
   taskId: string,
   leaseSeconds?: number,

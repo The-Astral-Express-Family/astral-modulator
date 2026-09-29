@@ -122,6 +122,7 @@ function buildTask(def: TaskDef): Task {
     priority: def.priority ?? 'normal',
     assignee_actor_id: def.assignee?.id ?? null,
     revision: 1 + (def.lease ? 1 : 0) + (def.status !== 'open' ? 1 : 0),
+    position: 0, // 由下方第二遍填充
     tags: (def.tags ?? []).map((name) => {
       const t = DEMO_TAGS.find((cand) => cand.name === name)
       if (!t) throw new Error(`fixture: unknown tag ${name}`)
@@ -148,6 +149,20 @@ for (const t of DEMO_TASKS) {
   if (t.parent_id) countById.set(t.parent_id, (countById.get(t.parent_id) ?? 0) + 1)
 }
 for (const t of DEMO_TASKS) t.children_count = countById.get(t.id) ?? 0
+
+// 第三遍（协议 2.2）：兄弟排序键 position——夹具 n 大 = 创建晚（展示序为
+// n 降序），按同父分组以 n 降序编 0..k-1，保持演示数据既有视觉顺序。
+const siblingsById = new Map<string, Task[]>()
+for (const t of DEMO_TASKS) {
+  const key = t.parent_id ?? '(root)'
+  const list = siblingsById.get(key) ?? []
+  list.push(t)
+  siblingsById.set(key, list)
+}
+for (const list of siblingsById.values()) {
+  list.sort((a, b) => (a.id < b.id ? 1 : -1)) // id 含 n，n 降序
+  list.forEach((t, i) => (t.position = i))
+}
 
 // 「模拟他人操作」用的演员池（排除当前用户在视图里的身份）。
 export const OTHER_ACTORS: Actor[] = [AGENT_NOVA, ALING]

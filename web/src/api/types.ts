@@ -178,6 +178,8 @@ export interface Task {
   priority: TaskPriority
   assignee_actor_id: ID | null
   revision: number
+  /** 兄弟排序键（协议 2.2）：同一父容器子层内 0 起，children 按 position 升序返回 */
+  position: number
   tags: Tag[]
   children_count: number
   lease?: Lease | null

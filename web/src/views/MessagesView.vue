@@ -26,6 +26,7 @@ import { fmtTime, shortId } from '@/lib/format'
 import { fromSelectValue, SELECT_ALL, toSelectValue } from '@/lib/selectAll'
 import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -216,6 +217,7 @@ function emptyTask(): TaskSearchHit {
     description: '',
     status: 'open',
     priority: 'normal',
+    position: 0,
     assignee_actor_id: null,
     revision: 1,
     tags: [],
@@ -409,11 +411,13 @@ watch(workspaceId, () => {
           </span>
         </div>
 
-        <div v-if="feedLoading && !feedItems.length" class="flex flex-col gap-2">
-          <Skeleton v-for="i in 5" :key="i" class="h-16" :style="{ width: `${96 - i * 4}%` }" />
-        </div>
-
-        <template v-else-if="visibleFeedItems.length">
+        <LoadSwap :loading="feedLoading && !feedItems.length">
+          <template #skeleton>
+            <div class="flex flex-col gap-2">
+              <Skeleton v-for="i in 4" :key="i" class="h-16" :style="{ width: `${96 - i * 4}%` }" />
+            </div>
+          </template>
+          <template v-if="visibleFeedItems.length">
           <div
             v-for="msg in visibleFeedItems"
             :key="msg.id"
@@ -447,20 +451,21 @@ watch(workspaceId, () => {
           >
             加载更早的消息
           </Button>
-        </template>
+          </template>
 
-        <Empty v-else-if="feedLoaded" class="border">
-          <EmptyHeader>
-            <EmptyTitle>没有可见消息。</EmptyTitle>
-            <EmptyDescription>
-              {{
-                typeFilter !== 'all' || actorFilter
-                  ? '当前过滤条件下无结果，试着放宽过滤。'
-                  : '还没有消息：用下方表单发一条广播试试。'
-              }}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+          <Empty v-else-if="feedLoaded" class="border">
+            <EmptyHeader>
+              <EmptyTitle>没有可见消息。</EmptyTitle>
+              <EmptyDescription>
+                {{
+                  typeFilter !== 'all' || actorFilter
+                    ? '当前过滤条件下无结果，试着放宽过滤。'
+                    : '还没有消息：用下方表单发一条广播试试。'
+                }}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </LoadSwap>
       </CardContent>
     </Card>
 
@@ -513,11 +518,13 @@ watch(workspaceId, () => {
             </code>
           </div>
 
-          <div v-if="threadLoading && !threadItems.length" class="flex flex-col gap-2">
-            <Skeleton v-for="i in 4" :key="i" class="h-14" :style="{ width: `${94 - i * 5}%` }" />
-          </div>
-
-          <template v-else-if="threadItems.length">
+          <LoadSwap :loading="threadLoading && !threadItems.length">
+            <template #skeleton>
+              <div class="flex flex-col gap-2">
+                <Skeleton v-for="i in 4" :key="i" class="h-14" :style="{ width: `${94 - i * 5}%` }" />
+              </div>
+            </template>
+            <template v-if="threadItems.length">
             <div class="flex flex-col gap-1.5">
               <div
                 v-for="msg in threadItems"
@@ -543,14 +550,15 @@ watch(workspaceId, () => {
             >
               加载更新的消息
             </Button>
-          </template>
+            </template>
 
-          <Empty v-else-if="threadLoaded" class="border">
-            <EmptyHeader>
-              <EmptyTitle>该任务还没有消息。</EmptyTitle>
-              <EmptyDescription>用下方表单发起第一条任务消息。</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+            <Empty v-else-if="threadLoaded" class="border">
+              <EmptyHeader>
+                <EmptyTitle>该任务还没有消息。</EmptyTitle>
+                <EmptyDescription>用下方表单发起第一条任务消息。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </LoadSwap>
         </template>
 
         <Empty v-else class="border">
