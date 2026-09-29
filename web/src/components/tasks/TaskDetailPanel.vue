@@ -53,6 +53,16 @@ const availableTags = computed(() => {
   return props.allTags.filter((t) => !attached.has(t.id))
 })
 
+// 2.2 依赖视图（服务端恒填充）：blocked_by 非空 = 存在未完成依赖，即被阻塞。
+const isBlocked = computed(() => props.task.blocked_by.length > 0)
+const dependencyGroups = computed(() =>
+  [
+    { key: 'blocked_by', label: '被阻塞于', ids: props.task.blocked_by },
+    { key: 'blocks', label: '阻塞着', ids: props.task.blocks },
+    { key: 'related', label: '关联', ids: props.task.related },
+  ].filter((g) => g.ids.length > 0),
+)
+
 // ---- 编辑态（切换选中任务时重置）----
 
 const editingTitle = ref(false)
@@ -168,6 +178,7 @@ const actorLabel = (actor: Actor | null): string => actor?.display_name ?? '（�
       <div class="flex items-start justify-between gap-2">
         <CardTitle class="flex min-w-0 items-center gap-2 text-base">
           <TaskStatusBadge :status="task.status" />
+          <Badge v-if="isBlocked" variant="destructive">被阻塞</Badge>
           <span class="truncate">{{ task.title }}</span>
         </CardTitle>
         <Button
@@ -296,6 +307,27 @@ const actorLabel = (actor: Actor | null): string => actor?.display_name ?? '（�
             （工作区暂无标签）
           </span>
         </div>
+      </div>
+
+      <Separator />
+
+      <!-- 依赖（2.2 task_dependencies：只读展示，增删走 CLI/服务端 API） -->
+      <div class="flex flex-col gap-1.5">
+        <Label>依赖</Label>
+        <div v-if="dependencyGroups.length" class="flex flex-col gap-1.5">
+          <div v-for="group in dependencyGroups" :key="group.key" class="flex flex-wrap items-center gap-1.5">
+            <span class="text-muted-foreground text-xs">{{ group.label }}</span>
+            <code
+              v-for="id in group.ids"
+              :key="id"
+              class="bg-muted rounded px-1.5 py-0.5 font-mono text-xs"
+              :title="id"
+            >
+              {{ shortId(id) }}
+            </code>
+          </div>
+        </div>
+        <span v-else class="text-muted-foreground text-xs">（无依赖关系）</span>
       </div>
 
       <Separator />
