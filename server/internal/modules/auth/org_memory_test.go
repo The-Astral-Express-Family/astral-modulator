@@ -10,7 +10,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 )
 
-// TestRegisterBootstrapSeedsOrgMemory：冷启动注册（无 invite_code 的首账号
+// TestRegisterBootstrapSeedsOrgMemory：冷启动注册（无 registration_code 的首账号
 // 路径）在同一事务内种子组织记忆 workspace（M1 裁决，round 37）——
 // slug=org-memory + 新 actor 的 owner membership + workspace.create audit。
 func TestRegisterBootstrapSeedsOrgMemory(t *testing.T) {
