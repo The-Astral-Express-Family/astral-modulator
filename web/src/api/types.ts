@@ -174,6 +174,12 @@ export interface Task {
   position: number
   tags: Tag[]
   children_count: number
+  /** 2.2 依赖视图：本任务依赖（等待）的任务 id（blocks 边出向，恒填充） */
+  blocked_by: ID[]
+  /** 依赖本任务的任务 id（blocks 边入向，恒填充） */
+  blocks: ID[]
+  /** relates 边的对端任务 id（恒填充） */
+  related: ID[]
   created_at: string
   updated_at: string
 }

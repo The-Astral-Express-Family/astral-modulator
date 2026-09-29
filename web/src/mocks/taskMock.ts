@@ -215,6 +215,9 @@ function createInContainer(parentId: string | null, payload: TaskCreatePayload):
     position: siblingsOf(parentId).length, // 2.2：创建追加兄弟尾部
     tags: resolvedTags.map(clone),
     children_count: 0,
+    blocked_by: [],
+    blocks: [],
+    related: [],
     created_at: now,
     updated_at: now,
   }

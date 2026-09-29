@@ -121,6 +121,9 @@ function buildTask(def: TaskDef): Task {
     assignee_actor_id: def.assignee?.id ?? null,
     revision: 1 + (def.status !== 'open' ? 1 : 0),
     position: 0, // 由下方第二遍填充
+    blocked_by: [],
+    blocks: [],
+    related: [],
     tags: (def.tags ?? []).map((name) => {
       const t = DEMO_TAGS.find((cand) => cand.name === name)
       if (!t) throw new Error(`fixture: unknown tag ${name}`)
