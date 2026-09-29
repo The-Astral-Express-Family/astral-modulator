@@ -23,6 +23,7 @@ import { useSessionStore } from '@/stores/session'
 import { fmtTime, shortId } from '@/lib/format'
 import { fromSelectValue, SELECT_ALL, toSelectValue } from '@/lib/selectAll'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -292,17 +293,19 @@ watch(workspaceId, () => {
           </span>
         </div>
 
-        <div v-if="wsLoading && !wsItems.length" class="flex flex-col gap-2">
-          <Skeleton v-for="i in 5" :key="i" class="h-16" :style="{ width: `${96 - i * 4}%` }" />
-        </div>
-
-        <Empty v-else-if="wsError" class="border">
-          <EmptyHeader>
-            <EmptyTitle>审计加载失败。</EmptyTitle>
-            <EmptyDescription>{{ wsError }}</EmptyDescription>
-          </EmptyHeader>
-          <Button variant="outline" size="sm" @click="loadWorkspace()">重试</Button>
-        </Empty>
+        <LoadSwap :loading="wsLoading && !wsItems.length">
+          <template #skeleton>
+            <div class="flex flex-col gap-2">
+              <Skeleton v-for="i in 4" :key="i" class="h-16" :style="{ width: `${96 - i * 4}%` }" />
+            </div>
+          </template>
+          <Empty v-if="wsError" class="border">
+            <EmptyHeader>
+              <EmptyTitle>审计加载失败。</EmptyTitle>
+              <EmptyDescription>{{ wsError }}</EmptyDescription>
+            </EmptyHeader>
+            <Button variant="outline" size="sm" @click="loadWorkspace()">重试</Button>
+          </Empty>
 
         <template v-else-if="wsItems.length">
           <div
@@ -364,6 +367,7 @@ watch(workspaceId, () => {
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
+        </LoadSwap>
       </CardContent>
     </Card>
 
@@ -426,19 +430,21 @@ watch(workspaceId, () => {
           </span>
         </div>
 
-        <div v-if="adminLoading && !adminItems.length" class="flex flex-col gap-2">
-          <Skeleton v-for="i in 5" :key="i" class="h-16" :style="{ width: `${96 - i * 4}%` }" />
-        </div>
-
-        <Empty v-else-if="adminError" class="border">
-          <EmptyHeader>
-            <EmptyTitle>平台审计加载失败。</EmptyTitle>
-            <EmptyDescription>
-              {{ adminError }}（platform:audit:read 仅平台管理员持有）
-            </EmptyDescription>
-          </EmptyHeader>
-          <Button variant="outline" size="sm" @click="loadAdmin()">重试</Button>
-        </Empty>
+        <LoadSwap :loading="adminLoading && !adminItems.length">
+          <template #skeleton>
+            <div class="flex flex-col gap-2">
+              <Skeleton v-for="i in 4" :key="i" class="h-16" :style="{ width: `${96 - i * 4}%` }" />
+            </div>
+          </template>
+          <Empty v-if="adminError" class="border">
+            <EmptyHeader>
+              <EmptyTitle>平台审计加载失败。</EmptyTitle>
+              <EmptyDescription>
+                {{ adminError }}（platform:audit:read 仅平台管理员持有）
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button variant="outline" size="sm" @click="loadAdmin()">重试</Button>
+          </Empty>
 
         <template v-else-if="adminItems.length">
           <div
@@ -504,6 +510,7 @@ watch(workspaceId, () => {
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
+        </LoadSwap>
       </CardContent>
     </Card>
   </div>

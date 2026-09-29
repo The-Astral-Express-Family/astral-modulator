@@ -28,6 +28,7 @@ import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { fmtTime } from '@/lib/format'
 import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -269,11 +270,13 @@ watch(
             </span>
           </div>
 
-          <div v-if="loading && !conflicts.length" class="flex flex-col gap-2">
-            <Skeleton v-for="i in 4" :key="i" class="h-9" :style="{ width: `${92 - i * 6}%` }" />
-          </div>
-
-          <template v-else-if="conflicts.length">
+          <LoadSwap :loading="loading && !conflicts.length">
+            <template #skeleton>
+              <div class="flex flex-col gap-2">
+                <Skeleton v-for="i in 4" :key="i" class="h-9" :style="{ width: `${92 - i * 6}%` }" />
+              </div>
+            </template>
+            <template v-if="conflicts.length">
             <button
               v-for="c in conflicts"
               :key="c.id"
@@ -311,22 +314,23 @@ watch(
             >
               加载更多
             </Button>
-          </template>
+            </template>
 
-          <Empty v-else-if="loaded" class="border">
-            <EmptyHeader>
-              <EmptyTitle>
-                {{ statusFilter === 'open' ? '没有未解决冲突。' : '没有匹配的冲突。' }}
-              </EmptyTitle>
-              <EmptyDescription>
-                {{
-                  statusFilter === 'open'
-                    ? '文档同步一切正常；push/delete 与远端失配时冲突会出现在这里。'
-                    : '换个状态过滤试试。'
-                }}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+            <Empty v-else-if="loaded" class="border">
+              <EmptyHeader>
+                <EmptyTitle>
+                  {{ statusFilter === 'open' ? '没有未解决冲突。' : '没有匹配的冲突。' }}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {{
+                    statusFilter === 'open'
+                      ? '文档同步一切正常；push/delete 与远端失配时冲突会出现在这里。'
+                      : '换个状态过滤试试。'
+                  }}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </LoadSwap>
         </CardContent>
       </Card>
 
@@ -346,12 +350,14 @@ watch(
         </CardHeader>
         <CardContent class="flex flex-col gap-3">
           <template v-if="selectedId">
-            <div v-if="detailLoading && !detail" class="flex flex-col gap-2">
-              <Skeleton class="h-5 w-2/3" />
-              <Skeleton class="h-32 w-full" />
-            </div>
-
-            <template v-else-if="detail">
+            <LoadSwap :loading="detailLoading && !detail">
+              <template #skeleton>
+                <div class="flex flex-col gap-2">
+                  <Skeleton class="h-5 w-2/3" />
+                  <Skeleton class="h-32 w-full" />
+                </div>
+              </template>
+              <template v-if="detail">
               <!-- base 指针元信息 -->
               <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span class="text-muted-foreground">
@@ -452,6 +458,7 @@ watch(
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
+            </LoadSwap>
           </template>
 
           <Empty v-else class="border">

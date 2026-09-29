@@ -32,6 +32,7 @@ import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { shortId } from '@/lib/format'
 import { useSessionStore } from '@/stores/session'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -409,17 +410,19 @@ watch(workspaceId, () => {
         </p>
       </CardHeader>
       <CardContent>
-        <div v-if="membersLoading && !members.length" class="flex flex-col gap-2">
-          <Skeleton v-for="i in 4" :key="i" class="h-10" :style="{ width: `${92 - i * 8}%` }" />
-        </div>
-
-        <Empty v-else-if="membersError" class="border">
-          <EmptyHeader>
-            <EmptyTitle>成员列表加载失败。</EmptyTitle>
-            <EmptyDescription>{{ membersError }}</EmptyDescription>
-          </EmptyHeader>
-          <Button variant="outline" size="sm" @click="loadMembers">重试</Button>
-        </Empty>
+        <LoadSwap :loading="membersLoading && !members.length">
+          <template #skeleton>
+            <div class="flex flex-col gap-2">
+              <Skeleton v-for="i in 4" :key="i" class="h-10" :style="{ width: `${92 - i * 8}%` }" />
+            </div>
+          </template>
+          <Empty v-if="membersError" class="border">
+            <EmptyHeader>
+              <EmptyTitle>成员列表加载失败。</EmptyTitle>
+              <EmptyDescription>{{ membersError }}</EmptyDescription>
+            </EmptyHeader>
+            <Button variant="outline" size="sm" @click="loadMembers">重试</Button>
+          </Empty>
 
         <Empty v-else-if="membersLoaded && !members.length" class="border">
           <EmptyHeader>
@@ -477,6 +480,7 @@ watch(workspaceId, () => {
             </TableRow>
           </TableBody>
         </Table>
+        </LoadSwap>
       </CardContent>
     </Card>
 
@@ -503,11 +507,13 @@ watch(workspaceId, () => {
           </span>
         </div>
 
-        <div v-if="agentsLoading && !agents.length" class="flex flex-col gap-2">
-          <Skeleton v-for="i in 2" :key="i" class="h-10" :style="{ width: `${90 - i * 10}%` }" />
-        </div>
-
-        <Table v-else-if="agents.length">
+        <LoadSwap :loading="agentsLoading && !agents.length">
+          <template #skeleton>
+            <div class="flex flex-col gap-2">
+              <Skeleton v-for="i in 2" :key="i" class="h-10" :style="{ width: `${90 - i * 10}%` }" />
+            </div>
+          </template>
+          <Table v-if="agents.length">
           <TableHeader>
             <TableRow>
               <TableHead>名称</TableHead>
@@ -547,6 +553,7 @@ watch(workspaceId, () => {
             <EmptyDescription>新建 agent 后为其签发凭证，即可接入 CLI 或自动化任务。</EmptyDescription>
           </EmptyHeader>
         </Empty>
+        </LoadSwap>
       </CardContent>
     </Card>
 
