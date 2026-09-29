@@ -115,9 +115,11 @@ type Credential struct {
 
 func (Credential) TableName() string { return "credentials" }
 
-// Task 见 00003_task_tree.sql / architecture §12。
+// Task 见 00003_task_tree.sql / 00019_task_position.sql / architecture §12。
 // Revision 由应用层在 UPDATE 中显式 +1（TODO.md D5）；乐观并发用
 // UPDATE ... WHERE revision = expected（冲突 0 行 → REVISION_CONFLICT）。
+// Position = 同一父容器子层内 0 起的兄弟序位（协议 2.2）：应用层在创建/移动
+// 事务内维护稠密序位；位移不 bump 兄弟 revision，仅被移动任务自身 bump。
 type Task struct {
 	ID              string  `gorm:"primaryKey;size:40"`
 	WorkspaceID     string  `gorm:"index:idx_tasks_workspace_parent;size:40"`
@@ -128,6 +130,7 @@ type Task struct {
 	Priority        string  `gorm:"size:16"`
 	AssigneeActorID *string `gorm:"size:40"`
 	Revision        int64
+	Position        int64   `gorm:"index:idx_tasks_sibling_order"`
 	CreatedBy       string  `gorm:"size:40"`
 	UpdatedBy       *string `gorm:"size:40"`
 	CreatedAt       time.Time

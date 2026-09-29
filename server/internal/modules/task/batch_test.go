@@ -344,6 +344,193 @@ func TestBatchUpdateTasks(t *testing.T) {
 	}
 }
 
+// setSibling 重设任务兄弟归属与序位（测试造数据：绕过 API 直接落库）。
+func setSibling(t *testing.T, f *fixture, id string, parent *string, pos int64) {
+	t.Helper()
+	var row model.Task
+	if err := f.db.First(&row, "id = ?", id).Error; err != nil {
+		t.Fatal(err)
+	}
+	row.ParentID = parent
+	row.Position = pos
+	if err := f.db.Save(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// siblingIDs 按 position 升序、同位 id 降序（= children 集合排序口径）返回
+// 指定容器的直接子层 id。
+func siblingIDs(t *testing.T, f *fixture, parent *string) []string {
+	t.Helper()
+	q := f.db.Model(&model.Task{}).Where("workspace_id = ? AND parent_id IS NULL", f.wsID)
+	if parent != nil {
+		q = f.db.Model(&model.Task{}).Where("parent_id = ?", *parent)
+	}
+	var rows []model.Task
+	if err := q.Order("position ASC, id DESC").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.ID)
+	}
+	return out
+}
+
+func moveCall(t *testing.T, f *fixture, secret, wsID string, in taskMoveIn) taskBatchOut {
+	t.Helper()
+	out, err := f.m.MoveTasks(context.Background(), principal(t, f, secret), wsID, in)
+	if err != nil {
+		t.Fatalf("MoveTasks: %v", err)
+	}
+	return out
+}
+
+// TestMoveTasksPositionReorder：同父重排（2.2）——C 移到 0 位 = [C,A,B]，
+// 位移兄弟不 bump revision，被移动任务 revision +1 且 position 落位。
+func TestMoveTasksPositionReorder(t *testing.T) {
+	f := setup(t)
+	createTask(t, f, "tsk_a", "A")
+	createTask(t, f, "tsk_b", "B")
+	c := createTask(t, f, "tsk_c", "C")
+	setSibling(t, f, "tsk_a", nil, 0)
+	setSibling(t, f, "tsk_b", nil, 1)
+	setSibling(t, f, "tsk_c", nil, 2)
+
+	moveCall(t, f, f.credA, f.wsID, taskMoveIn{Items: []taskMoveItemIn{
+		{TaskID: "tsk_c", ParentID: nil, ExpectedRevision: c.Revision, Position: intp(0)},
+	}})
+	if got := siblingIDs(t, f, nil); len(got) != 3 || got[0] != "tsk_c" || got[1] != "tsk_a" || got[2] != "tsk_b" {
+		t.Fatalf("root order = %v, want [c a b]", got)
+	}
+	var aRow, cRow model.Task
+	f.db.First(&aRow, "id = ?", "tsk_a")
+	f.db.First(&cRow, "id = ?", "tsk_c")
+	if aRow.Position != 1 || cRow.Position != 0 {
+		t.Fatalf("positions = a:%d c:%d, want 1/0", aRow.Position, cRow.Position)
+	}
+	// 位移兄弟 revision 不动；被移动任务 bump。
+	if aRow.Revision != 1 {
+		t.Fatalf("sibling revision must not bump, got %d", aRow.Revision)
+	}
+	if cRow.Revision != c.Revision+1 {
+		t.Fatalf("moved task revision = %d, want %d", cRow.Revision, c.Revision+1)
+	}
+}
+
+// TestMoveTasksPositionInsertBefore：同父 position 以摘除前列表为准——
+// B 移到 2 位（原 index 2 = C 之前）= 不动；A 移到 2 位（C 之前）= [B,A,C]。
+func TestMoveTasksPositionInsertBefore(t *testing.T) {
+	f := setup(t)
+	a := createTask(t, f, "tsk_a", "A")
+	createTask(t, f, "tsk_b", "B")
+	createTask(t, f, "tsk_c", "C")
+	setSibling(t, f, "tsk_a", nil, 0)
+	setSibling(t, f, "tsk_b", nil, 1)
+	setSibling(t, f, "tsk_c", nil, 2)
+
+	// no-op：B 已在 C 之前。
+	moveCall(t, f, f.credA, f.wsID, taskMoveIn{Items: []taskMoveItemIn{
+		{TaskID: "tsk_b", ParentID: nil, ExpectedRevision: 1, Position: intp(2)},
+	}})
+	if got := siblingIDs(t, f, nil); got[0] != "tsk_a" || got[1] != "tsk_b" || got[2] != "tsk_c" {
+		t.Fatalf("no-op move changed order: %v", got)
+	}
+
+	// A 移到摘除前 index 2（C 之前）：[B,A,C]。
+	moveCall(t, f, f.credA, f.wsID, taskMoveIn{Items: []taskMoveItemIn{
+		{TaskID: "tsk_a", ParentID: nil, ExpectedRevision: a.Revision, Position: intp(2)},
+	}})
+	if got := siblingIDs(t, f, nil); got[0] != "tsk_b" || got[1] != "tsk_a" || got[2] != "tsk_c" {
+		t.Fatalf("insert-before order = %v, want [b a c]", got)
+	}
+}
+
+// TestMoveTasksPositionCrossParent：换父 + 序位一次完成——A 挂到 B 下 0 位
+// （B 已有子 C）→ B 子层 [A,C]，根层收紧为 [B]。
+func TestMoveTasksPositionCrossParent(t *testing.T) {
+	f := setup(t)
+	a := createTask(t, f, "tsk_a", "A")
+	b := createTask(t, f, "tsk_b", "B")
+	createTask(t, f, "tsk_c", "C")
+	setSibling(t, f, "tsk_a", nil, 0)
+	setSibling(t, f, "tsk_b", nil, 1)
+	setSibling(t, f, "tsk_c", &b.ID, 0)
+
+	moveCall(t, f, f.credA, f.wsID, taskMoveIn{Items: []taskMoveItemIn{
+		{TaskID: "tsk_a", ParentID: &b.ID, ExpectedRevision: a.Revision, Position: intp(0)},
+	}})
+	if got := siblingIDs(t, f, &b.ID); len(got) != 2 || got[0] != "tsk_a" || got[1] != "tsk_c" {
+		t.Fatalf("B children = %v, want [a c]", got)
+	}
+	if got := siblingIDs(t, f, nil); len(got) != 1 || got[0] != "tsk_b" {
+		t.Fatalf("roots = %v, want [b]", got)
+	}
+	var bRow model.Task
+	f.db.First(&bRow, "id = ?", "tsk_b")
+	if bRow.Position != 0 {
+		t.Fatalf("root hole not closed: B position = %d", bRow.Position)
+	}
+}
+
+// TestMoveTasksPositionDefaults：缺省 position = 追加末尾（同父与换父一致）；
+// 越界下标收敛到末尾；负数 400。
+func TestMoveTasksPositionDefaults(t *testing.T) {
+	f := setup(t)
+	a := createTask(t, f, "tsk_a", "A")
+	createTask(t, f, "tsk_b", "B")
+	createTask(t, f, "tsk_c", "C")
+	setSibling(t, f, "tsk_a", nil, 0)
+	setSibling(t, f, "tsk_b", nil, 1)
+	setSibling(t, f, "tsk_c", nil, 2)
+
+	// 同父缺省 = 摘除后追加末尾：[B,C,A]。
+	moveCall(t, f, f.credA, f.wsID, taskMoveIn{Items: []taskMoveItemIn{
+		{TaskID: "tsk_a", ParentID: nil, ExpectedRevision: a.Revision},
+	}})
+	if got := siblingIDs(t, f, nil); got[0] != "tsk_b" || got[1] != "tsk_c" || got[2] != "tsk_a" {
+		t.Fatalf("default append = %v, want [b c a]", got)
+	}
+	// 越界收敛到末尾：[B,C,A] 中 B 移到 99 → 仍在末位 [C,A,B]。
+	moveCall(t, f, f.credA, f.wsID, taskMoveIn{Items: []taskMoveItemIn{
+		{TaskID: "tsk_b", ParentID: nil, ExpectedRevision: 1, Position: intp(99)},
+	}})
+	if got := siblingIDs(t, f, nil); got[len(got)-1] != "tsk_b" {
+		t.Fatalf("clamped order = %v, want b last", got)
+	}
+	// 负数 400。
+	p := principal(t, f, f.credA)
+	_, err := f.m.MoveTasks(context.Background(), p, f.wsID, taskMoveIn{Items: []taskMoveItemIn{
+		{TaskID: "tsk_b", ParentID: nil, ExpectedRevision: 2, Position: intp(-1)},
+	}})
+	apiErr, ok := err.(*httpx.APIError)
+	if !ok || apiErr.Status != 400 {
+		t.Fatalf("negative position: got %v, want 400", err)
+	}
+}
+
+func intp(v int) *int { return &v }
+
+// TestCreateTaskTreesPositions：树形创建的兄弟序位——根树按请求顺序追加到
+// 容器尾部；批内新建父任务的儿子从 0 起按请求顺序排。
+func TestCreateTaskTreesPositions(t *testing.T) {
+	f := setup(t)
+	createTask(t, f, "tsk_old", "old")
+	setSibling(t, f, "tsk_old", nil, 0)
+
+	out := treeCall(t, f, f.credA, f.wsID, nil, taskTreesIn{Trees: []taskTreeNodeIn{
+		{Title: "E1", Children: []taskTreeNodeIn{{Title: "S1"}, {Title: "S2"}}},
+		{Title: "E2"},
+	}})
+	if got := siblingIDs(t, f, nil); len(got) != 3 || got[0] != "tsk_old" || got[1] != out.Items[0].Task.ID || got[2] != out.Items[1].Task.ID {
+		t.Fatalf("root order = %v, want [old E1 E2]", got)
+	}
+	epicID := out.Items[0].Task.ID
+	if got := siblingIDs(t, f, &epicID); len(got) != 2 || got[0] != out.Items[0].Children[0].Task.ID || got[1] != out.Items[0].Children[1].Task.ID {
+		t.Fatalf("E1 children order = %v, want request order", got)
+	}
+}
+
 func strptr(s string) *string { return &s }
 
 // idPtr 三态字段的非空指派（**string 内层指向 id）。

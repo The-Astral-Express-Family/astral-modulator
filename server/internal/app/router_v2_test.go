@@ -334,3 +334,95 @@ func TestTaskBatchV2(t *testing.T) {
 		t.Fatalf("revision conflict: %d %v", code, errBody)
 	}
 }
+
+// TestTaskPositionOrderingAndCursor（协议 2.2）：children 按 position 升序返回；
+// 创建追加尾部；move 带 position 同调用完成换父与重排；游标为 position 键集
+// （对客户端不透明，翻页续传即可）。
+func TestTaskPositionOrderingAndCursor(t *testing.T) {
+	ts := newTestServer(t)
+	cookie := loginHuman(t, ts, "position@example.com")
+	api := "/api/v1"
+
+	code, ws := doAuthed(t, ts, cookie, "POST", api+"/workspaces", map[string]any{"name": "pos-demo"})
+	if code != 201 {
+		t.Fatalf("create ws: %d %v", code, ws)
+	}
+	wsID := ws["id"].(string)
+
+	ids := make([]string, 0, 3)
+	for _, title := range []string{"first", "second", "third"} {
+		code, row := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/children",
+			map[string]any{"title": title})
+		if code != 201 {
+			t.Fatalf("create %s: %d %v", title, code, row)
+		}
+		ids = append(ids, row["id"].(string))
+		if row["position"] != float64(len(ids)-1) {
+			t.Fatalf("create must append tail: %s position %v", title, row["position"])
+		}
+	}
+
+	// 排序契约：position 升序 = 创建正序（first, second, third）。
+	assertRootOrder := func(want []string) {
+		t.Helper()
+		code, page := doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children", nil)
+		if code != 200 {
+			t.Fatalf("list children: %d %v", code, page)
+		}
+		got := items(t, page)
+		if len(got) != len(want) {
+			t.Fatalf("root count = %d, want %d", len(got), len(want))
+		}
+		for i, id := range want {
+			if got[i].(map[string]any)["id"] != id {
+				t.Fatalf("root[%d] = %v, want %s", i, got[i], id)
+			}
+		}
+	}
+	assertRootOrder(ids)
+
+	// 重排：third 移到 0 位 → [third, first, second]（其余 revision 不动）。
+	code, mv := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": ids[2], "parent_id": nil, "expected_revision": 1, "position": 0},
+		}})
+	if code != 200 {
+		t.Fatalf("move with position: %d %v", code, mv)
+	}
+	if mv["items"].([]any)[0].(map[string]any)["position"] != float64(0) {
+		t.Fatalf("move result position: %v", mv)
+	}
+	assertRootOrder([]string{ids[2], ids[0], ids[1]})
+
+	// position 键集游标：limit=2 首页 + 续页恰好覆盖剩余（无重复无遗漏）。
+	code, page := doAuthed(t, ts, cookie,
+		"GET", api+"/workspaces/"+wsID+"/children?limit=2", nil)
+	if code != 200 || len(items(t, page)) != 2 || page["next_cursor"] == nil {
+		t.Fatalf("cursor page 1: %d %v", code, page)
+	}
+	firstTwo := items(t, page)
+	code, page2 := doAuthed(t, ts, cookie,
+		"GET", api+"/workspaces/"+wsID+"/children?limit=2&cursor="+page["next_cursor"].(string), nil)
+	if code != 200 || len(items(t, page2)) != 1 {
+		t.Fatalf("cursor page 2: %d %v", code, page2)
+	}
+	last := items(t, page2)[0].(map[string]any)["id"].(string)
+	if firstTwo[0].(map[string]any)["id"] == last ||
+		firstTwo[1].(map[string]any)["id"] == last {
+		t.Fatalf("cursor page overlap: %v / %v", firstTwo, last)
+	}
+
+	// 换父 + 序位一次完成：third 挂到 first 下 0 位（first 无子）。
+	code, mv = doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": ids[2], "parent_id": ids[0], "expected_revision": 2, "position": 0},
+		}})
+	if code != 200 {
+		t.Fatalf("cross-parent move: %d %v", code, mv)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/tasks/"+ids[0]+"/children", nil)
+	if code != 200 || len(items(t, page)) != 1 || items(t, page)[0].(map[string]any)["id"] != ids[2] {
+		t.Fatalf("children after cross-parent move: %d %v", code, page)
+	}
+	assertRootOrder([]string{ids[0], ids[1]})
+}

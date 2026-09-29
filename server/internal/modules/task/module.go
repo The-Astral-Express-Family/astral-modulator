@@ -130,6 +130,7 @@ type taskDTO struct {
 	Priority        string       `json:"priority"`
 	AssigneeActorID *string      `json:"assignee_actor_id"`
 	Revision        int64        `json:"revision"`
+	Position        int64        `json:"position"`
 	Tags            []tag.TagDTO `json:"tags"`
 	ChildrenCount   int64        `json:"children_count"`
 	Lease           *leaseDTO    `json:"lease"`
@@ -138,7 +139,7 @@ type taskDTO struct {
 }
 
 // toTaskDTO 组装任务响应。v2（D15 修订 D11）：tags 恒填充（nil 兜底为空数组）、
-// children_count 恒填充；lease 仅 get/claim 填充非空。
+// children_count 恒填充；lease 仅 get/claim 填充非空；position 恒填充（2.2）。
 func toTaskDTO(t model.Task, lease *model.TaskLease, tags []tag.TagDTO, childCount int64) taskDTO {
 	if tags == nil {
 		tags = []tag.TagDTO{}
@@ -148,7 +149,8 @@ func toTaskDTO(t model.Task, lease *model.TaskLease, tags []tag.TagDTO, childCou
 		Title: t.Title, Description: t.Description,
 		Status: t.Status, Priority: t.Priority,
 		AssigneeActorID: t.AssigneeActorID, Revision: t.Revision,
-		Tags: tags, ChildrenCount: childCount,
+		Position: t.Position,
+		Tags:     tags, ChildrenCount: childCount,
 		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
 	}
