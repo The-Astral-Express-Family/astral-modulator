@@ -37,14 +37,16 @@ type ScoredTask struct {
 }
 
 type SearchParams struct {
-	Regex    string
-	Fuzzy    string
-	ParentID string
-	Tag      string
-	Status   string
-	Assignee string
-	Limit    int
-	Cursor   string // base64 候选集内偏移（候选集已封顶，内存分页稳定）
+	Regex     string
+	Fuzzy     string
+	ParentID  string
+	Tag       string
+	Status    string
+	Assignee  string
+	Blocked   bool   // 2.2：存在未完成的 blocks 依赖
+	BlockedBy string // 2.2：被指定任务阻塞
+	Limit     int
+	Cursor    string // base64 候选集内偏移（候选集已封顶，内存分页稳定）
 }
 
 // Search 执行一次搜索并返回一页结果。调用方已完成 task:read 授权。
@@ -72,6 +74,7 @@ func (m *Module) Search(ctx context.Context, wsID string, params SearchParams) (
 	}
 	query, apiErr := applyTaskFilters(query, taskFilters{
 		Status: params.Status, Tag: params.Tag, Assignee: params.Assignee,
+		Blocked: params.Blocked, BlockedBy: params.BlockedBy,
 	})
 	if apiErr != nil {
 		return nil, "", apiErr

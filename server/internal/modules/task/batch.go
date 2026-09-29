@@ -230,10 +230,11 @@ func (m *Module) enrichFlat(ctx context.Context, created []model.Task) []taskTre
 	}
 	tagsByTask := m.tagsForTasks(ctx, all)
 	counts := m.childCounts(ctx, all)
+	views := m.depViewsForTasks(ctx, all)
 	dtos := make([]taskTreeNodeDTO, len(created))
 	for i := range created {
 		dtos[i] = taskTreeNodeDTO{
-			Task:     toTaskDTO(created[i], nil, tagsByTask[created[i].ID], counts[created[i].ID]),
+			Task:     toTaskDTO(created[i], nil, tagsByTask[created[i].ID], counts[created[i].ID], views[created[i].ID]),
 			Children: []taskTreeNodeDTO{},
 		}
 	}

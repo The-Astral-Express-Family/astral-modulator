@@ -58,9 +58,11 @@ func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID strin
 	} else {
 		query = query.Where("tasks.parent_id = ?", *parentID)
 	}
-	// status/tag/assignee 三件套与 task-search 共用同一实现（filters.go）。
+	// status/tag/assignee 三件套 + 2.2 依赖过滤（blocked/blocked_by），
+	// 与 task-search 共用同一实现（filters.go）。
 	query, apiErr := applyTaskFilters(query, taskFilters{
 		Status: q.Get("status"), Tag: q.Get("tag"), Assignee: q.Get("assignee"),
+		Blocked: q.Get("blocked") == "true", BlockedBy: q.Get("blocked_by"),
 	})
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
@@ -198,7 +200,7 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 	if err != nil {
 		return taskDTO{}, err
 	}
-	return toTaskDTO(t, nil, m.loadTaskTags(ctx, t.ID), 0), nil
+	return toTaskDTO(t, nil, m.loadTaskTags(ctx, t.ID), 0, depViews{}), nil
 }
 
 // resolveTagNames 按规范化名解析 workspace 内既有 tag；未知名字 → 404
@@ -240,9 +242,10 @@ func (m *Module) enrichTasks(ctx context.Context, rows []model.Task) []taskDTO {
 	}
 	tagsByTask := m.tagsForTasks(ctx, ids)
 	counts := m.childCounts(ctx, ids)
+	views := m.depViewsForTasks(ctx, ids)
 	items := make([]taskDTO, 0, len(rows))
 	for i := range rows {
-		items = append(items, toTaskDTO(rows[i], nil, tagsByTask[rows[i].ID], counts[rows[i].ID]))
+		items = append(items, toTaskDTO(rows[i], nil, tagsByTask[rows[i].ID], counts[rows[i].ID], views[rows[i].ID]))
 	}
 	return items
 }
