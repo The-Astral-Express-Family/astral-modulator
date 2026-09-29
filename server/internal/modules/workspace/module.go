@@ -48,6 +48,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/workspaces/{workspace_id}/invitations", m.createInvitation)
 	r.Get("/workspaces/{workspace_id}/invitations", m.listInvitations)
 	r.Post("/invitations/{invitation_id}/revoke", m.revokeInvitation)
+	r.Post("/invitations/redeem", m.redeemInvitation)
 	m.registerApprovalRoutes(r)
 }
 

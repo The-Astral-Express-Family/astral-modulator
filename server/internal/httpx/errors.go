@@ -53,9 +53,13 @@ const (
 	// CodeApprovalExpired：approval 已过期或已裁决（409）。
 	CodeApprovalExpired = "APPROVAL_EXPIRED"
 
-	// CodeInviteInvalid：邀请码不存在/已兑换/已撤销/已过期统一此码同文案
-	// （400，防探测——持有者对码的失效原因无合法需求，docs/registration.md §3）。
+	// CodeInviteInvalid：邀请码不存在/已兑换/已撤销/已过期/类型不符统一此码
+	// 同文案（400，防探测——持有者对码的失效原因无合法需求，docs/registration.md §3）。
 	CodeInviteInvalid = "INVITE_INVALID"
+
+	// CodeAlreadyMember：兑码入伙时已是该 workspace 成员（409，ADR-0009）。
+	// 区别于 INVITE_INVALID：这不为探测者泄露码的状态，只陈述本人身份事实。
+	CodeAlreadyMember = "ALREADY_MEMBER"
 
 	// CodeEmailTaken：email 已被注册（409）。仅在邀请码验证通过后才会暴露
 	// （要求持有效码才可探测，泄露面可接受，docs/registration.md §3）。

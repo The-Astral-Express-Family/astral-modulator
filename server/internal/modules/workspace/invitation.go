@@ -1,10 +1,13 @@
-// 邀请码生命周期（docs/registration.md，TODO.md A5）：签发 / 列表 / 撤销。
-// 兑换在 auth（POST /auth/register 的 invite_code 分支），本文件只管管理面。
-// 授权双闸：human session（agent credential 一律 403——程序不能替人决定
-// 谁能进来）+ workspace:manage_members（非成员 404 / 不足 403）。
+// 工作区邀请生命周期（docs/registration.md / ADR-0009 双轨分离）：
+// 签发 / 列表 / 撤销 / **兑换**（POST /invitations/redeem，已登录 human
+// 凭码入伙——注册/入伙两轨分离后，这是工作区码唯一的兑换入口）。
+// 管理面授权双闸：human session（agent credential 一律 403——程序不能替人
+// 决定谁能进来）+ workspace:manage_members（非成员 404 / 不足 403）。
+// 兑换面只要 human session：码本身就是授予凭据，持码者即受邀人。
 package workspace
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -45,7 +48,8 @@ type invitationDTO struct {
 }
 
 // invitationCreatedDTO 仅用于签发响应：code 明文只出现这一次（库中只有
-// hash），invite_url 是拼好的 /register?code= 链接，收件人可直接打开。
+// hash），invite_url 是拼好的 /join?ws= 链接（面向已注册用户，ADR-0009：
+// 工作区码不再是注册入口）。
 type invitationCreatedDTO struct {
 	invitationDTO
 	Code      string `json:"code"`
@@ -221,9 +225,160 @@ func (m *Module) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// inviteURL 拼注册链接 {WebBaseURL}/register?code=<code>；基址回退链与
-// device verification_uri 同源（auth.ResolveWebBaseURL），不再另造拼装点。
+// inviteURL 拼入伙链接 {WebBaseURL}/join?ws=<code>：收件人是已注册用户
+// （ADR-0009——工作区码不再指向 /register）；基址回退链与 device
+// verification_uri 同源（auth.ResolveWebBaseURL），不再另造拼装点。
 func (m *Module) inviteURL(r *http.Request, code string) string {
 	base := auth.ResolveWebBaseURL(m.WebBaseURL, m.PublicURL, r)
-	return strings.TrimRight(base, "/") + "/register?code=" + url.QueryEscape(code)
+	return strings.TrimRight(base, "/") + "/join?ws=" + url.QueryEscape(code)
+}
+
+// errInviteInvalid 与 auth 包同文案同语义（防探测：查无/已用/撤销/过期/
+// 类型不符一律同码同消息）。独立构造，避免 workspace→auth 内部符号耦合。
+var errInviteInvalid = &httpx.APIError{
+	Status:  http.StatusBadRequest,
+	Code:    httpx.CodeInviteInvalid,
+	Message: "invite code is invalid or expired",
+}
+
+var errAlreadyMember = &httpx.APIError{
+	Status:  http.StatusConflict,
+	Code:    httpx.CodeAlreadyMember,
+	Message: "already a member of this workspace",
+}
+
+// redeemedDTO 是 POST /invitations/redeem 的响应：入伙结果（workspace +
+// 生效角色）。幂等重试（本人已兑过同码）与首次兑换同形状。
+type redeemedDTO struct {
+	Workspace workspaceDTO `json:"workspace"`
+	Role      string       `json:"role"`
+}
+
+// redeemInvitation 是 POST /invitations/redeem {code}：已登录 human 凭
+// 工作区邀请码入伙（ADR-0009——工作区码=权限授予，不再出现在注册端点）。
+//
+// 语义边界：
+//   - 查无/已用（非本人）/撤销/过期/注册码填入 → 400 INVITE_INVALID
+//     （同码同文案防探测）；
+//   - 本人已兑过同码 → 幂等 200（网络重试安全，返回现成员角色）；
+//   - 已是该 workspace 成员（另一张有效码）→ 409 ALREADY_MEMBER，
+//     码不消耗；
+//   - agent credential → 403（入伙是人的行为）。
+func (m *Module) redeemInvitation(w http.ResponseWriter, r *http.Request) {
+	if apiErr := auth.RequireHuman(r, "human session required"); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	p := auth.PrincipalFrom(r.Context())
+	var in struct {
+		Code string `json:"code"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Code) == "" {
+		httpx.WriteError(w, r, httpx.Invalid("code is required"))
+		return
+	}
+
+	var inv model.Invitation
+	codeHash := auth.HashToken(auth.NormalizeInviteCode(in.Code))
+	err := m.DB.WithContext(r.Context()).Where("code_hash = ?", codeHash).First(&inv).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.WriteError(w, r, errInviteInvalid)
+			return
+		}
+		httpx.RespondError(w, r, err)
+		return
+	}
+
+	// 幂等窗口先于失效判定：本人重试已兑过的码必须成功，而非 INVITE_INVALID。
+	if inv.Status == "redeemed" && inv.RedeemedBy != nil && *inv.RedeemedBy == p.ActorID {
+		var mem model.WorkspaceMember
+		if err := m.DB.WithContext(r.Context()).
+			First(&mem, "workspace_id = ? AND actor_id = ?", inv.WorkspaceID, p.ActorID).Error; err == nil {
+			m.writeRedeemed(w, r, inv.WorkspaceID, mem.Role)
+			return
+		}
+		// 兑过码但成员行已被移除：走下方正常路径（重新入伙需码仍是
+		// invited，否则按失效处理）。
+	}
+
+	if inv.Status != "invited" || time.Now().After(inv.ExpiresAt) {
+		httpx.WriteError(w, r, errInviteInvalid)
+		return
+	}
+	var memberCount int64
+	if err := m.DB.WithContext(r.Context()).Model(&model.WorkspaceMember{}).
+		Where("workspace_id = ? AND actor_id = ?", inv.WorkspaceID, p.ActorID).
+		Count(&memberCount).Error; err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	if memberCount > 0 {
+		httpx.WriteError(w, r, errAlreadyMember)
+		return
+	}
+
+	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		// 条件更新抢状态（tag confirm 验证过的模式）：并发同码只有一个赢家。
+		res := tx.Model(&model.Invitation{}).
+			Where("id = ? AND status = 'invited'", inv.ID).
+			Updates(map[string]any{"status": "redeemed", "redeemed_by": p.ActorID, "redeemed_at": time.Now()})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errInviteInvalid
+		}
+		mem := model.WorkspaceMember{WorkspaceID: inv.WorkspaceID, ActorID: p.ActorID, Role: inv.Role}
+		if err := tx.Create(&mem).Error; err != nil {
+			return err
+		}
+		if err := audit.RecordInTx(tx, audit.Entry{
+			WorkspaceID: inv.WorkspaceID, ActorID: p.ActorID,
+			Action: "invite.redeem", Outcome: "allowed",
+			TargetType: "invitation", TargetID: inv.ID,
+			Details: map[string]any{"role": inv.Role, "via": "redeem"},
+		}); err != nil {
+			return err
+		}
+		if err := outbox.EmitTx(tx, outbox.TypeSecurityInviteRedeemed, inv.WorkspaceID, p.ActorID, 0, map[string]any{
+			"invitation_id": inv.ID, "role": inv.Role, "via": "redeem",
+		}); err != nil {
+			return err
+		}
+		// 与 addMember 同事件面：SSE 订阅方对「管理员加人」与「兑码入伙」
+		// 看到同一 type，change 区分来源。
+		return outbox.EmitTx(tx, outbox.TypeWorkspaceMemberChanged, inv.WorkspaceID, p.ActorID, 0, map[string]any{
+			"actor_id": p.ActorID, "role": inv.Role, "change": "joined",
+		})
+	})
+	if err != nil {
+		if errors.Is(err, errInviteInvalid) {
+			httpx.WriteError(w, r, errInviteInvalid)
+			return
+		}
+		// 并发窗口：抢到码但成员行已被 addMember 建立（唯一约束）→
+		// 整体回滚（码不消耗），按已是成员告知。
+		if store.IsUniqueViolation(err) {
+			httpx.WriteError(w, r, errAlreadyMember)
+			return
+		}
+		httpx.RespondError(w, r, err)
+		return
+	}
+	m.writeRedeemed(w, r, inv.WorkspaceID, inv.Role)
+}
+
+// writeRedeemed 加载 workspace 并写 200 入伙结果。
+func (m *Module) writeRedeemed(w http.ResponseWriter, r *http.Request, workspaceID, role string) {
+	var ws model.Workspace
+	if apiErr := store.First(m.DB.WithContext(r.Context()), &ws,
+		httpx.NotFound("workspace not found"), "id = ?", workspaceID); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	httpx.WriteOK(w, r, http.StatusOK, redeemedDTO{Workspace: toWorkspaceDTO(ws), Role: role})
 }

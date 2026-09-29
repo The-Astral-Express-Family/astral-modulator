@@ -1104,7 +1104,7 @@ paths:
       - { $ref: "#/components/parameters/WorkspaceId" }
     post:
       tags: [workspaces]
-      summary: 签发一次性邀请码（A5；需 human session + workspace:manage_members，agent credential 403）
+      summary: 签发一次性工作区邀请码（A5/ADR-0009；需 human session + workspace:manage_members，agent credential 403；码供已注册用户经 /invitations/redeem 入伙）
       operationId: createInvitation
       requestBody:
         required: true
@@ -1113,7 +1113,7 @@ paths:
             schema: { $ref: "#/components/schemas/InvitationCreate" }
       responses:
         "201":
-          description: 已签发；code 明文仅本次返回，invite_url 为拼好的注册链接
+          description: 已签发；code 明文仅本次返回，invite_url 为拼好的入伙链接（/join?ws=）
           content:
             application/json:
               schema: { $ref: "#/components/schemas/InvitationCreated" }
@@ -1137,6 +1137,32 @@ paths:
         "400": { $ref: "#/components/responses/Error" }   # status 过滤值非法
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+
+  /invitations/redeem:
+    post:
+      tags: [workspaces]
+      summary: 凭工作区邀请码入伙（ADR-0009：工作区码=权限授予，任何已存在 human 可兑；
+        本人重复兑已兑码幂等 200；已是成员 409 ALREADY_MEMBER 且码不消耗）
+      operationId: redeemInvitation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: 一次性工作区邀请码（比对前归一化：去分隔符+大写） }
+      responses:
+        "200":
+          description: 已入伙（含幂等重试；返回 workspace 与生效角色）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationRedeemed" }
+        "400": { $ref: "#/components/responses/Error" }   # INVITE_INVALID（查无/已用/撤销/过期/注册码，统一防探测）或 VALIDATION_FAILED
+        "403": { $ref: "#/components/responses/Error" }   # agent credential：入伙是人的行为
 
   /invitations/{invitation_id}/revoke:
     post:
@@ -1511,7 +1537,8 @@ components:
         - TASK_LEASE_EXPIRED
         - TAG_PROPOSAL_EXPIRED
         - APPROVAL_EXPIRED        # approval 过期或已裁决（409）
-        - INVITE_INVALID          # 邀请码不存在/已兑换/已撤销/已过期统一此码（防探测，400）
+        - INVITE_INVALID          # 邀请码不存在/已兑换/已撤销/已过期/类型不符统一此码（防探测，400）
+        - ALREADY_MEMBER          # 兑码入伙时已是该 workspace 成员（409，ADR-0009）
         - EMAIL_TAKEN             # email 已被注册（409，仅邀请码验证通过后可达）
         - TAG_ALREADY_EXISTS
         - REVISION_CONFLICT
@@ -1754,7 +1781,7 @@ components:
             invite_url:
               type: string
               format: uri
-              description: "{WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host"
+              description: "{WebBaseURL}/join?ws=<code>（面向已注册用户的入伙链接，ADR-0009）；基址回退链 WebBaseURL→PublicURL→请求 Host"
 
     InvitationPage:
       allOf:
@@ -1762,6 +1789,14 @@ components:
         - type: object
           properties:
             items: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+
+    InvitationRedeemed:
+      type: object
+      required: [workspace, role]
+      properties:
+        workspace: { $ref: "#/components/schemas/Workspace" }
+        role: { $ref: "#/components/schemas/InvitationRole" }
+      description: POST /invitations/redeem 的入伙结果（幂等重试同形状）
 
     RegistrationInvitationCreate:
       type: object
@@ -1796,11 +1831,11 @@ components:
           properties:
             code:
               type: string
-              description: 邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次
+              description: 注册邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次
             invite_url:
               type: string
               format: uri
-              description: "{WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host"
+              description: "{WebBaseURL}/register?code=<code>（注册链接，ADR-0009）；基址回退链 WebBaseURL→PublicURL→请求 Host"
 
     RegistrationInvitationPage:
       allOf:

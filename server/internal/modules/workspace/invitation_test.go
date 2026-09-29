@@ -126,7 +126,7 @@ func TestInvitationIssueListRevoke(t *testing.T) {
 		t.Fatal("hash must not contain plaintext")
 	}
 	inviteURL, _ := created["invite_url"].(string)
-	if inviteURL != "https://app.example.com/register?code="+code {
+	if inviteURL != "https://app.example.com/join?ws="+code {
 		t.Fatalf("invite_url = %q", inviteURL)
 	}
 	// TTL 缺省 7d。

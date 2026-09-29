@@ -802,8 +802,25 @@ export interface paths {
         /** 邀请列表（授权同签发；不含 code——库中只有 hash） */
         get: operations["listInvitations"];
         put?: never;
-        /** 签发一次性邀请码（A5；需 human session + workspace:manage_members，agent credential 403） */
+        /** 签发一次性工作区邀请码（A5/ADR-0009；需 human session + workspace:manage_members，agent credential 403；码供已注册用户经 /invitations/redeem 入伙） */
         post: operations["createInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 凭工作区邀请码入伙（ADR-0009：工作区码=权限授予，任何已存在 human 可兑； 本人重复兑已兑码幂等 200；已是成员 409 ALREADY_MEMBER 且码不消耗） */
+        post: operations["redeemInvitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1032,7 +1049,7 @@ export interface components {
         DateTimeOrNull: string | null;
         LeaseOrNull: components["schemas"]["Lease"] | null;
         /** @enum {string} */
-        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TASK_LEASE_EXPIRED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TASK_LEASE_EXPIRED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "ALREADY_MEMBER" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
         ErrorEnvelope: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1237,12 +1254,17 @@ export interface components {
             code: string;
             /**
              * Format: uri
-             * @description {WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host
+             * @description {WebBaseURL}/join?ws=<code>（面向已注册用户的入伙链接，ADR-0009）；基址回退链 WebBaseURL→PublicURL→请求 Host
              */
             invite_url: string;
         };
         InvitationPage: components["schemas"]["PageMeta"] & {
             items?: components["schemas"]["Invitation"][];
+        };
+        /** @description POST /invitations/redeem 的入伙结果（幂等重试同形状） */
+        InvitationRedeemed: {
+            workspace: components["schemas"]["Workspace"];
+            role: components["schemas"]["InvitationRole"];
         };
         RegistrationInvitationCreate: {
             /**
@@ -1267,11 +1289,11 @@ export interface components {
             redeemed_at?: components["schemas"]["DateTimeOrNull"];
         };
         RegistrationInvitationCreated: components["schemas"]["RegistrationInvitation"] & {
-            /** @description 邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次 */
+            /** @description 注册邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次 */
             code: string;
             /**
              * Format: uri
-             * @description {WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host
+             * @description {WebBaseURL}/register?code=<code>（注册链接，ADR-0009）；基址回退链 WebBaseURL→PublicURL→请求 Host
              */
             invite_url: string;
         };
@@ -3209,7 +3231,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已签发；code 明文仅本次返回，invite_url 为拼好的注册链接 */
+            /** @description 已签发；code 明文仅本次返回，invite_url 为拼好的入伙链接（/join?ws=） */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -3221,6 +3243,35 @@ export interface operations {
             400: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    redeemInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 一次性工作区邀请码（比对前归一化：去分隔符+大写） */
+                    code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已入伙（含幂等重试；返回 workspace 与生效角色） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationRedeemed"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     revokeInvitation: {
