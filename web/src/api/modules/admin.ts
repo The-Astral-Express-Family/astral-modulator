@@ -24,9 +24,9 @@ export function changeAdminUserRole(actorId: string, platformRole: Exclude<Platf
   })
 }
 
-// ---- 平台级注册邀请（00018）----
+// ---- 注册邀请（00018 落地，00019 更名；唯一注册资格来源）----
 
-export interface PlatformInvitation {
+export interface RegistrationInvitation {
   id: string
   status: 'invited' | 'redeemed' | 'revoked'
   created_by: string
@@ -36,32 +36,32 @@ export interface PlatformInvitation {
   redeemed_at?: string | null
 }
 
-export interface PlatformInvitationCreated extends PlatformInvitation {
+export interface RegistrationInvitationCreated extends RegistrationInvitation {
   /** 邀请码明文，仅签发响应返回一次 */
   code: string
   invite_url: string
 }
 
-/** 签发平台邀请：兑换后为普通 user，不入任何 workspace。 */
-export function createPlatformInvitation(expiresIn: number): Promise<PlatformInvitationCreated> {
-  return apiFetch('/api/v1/admin/invitations', {
+/** 签发注册邀请：兑换后为普通 user，不入任何 workspace。 */
+export function createRegistrationInvitation(expiresIn: number): Promise<RegistrationInvitationCreated> {
+  return apiFetch('/api/v1/admin/registration-invitations', {
     method: 'POST',
     body: { expires_in: expiresIn },
   })
 }
 
 /** 最近签发列表（silent：Dialog 内空态自行引导，不弹 toast）。 */
-export function listPlatformInvitations(params?: {
+export function listRegistrationInvitations(params?: {
   status?: 'invited' | 'redeemed' | 'revoked'
   limit?: number
-}): Promise<{ items: PlatformInvitation[]; next_cursor: string | null }> {
+}): Promise<{ items: RegistrationInvitation[]; next_cursor: string | null }> {
   const q = new URLSearchParams()
   if (params?.status) q.set('status', params.status)
   if (params?.limit) q.set('limit', String(params.limit))
   const qs = q.toString()
-  return apiFetch(`/api/v1/admin/invitations${qs ? `?${qs}` : ''}`, { silent: true })
+  return apiFetch(`/api/v1/admin/registration-invitations${qs ? `?${qs}` : ''}`, { silent: true })
 }
 
-export function revokePlatformInvitation(invitationId: string): Promise<void> {
-  return apiFetch(`/api/v1/admin/invitations/${invitationId}/revoke`, { method: 'POST' })
+export function revokeRegistrationInvitation(invitationId: string): Promise<void> {
+  return apiFetch(`/api/v1/admin/registration-invitations/${invitationId}/revoke`, { method: 'POST' })
 }

@@ -1,5 +1,5 @@
-// 平台级注册邀请（00018）：签发/列表/撤销管理面测试。兑换路径在 auth
-// （platform_invite_test.go）。授权矩阵对齐 module_test.go：user/agent
+// 注册邀请（00018 落地，00019 更名 platform→registration）：签发/列表/撤销管理面测试。兑换路径在 auth
+// （registration_invite_test.go）。授权矩阵对齐 module_test.go：user/agent
 // 一律 403，仅平台 admin（platform:users:manage）可操作。
 package admin
 
@@ -24,7 +24,7 @@ func (f *fixture) callInvitation(t *testing.T, p *auth.Principal, method, path, 
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	rctx := chi.NewRouteContext()
-	bare := strings.SplitN(strings.TrimPrefix(path, "/api/v1/admin/invitations"), "?", 2)[0]
+	bare := strings.SplitN(strings.TrimPrefix(path, "/api/v1/admin/registration-invitations"), "?", 2)[0]
 	if bare != "" && bare != "/" {
 		rctx.URLParams.Add("invitation_id", strings.Split(strings.Trim(bare, "/"), "/")[0])
 	}
@@ -32,20 +32,20 @@ func (f *fixture) callInvitation(t *testing.T, p *auth.Principal, method, path, 
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 	switch {
 	case bare == "" && method == "POST":
-		f.m.createPlatformInvitation(rec, req)
+		f.m.createRegistrationInvitation(rec, req)
 	case bare == "" && method == "GET":
-		f.m.listPlatformInvitations(rec, req)
+		f.m.listRegistrationInvitations(rec, req)
 	case strings.HasSuffix(bare, "/revoke") && method == "POST":
-		f.m.revokePlatformInvitation(rec, req)
+		f.m.revokeRegistrationInvitation(rec, req)
 	default:
 		t.Fatalf("unroutable %s %q", method, path)
 	}
 	return rec
 }
 
-func (f *fixture) issuePlatform(t *testing.T, body string) map[string]any {
+func (f *fixture) issueRegistration(t *testing.T, body string) map[string]any {
 	t.Helper()
-	rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/invitations", body)
+	rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/registration-invitations", body)
 	if rec.Code != 201 {
 		t.Fatalf("issue status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -56,15 +56,15 @@ func (f *fixture) issuePlatform(t *testing.T, body string) map[string]any {
 	return out
 }
 
-func TestPlatformInvitationIssueListRevoke(t *testing.T) {
+func TestRegistrationInvitationIssueListRevoke(t *testing.T) {
 	f := newFixture(t)
 
-	created := f.issuePlatform(t, `{}`)
+	created := f.issueRegistration(t, `{}`)
 	code, _ := created["code"].(string)
 	if code == "" || len(strings.Split(code, "-")) != 4 {
 		t.Fatalf("code shape: %q", code)
 	}
-	var row model.PlatformInvitation
+	var row model.RegistrationInvitation
 	if err := f.db.First(&row, "id = ?", created["id"]).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestPlatformInvitationIssueListRevoke(t *testing.T) {
 	}
 
 	// 列表：status=invited 命中；不回传 code。
-	rec := f.callInvitation(t, f.admin, "GET", "/api/v1/admin/invitations?status=invited", "")
+	rec := f.callInvitation(t, f.admin, "GET", "/api/v1/admin/registration-invitations?status=invited", "")
 	if rec.Code != 200 {
 		t.Fatalf("list status = %d", rec.Code)
 	}
@@ -99,13 +99,13 @@ func TestPlatformInvitationIssueListRevoke(t *testing.T) {
 		t.Fatal("list must not expose code")
 	}
 	if _, ok := page.Items[0]["workspace_id"]; ok {
-		t.Fatal("platform invitation must not carry workspace_id")
+		t.Fatal("registration invitation must not carry workspace_id")
 	}
 
 	// 撤销幂等 + 状态落库。
 	invID, _ := created["id"].(string)
 	for i := 0; i < 2; i++ {
-		rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/invitations/"+invID+"/revoke", "")
+		rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/registration-invitations/"+invID+"/revoke", "")
 		if rec.Code != 204 {
 			t.Fatalf("revoke #%d status = %d", i, rec.Code)
 		}
@@ -116,7 +116,7 @@ func TestPlatformInvitationIssueListRevoke(t *testing.T) {
 	if row.Status != "revoked" {
 		t.Fatalf("status = %q", row.Status)
 	}
-	// 事件：created + revoked 各一条（scope=platform）。
+	// 事件：created + revoked 各一条（scope=registration）。
 	var events []model.OutboxEvent
 	if err := f.db.Where("type IN ?", []string{
 		outbox.TypeSecurityInviteCreated, outbox.TypeSecurityInviteRevoked,
@@ -125,20 +125,20 @@ func TestPlatformInvitationIssueListRevoke(t *testing.T) {
 	}
 	for _, e := range events {
 		if e.WorkspaceID != nil {
-			t.Fatalf("platform invite event must not carry workspace: %v", e.WorkspaceID)
+			t.Fatalf("registration invite event must not carry workspace: %v", e.WorkspaceID)
 		}
 	}
 
 	// 未知邀请 404；非法 status 过滤 400。
-	if rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/invitations/inv_nope/revoke", ""); rec.Code != 404 {
+	if rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/registration-invitations/inv_nope/revoke", ""); rec.Code != 404 {
 		t.Fatalf("unknown invitation status = %d", rec.Code)
 	}
-	if rec := f.callInvitation(t, f.admin, "GET", "/api/v1/admin/invitations?status=weird", ""); rec.Code != 400 {
+	if rec := f.callInvitation(t, f.admin, "GET", "/api/v1/admin/registration-invitations?status=weird", ""); rec.Code != 400 {
 		t.Fatalf("bad filter status = %d", rec.Code)
 	}
 }
 
-func TestPlatformInvitationAuthorizationAndValidation(t *testing.T) {
+func TestRegistrationInvitationAuthorizationAndValidation(t *testing.T) {
 	f := newFixture(t)
 
 	// user / agent 一律 403（与 /admin/users* 同矩阵）。
@@ -147,10 +147,10 @@ func TestPlatformInvitationAuthorizationAndValidation(t *testing.T) {
 		method string
 		path   string
 	}{
-		{f.user, "POST", "/api/v1/admin/invitations"},
-		{f.user, "GET", "/api/v1/admin/invitations"},
-		{f.user, "POST", "/api/v1/admin/invitations/inv_x/revoke"},
-		{f.agentP, "POST", "/api/v1/admin/invitations"},
+		{f.user, "POST", "/api/v1/admin/registration-invitations"},
+		{f.user, "GET", "/api/v1/admin/registration-invitations"},
+		{f.user, "POST", "/api/v1/admin/registration-invitations/inv_x/revoke"},
+		{f.agentP, "POST", "/api/v1/admin/registration-invitations"},
 	} {
 		rec := f.callInvitation(t, tc.p, tc.method, tc.path, `{}`)
 		if rec.Code != 403 {
@@ -160,13 +160,13 @@ func TestPlatformInvitationAuthorizationAndValidation(t *testing.T) {
 
 	// 非法 expires_in 拒绝；显式 expires_in 生效。
 	for _, body := range []string{`{"expires_in":0}`, `{"expires_in":2592001}`} {
-		rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/invitations", body)
+		rec := f.callInvitation(t, f.admin, "POST", "/api/v1/admin/registration-invitations", body)
 		if rec.Code != 400 {
 			t.Fatalf("body %s: status = %d", body, rec.Code)
 		}
 	}
-	created := f.issuePlatform(t, `{"expires_in":3600}`)
-	var row model.PlatformInvitation
+	created := f.issueRegistration(t, `{"expires_in":3600}`)
+	var row model.RegistrationInvitation
 	if err := f.db.First(&row, "id = ?", created["id"]).Error; err != nil {
 		t.Fatal(err)
 	}

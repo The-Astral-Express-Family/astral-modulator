@@ -1342,29 +1342,29 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
-  /admin/invitations:
+  /admin/registration-invitations:
     post:
       tags: [admin]
-      summary: 签发平台级注册邀请（platform:users:manage；兑换后为普通 user，不入任何 workspace）
-      operationId: createPlatformInvitation
+      summary: 签发注册邀请（platform:users:manage；唯一注册资格来源——兑换后为普通 user，不入任何 workspace）
+      operationId: createRegistrationInvitation
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/PlatformInvitationCreate" }
+            schema: { $ref: "#/components/schemas/RegistrationInvitationCreate" }
       responses:
         "201":
           description: 已签发（code 明文仅本次返回）
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PlatformInvitationCreated" }
+              schema: { $ref: "#/components/schemas/RegistrationInvitationCreated" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
     get:
       tags: [admin]
-      summary: 平台邀请列表（platform:users:manage；id 降序游标分页；不回传 code）
-      operationId: listPlatformInvitations
+      summary: 注册邀请列表（platform:users:manage；id 降序游标分页；不回传 code）
+      operationId: listRegistrationInvitations
       parameters:
         - name: status
           in: query
@@ -1378,16 +1378,16 @@ paths:
           description: 邀请分页列表
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PlatformInvitationPage" }
+              schema: { $ref: "#/components/schemas/RegistrationInvitationPage" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
 
-  /admin/invitations/{invitation_id}/revoke:
+  /admin/registration-invitations/{invitation_id}/revoke:
     post:
       tags: [admin]
-      summary: 撤销平台邀请（platform:users:manage；重复撤销幂等 204）
-      operationId: revokePlatformInvitation
+      summary: 撤销注册邀请（platform:users:manage；重复撤销幂等 204）
+      operationId: revokeRegistrationInvitation
       parameters:
         - { name: invitation_id, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
       responses:
@@ -1762,7 +1762,7 @@ components:
           properties:
             items: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
 
-    PlatformInvitationCreate:
+    RegistrationInvitationCreate:
       type: object
       properties:
         expires_in:
@@ -1772,7 +1772,7 @@ components:
           default: 604800
           description: 有效期（秒）；缺省 7 天，上限 30 天
 
-    PlatformInvitation:
+    RegistrationInvitation:
       type: object
       required: [id, status, created_by, created_at, expires_at]
       properties:
@@ -1787,9 +1787,9 @@ components:
         redeemed_by: { $ref: "#/components/schemas/IdOrNull" }
         redeemed_at: { $ref: "#/components/schemas/DateTimeOrNull" }
 
-    PlatformInvitationCreated:
+    RegistrationInvitationCreated:
       allOf:
-        - $ref: "#/components/schemas/PlatformInvitation"
+        - $ref: "#/components/schemas/RegistrationInvitation"
         - type: object
           required: [code, invite_url]
           properties:
@@ -1801,12 +1801,12 @@ components:
               format: uri
               description: "{WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host"
 
-    PlatformInvitationPage:
+    RegistrationInvitationPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
         - type: object
           properties:
-            items: { type: array, items: { $ref: "#/components/schemas/PlatformInvitation" } }
+            items: { type: array, items: { $ref: "#/components/schemas/RegistrationInvitation" } }
 
     TaskStatus:
       type: string

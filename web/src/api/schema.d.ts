@@ -983,25 +983,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/invitations": {
+    "/admin/registration-invitations": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 平台邀请列表（platform:users:manage；id 降序游标分页；不回传 code） */
-        get: operations["listPlatformInvitations"];
+        /** 注册邀请列表（platform:users:manage；id 降序游标分页；不回传 code） */
+        get: operations["listRegistrationInvitations"];
         put?: never;
-        /** 签发平台级注册邀请（platform:users:manage；兑换后为普通 user，不入任何 workspace） */
-        post: operations["createPlatformInvitation"];
+        /** 签发注册邀请（platform:users:manage；唯一注册资格来源——兑换后为普通 user，不入任何 workspace） */
+        post: operations["createRegistrationInvitation"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/admin/invitations/{invitation_id}/revoke": {
+    "/admin/registration-invitations/{invitation_id}/revoke": {
         parameters: {
             query?: never;
             header?: never;
@@ -1010,8 +1010,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 撤销平台邀请（platform:users:manage；重复撤销幂等 204） */
-        post: operations["revokePlatformInvitation"];
+        /** 撤销注册邀请（platform:users:manage；重复撤销幂等 204） */
+        post: operations["revokeRegistrationInvitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1244,14 +1244,14 @@ export interface components {
         InvitationPage: components["schemas"]["PageMeta"] & {
             items?: components["schemas"]["Invitation"][];
         };
-        PlatformInvitationCreate: {
+        RegistrationInvitationCreate: {
             /**
              * @description 有效期（秒）；缺省 7 天，上限 30 天
              * @default 604800
              */
             expires_in: number;
         };
-        PlatformInvitation: {
+        RegistrationInvitation: {
             id: components["schemas"]["Id"];
             /**
              * @description expired 为派生态（invited 且 now > expires_at），不落库
@@ -1266,7 +1266,7 @@ export interface components {
             redeemed_by?: components["schemas"]["IdOrNull"];
             redeemed_at?: components["schemas"]["DateTimeOrNull"];
         };
-        PlatformInvitationCreated: components["schemas"]["PlatformInvitation"] & {
+        RegistrationInvitationCreated: components["schemas"]["RegistrationInvitation"] & {
             /** @description 邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次 */
             code: string;
             /**
@@ -1275,8 +1275,8 @@ export interface components {
              */
             invite_url: string;
         };
-        PlatformInvitationPage: components["schemas"]["PageMeta"] & {
-            items?: components["schemas"]["PlatformInvitation"][];
+        RegistrationInvitationPage: components["schemas"]["PageMeta"] & {
+            items?: components["schemas"]["RegistrationInvitation"][];
         };
         /** @enum {string} */
         TaskStatus: "open" | "in_progress" | "blocked" | "review" | "done" | "cancelled";
@@ -3513,7 +3513,7 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
-    listPlatformInvitations: {
+    listRegistrationInvitations: {
         parameters: {
             query?: {
                 status?: "invited" | "redeemed" | "revoked";
@@ -3532,7 +3532,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformInvitationPage"];
+                    "application/json": components["schemas"]["RegistrationInvitationPage"];
                 };
             };
             400: components["responses"]["Error"];
@@ -3540,7 +3540,7 @@ export interface operations {
             403: components["responses"]["Error"];
         };
     };
-    createPlatformInvitation: {
+    createRegistrationInvitation: {
         parameters: {
             query?: never;
             header?: never;
@@ -3549,7 +3549,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PlatformInvitationCreate"];
+                "application/json": components["schemas"]["RegistrationInvitationCreate"];
             };
         };
         responses: {
@@ -3559,7 +3559,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformInvitationCreated"];
+                    "application/json": components["schemas"]["RegistrationInvitationCreated"];
                 };
             };
             400: components["responses"]["Error"];
@@ -3567,7 +3567,7 @@ export interface operations {
             403: components["responses"]["Error"];
         };
     };
-    revokePlatformInvitation: {
+    revokeRegistrationInvitation: {
         parameters: {
             query?: never;
             header?: never;

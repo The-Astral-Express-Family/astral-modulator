@@ -13,14 +13,14 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 )
 
-// seedPlatformInvite 直插一张平台邀请，返回明文码。
-func seedPlatformInvite(t *testing.T, s *Service, mutate func(*model.PlatformInvitation)) string {
+// seedRegistrationInvite 直插一张平台邀请，返回明文码。
+func seedRegistrationInvite(t *testing.T, s *Service, mutate func(*model.RegistrationInvitation)) string {
 	t.Helper()
 	code, err := NewInviteCode()
 	if err != nil {
 		t.Fatal(err)
 	}
-	inv := model.PlatformInvitation{
+	inv := model.RegistrationInvitation{
 		ID:        "inv_plat1",
 		CodeHash:  HashToken(NormalizeInviteCode(code)),
 		CreatedBy: "usr_owner",
@@ -36,10 +36,10 @@ func seedPlatformInvite(t *testing.T, s *Service, mutate func(*model.PlatformInv
 	return code
 }
 
-func TestRegisterWithPlatformInvite(t *testing.T) {
+func TestRegisterWithRegistrationInvite(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	code := seedPlatformInvite(t, s, nil)
+	code := seedRegistrationInvite(t, s, nil)
 
 	actor, refresh, err := s.Register(ctx, RegisterInput{
 		Email: "plat@example.com", Password: "hunter2safe", InviteCode: code,
@@ -62,7 +62,7 @@ func TestRegisterWithPlatformInvite(t *testing.T) {
 		t.Fatalf("platform invite must not add workspace membership, got %d", memberCount)
 	}
 	// 邀请已兑换；审计 invite.redeem（workspace_id 留空）+ auth.register。
-	var inv model.PlatformInvitation
+	var inv model.RegistrationInvitation
 	if err := s.DB.First(&inv, "id = ?", "inv_plat1").Error; err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +86,10 @@ func TestRegisterWithPlatformInvite(t *testing.T) {
 	}
 }
 
-func TestPlatformInviteReuseAndExpiry(t *testing.T) {
+func TestRegistrationInviteReuseAndExpiry(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	code := seedPlatformInvite(t, s, nil)
+	code := seedRegistrationInvite(t, s, nil)
 
 	if _, _, err := s.Register(ctx, RegisterInput{
 		Email: "a@example.com", Password: "hunter2safe", InviteCode: code,
@@ -106,7 +106,7 @@ func TestPlatformInviteReuseAndExpiry(t *testing.T) {
 	}
 
 	// 过期：invited 但已过 expires_at → INVITE_INVALID（防探测同文案）。
-	expiredCode := seedPlatformInvite(t, s, func(inv *model.PlatformInvitation) {
+	expiredCode := seedRegistrationInvite(t, s, func(inv *model.RegistrationInvitation) {
 		inv.ID = "inv_plat_exp"
 		inv.ExpiresAt = time.Now().Add(-time.Hour)
 	})

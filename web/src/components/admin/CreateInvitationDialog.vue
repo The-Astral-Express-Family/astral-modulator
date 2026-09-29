@@ -6,11 +6,11 @@
 import { ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
-  createPlatformInvitation,
-  listPlatformInvitations,
-  revokePlatformInvitation,
-  type PlatformInvitation,
-  type PlatformInvitationCreated,
+  createRegistrationInvitation,
+  listRegistrationInvitations,
+  revokeRegistrationInvitation,
+  type RegistrationInvitation,
+  type RegistrationInvitationCreated,
 } from '@/api/modules/admin'
 import { fmtTime } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
@@ -43,20 +43,20 @@ const TTL_OPTIONS = [
   { value: '604800', label: '7 天' },
   { value: '2592000', label: '30 天' },
 ]
-const STATUS_VARIANTS: Record<PlatformInvitation['status'], BadgeVariants['variant']> = {
+const STATUS_VARIANTS: Record<RegistrationInvitation['status'], BadgeVariants['variant']> = {
   invited: 'secondary',
   redeemed: 'default',
   revoked: 'destructive',
 }
-const STATUS_LABELS: Record<PlatformInvitation['status'], string> = {
+const STATUS_LABELS: Record<RegistrationInvitation['status'], string> = {
   invited: '待使用',
   redeemed: '已兑换',
   revoked: '已撤销',
 }
 
 const ttl = ref('604800')
-const issued = ref<PlatformInvitationCreated | null>(null)
-const recent = ref<PlatformInvitation[]>([])
+const issued = ref<RegistrationInvitationCreated | null>(null)
+const recent = ref<RegistrationInvitation[]>([])
 const listLoading = ref(false)
 const revokingId = ref<string | null>(null)
 const { busy: issuing, run } = useApiAction()
@@ -73,7 +73,7 @@ watch(
 async function loadRecent(): Promise<void> {
   listLoading.value = true
   try {
-    recent.value = (await listPlatformInvitations({ limit: 5 })).items
+    recent.value = (await listRegistrationInvitations({ limit: 5 })).items
   } catch {
     recent.value = [] // silent：空态自行引导
   } finally {
@@ -83,7 +83,7 @@ async function loadRecent(): Promise<void> {
 
 async function issue(): Promise<void> {
   const ok = await run(async () => {
-    issued.value = await createPlatformInvitation(Number(ttl.value))
+    issued.value = await createRegistrationInvitation(Number(ttl.value))
   })
   if (ok) {
     toast.success('邀请已生成，请立即复制保存')
@@ -91,10 +91,10 @@ async function issue(): Promise<void> {
   }
 }
 
-async function revoke(inv: PlatformInvitation): Promise<void> {
+async function revoke(inv: RegistrationInvitation): Promise<void> {
   revokingId.value = inv.id
   const ok = await run(async () => {
-    await revokePlatformInvitation(inv.id)
+    await revokeRegistrationInvitation(inv.id)
   })
   revokingId.value = null
   if (ok) {

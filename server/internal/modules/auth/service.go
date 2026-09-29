@@ -324,7 +324,7 @@ func seedOrgMemory(tx *gorm.DB, actorID string) error {
 // 命中按失效码统一拒（防探测）。哈希预计算一次，两表共用。
 func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
 	codeHash := HashToken(NormalizeInviteCode(in.InviteCode))
-	var pInv model.PlatformInvitation
+	var pInv model.RegistrationInvitation
 	err := s.DB.WithContext(ctx).Where("code_hash = ?", codeHash).First(&pInv).Error
 	if err == nil {
 		return s.redeemPlatformInvite(ctx, in, pInv, ip, ua)
@@ -412,7 +412,7 @@ func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, 
 // 不建 WorkspaceMember（平台邀请只管「允许注册」，入伙由用户自行操作或
 // workspace 邀请补足）。失败语义与 workspace 兑换同构：errInviteInvalid
 // 整体回滚；email 撞车 409 EMAIL_TAKEN（邀请不消耗）。
-func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pInv model.PlatformInvitation, ip, ua string) (*model.Actor, string, error) {
+func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pInv model.RegistrationInvitation, ip, ua string) (*model.Actor, string, error) {
 	if pInv.Status != "invited" || time.Now().After(pInv.ExpiresAt) {
 		return nil, "", errInviteInvalid
 	}
@@ -429,7 +429,7 @@ func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pI
 			return err
 		}
 		// 条件更新抢状态：并发同码只有一个事务成功，输家整体回滚。
-		res := tx.Model(&model.PlatformInvitation{}).
+		res := tx.Model(&model.RegistrationInvitation{}).
 			Where("id = ? AND status = 'invited'", pInv.ID).
 			Updates(map[string]any{"status": "redeemed", "redeemed_by": actor.ID, "redeemed_at": time.Now()})
 		if res.Error != nil {
@@ -471,7 +471,7 @@ func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pI
 	if err != nil {
 		return nil, "", err
 	}
-	s.Log.Info("human registered via platform invite", "actor_id", actor.ID)
+	s.Log.Info("human registered via registration invite", "actor_id", actor.ID)
 	return actor, refresh, nil
 }
 
