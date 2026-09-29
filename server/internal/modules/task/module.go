@@ -1,4 +1,5 @@
-// Package task 模块：TODO 树、原子 claim/lease、regex→fuzzy 搜索
+// Package task 模块：TODO 树、原子 claim/lease、regex→fuzzy 搜索、
+// 批量管理（batch.go，协议 2.1 task_batch）
 // （architecture §12/§13/§17；搜索实现决策 TODO.md D7）。
 package task
 
@@ -60,6 +61,11 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Delete("/tasks/{task_id}/lease", m.release)
 	r.Put("/tasks/{task_id}/tags/{tag_id}", m.attachTag)
 	r.Delete("/tasks/{task_id}/tags/{tag_id}", m.detachTag)
+	// 批量管理（协议 2.1 task_batch）：整批单事务全有或全无（batch.go）。
+	r.Post("/workspaces/{workspace_id}/task-trees", m.createRootTrees)
+	r.Post("/tasks/{task_id}/task-trees", m.createChildTrees)
+	r.Post("/workspaces/{workspace_id}/tasks/move", m.moveTasks)
+	r.Post("/workspaces/{workspace_id}/tasks/batch-update", m.batchUpdate)
 }
 
 // StartSweeper 启动租约清扫 goroutine（由 app 装配调用，ctx 取消即退出）。

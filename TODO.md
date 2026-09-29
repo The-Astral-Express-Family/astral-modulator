@@ -318,6 +318,8 @@ docs/                               architecture/protocol/sync-semantics/registr
 | workspace 默认策略/repo metadata 字段 | 延期 | model.go TODO(phase-2)，无消费方 |
 | presence upsert ON CONFLICT 化 | 延期 | 现实现正确，无性能触发 |
 | managed path config（workspace include/exclude） | 移交 | round 38 R3：客户端约定，astral-cli 仓持有；服务端只保留固定黑名单（sync-semantics §3 已标注归属） |
+| 任务批量 tag 挂/摘 | 延期 | 2026-09-30 task_batch 首版不含：逐个 PUT/DELETE `/tasks/{id}/tags/{tag_id}` 已可用；出现真实批量打标场景再启（契约按名字全有或全无） |
+| 任务兄弟排序（position 键） | 延期 | 2026-09-30：集合顺序 = 创建序（id 序），协议未承诺展示顺序；出现拖拽/置顶需求再议 schema 加列（需 migration + children/search 排序口径同步） |
 | 审批面扩展（workspace.delete / credential.create_privileged 等 §22 候选） | 触发式 | round 38 R5：architecture §22 本标"候选"；出现真实高风险操作再启 |
 | CLI/发行需求（FR-010/014/015、NFR-001/002/003/008、Distribution MVP） | 移交 | round 38 R6：整体归属 astral-cli 仓，本仓不登记其实现；执行设计已定稿于 astral-cli docs/DISTRIBUTION.md（2026-09-26，R0-R5 分阶段） |
 | admin/users 分页 | 契约明示不做 | round 38 R9：契约即注明"平台用户量小，暂不分页"；规模触发再改契约 |
@@ -361,6 +363,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 2026-09-16 | 第 38 轮 G4 补录：`CredentialCreate` 补声明可选 `workspace_id`（授权分流字段——服务端行为本就如此，契约补齐文档；Web MembersView 传当前 ws） | 契约文档 | CLI/Web |
 | 2026-09-25 | 第 41 轮：新增端点 `GET /workspaces/{id}/document-versions`（历史版本列表，path 必填 query，revision 降序游标分页）与 `GET /workspaces/{id}/document-versions/{revision}`（单版全量快照）；新增 schema DocumentVersion / DocumentVersionDetail；新增 ID 前缀 `dvh`；新增 env ASTRAL_DOC_HISTORY_MAX_PER_DOC / ASTRAL_DOC_HISTORY_TTL_HOURS；行为：每次内容被取代前同事务归档全量快照（§1.2 P3 解冻） | 补充 | CLI 已跟进（history / get --revision / push --force 防盲推门，astral-cli 5c32909） / Web |
 | 2026-09-28 | 平台级注册邀请（8c25bd0）：新增端点 `POST /admin/invitations`（签发，code 明文仅一次）`GET /admin/invitations`（id 降序游标分页，不回传 code）`POST /admin/invitations/{id}/revoke`（幂等 204）；migration 00018 platform_invitations；授权复用 `platform:users:manage`（无新角色）；兑换走既有 `/auth/register`（命中平台邀请则不写 membership，账号为不入任何 workspace 的普通 user）；**推翻 registration.md §8「服务器级邀请不做」原裁决**（该文档 §1/§4.5/§8 已按实装修订）；Web AdminUsersView 签发入口 | 补充 | Web（CLI/协议快照未跟进——快照下次刷新携带） |
+| 2026-09-30 | 任务批量管理（协议 2.1，task_batch）：新增端点 `POST /workspaces/{id}/task-trees` 与 `POST /tasks/{id}/task-trees`（嵌套树批量创建，整批单事务全有或全无，≤200 节点/深度 ≤8）、`POST /workspaces/{id}/tasks/move`（批量换父，逐项 expected_revision，批内互移统一环检测，不支持跨 ws，子树恒跟随）、`POST /workspaces/{id}/tasks/batch-update`（同值批量改 status/priority/assignee）；capabilities features += `task_batch`；Idempotency-Key 由 summary 散文正式化为 header 参数（components.parameters.IdempotencyKey，挂 6 个 tasks 写端点）；info.version 2.0.0-scaffold→2.1.0（protocol_version 保持 2）；新 audit action task.batch_create/batch_move/batch_update（每批一条）；事件逐任务 emit 既有词表（无新事件类型）；无 schema/迁移变更；批量 tag 挂摘与兄弟排序（position）登记 §3 延期 | 补充 | CLI/Web |
 
 ## 附录 A. 稳定锚点（原 §2 裁决表 / 原 §11 编号清单，编号不变）
 

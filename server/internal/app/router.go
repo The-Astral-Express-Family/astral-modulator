@@ -126,10 +126,11 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 			// task_lease：原子 claim + lease renew/release 已实装（见 task 模块测试）。
 			// document_sync：documents/conflicts 七端点已实装（round 38 T4；
 			// memory 无独立 feature——复用 documents 端点，M1 裁决）。
+			// task_batch：批量树创建/move/batch-update 已实装（协议 2.1）。
 			httpx.WriteOK(w, req, http.StatusOK, Capabilities{
 				ProtocolVersion:   httpx.ProtocolVersion,
 				MinimumCliVersion: "0.1.0",
-				Features:          []string{"task_lease", "document_sync"},
+				Features:          []string{"task_lease", "document_sync", "task_batch"},
 			})
 		})
 
