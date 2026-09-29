@@ -1,15 +1,23 @@
 // 任务数据源的内存实现（mock 模式，v2 容器语义）：复刻服务端已裁决的语义，
-// 供设计演示与离线开发。对齐点：集合（workspace/task children）按 id DESC +
-// status/tag/assignee 过滤；task-search 需 ≥1 条件（fuzzy 打分 0.85*title +
-// 0.15*description）；创建 = 向容器 POST children（tags 按名解析，缺失 → 404，
-// children_count 同步）；claim = assignee 条件更新（持有至释放/完成）；
-// release 清 assignee + in_progress→open；attach/detach 幂等（已关联不 bump）。
+// 供设计演示与离线开发。对齐点：集合（workspace/task children）按兄弟排序键
+// position 升序（同位 id 降序兜底，2.4）+ status/tag/assignee 过滤；
+// task-search 需 ≥1 条件（fuzzy 打分 0.85*title + 0.15*description）；
+// 创建 = 向容器 POST children（tags 按名解析，缺失 → 404，children_count 同步，
+// position 追加兄弟尾部）；move = 换父 + 兄弟内重排（摘除-让位-落位，2.4）；
+// claim = assignee 条件更新（持有至释放/完成）；release 清 assignee +
+// in_progress→open；attach/detach 幂等（已关联不 bump）。
 // 所有 API 注入 ~250ms 延迟，让骨架屏/busy 态在 mock 下真实可见。
 // 错误以 `CODE: 文案` 形式的 Error 抛出（async 函数内 throw → rejected Promise）。
 
 import { useSessionStore } from '@/stores/session'
 import type { TaskApi } from '@/api/taskSource'
-import type { TaskCreatePayload, TaskFilterParams, TaskSearchParams, TaskUpdatePayload } from '@/api/modules/task'
+import type {
+  TaskCreatePayload,
+  TaskFilterParams,
+  TaskMoveItem,
+  TaskSearchParams,
+  TaskUpdatePayload,
+} from '@/api/modules/task'
 import type {
   EventEnvelope,
   Member,
@@ -98,9 +106,15 @@ function applyFilters(items: Task[], params: TaskFilterParams): Task[] {
     out = out.filter((t) => t.tags.some((tg) => tg.name.toLowerCase() === wanted))
   }
   if (params.assignee) out = out.filter((t) => t.assignee_actor_id === params.assignee)
-  out.sort((a, b) => (a.id < b.id ? 1 : -1)) // id DESC = 创建序倒序
+  // 排序口径与服务端一致（2.2）：position 升序、同位 id 降序兜底。
+  out.sort((a, b) => a.position - b.position || (a.id < b.id ? 1 : -1))
   if (params.cursor) out = out.filter((t) => t.id < params.cursor!)
   return out
+}
+
+// 同一父容器子层的兄弟集合（内存版 siblingScope）。
+function siblingsOf(parentId: string | null): Task[] {
+  return [...tasks.values()].filter((t) => t.parent_id === parentId)
 }
 
 async function listWorkspaceChildren(
@@ -198,6 +212,7 @@ function createInContainer(parentId: string | null, payload: TaskCreatePayload):
     priority: payload.priority ?? 'normal',
     assignee_actor_id: null,
     revision: 1,
+    position: siblingsOf(parentId).length, // 2.2：创建追加兄弟尾部
     tags: resolvedTags.map(clone),
     children_count: 0,
     blocked_by: [],
@@ -299,6 +314,75 @@ async function detachTaskTag(taskId: string, tagId: string): Promise<void> {
   emitEvent('task.updated', { task_id: t.id, tag_change: 'detach', tag_id: tagId }, t.revision)
 }
 
+// moveTasks（2.2）：换父 + 兄弟内重排，复刻服务端摘除-让位-落位语义。
+// items 按序生效；position 以摘除前的兄弟列表为准（同父且原位在下标之前
+// → 摘除后等效下标 -1），越界收敛到末尾；位移兄弟不 bump revision。
+function applyMoveItems(items: TaskMoveItem[]): Task[] {
+  const moved: Task[] = []
+  for (const it of items) {
+    const t = taskOrThrow(it.task_id)
+    checkRevision(t, it.expected_revision)
+    if (it.parent_id) taskOrThrow(it.parent_id)
+    if (it.position !== undefined && it.position < 0) {
+      err('VALIDATION_FAILED', 'position 须 ≥ 0。')
+    }
+    const sameParent =
+      (it.parent_id === null && t.parent_id === null) || it.parent_id === t.parent_id
+    // 摘除：老列表补洞。
+    const oldPos = t.position
+    const oldParent = t.parent_id
+    for (const sib of siblingsOf(t.parent_id)) {
+      if (sib.id !== t.id && sib.position > oldPos) sib.position -= 1
+    }
+    // 目标下标：缺省 = 末尾；同父且原位在下标之前 → 等效下标 -1，越界收敛。
+    const targetSibs = siblingsOf(it.parent_id)
+    let idx = it.position ?? targetSibs.length
+    if (sameParent && it.position !== undefined && it.position > oldPos) idx -= 1
+    idx = Math.min(Math.max(idx, 0), targetSibs.length)
+    // 让位 + 落位。
+    for (const sib of targetSibs) {
+      if (sib.id !== t.id && sib.position >= idx) sib.position += 1
+    }
+    t.parent_id = it.parent_id
+    t.position = idx
+    t.revision += 1
+    t.updated_at = new Date().toISOString()
+    // children_count 是 mock 内存字段（服务端为读时计算，无此维护点）：
+    // 换父时同步老/新父计数。
+    if (!sameParent) {
+      if (oldParent) {
+        const old = tasks.get(oldParent)
+        if (old) old.children_count = Math.max(old.children_count - 1, 0)
+      }
+      if (it.parent_id) {
+        tasks.get(it.parent_id)!.children_count += 1
+      }
+    }
+    emitEvent('task.updated', { task_id: t.id, parent_id: t.parent_id, position: t.position }, t.revision)
+    moved.push(clone(t))
+  }
+  return moved
+}
+
+async function moveTasks(_workspaceId: string, items: TaskMoveItem[]): Promise<{ items: Task[] }> {
+  await sleep()
+  if (!items.length || items.length > 200) {
+    err('VALIDATION_FAILED', 'items 须为 1–200 项。')
+  }
+  const seen = new Set<string>()
+  for (const it of items) {
+    if (seen.has(it.task_id)) err('VALIDATION_FAILED', 'task_id 不得重复。')
+    seen.add(it.task_id)
+    // 环检测：沿新 parent 向上走，遇到自己即环（与服务端 400 语义一致）。
+    let cursor: string | null = it.parent_id
+    for (let depth = 0; cursor && depth < 64; depth++) {
+      if (cursor === it.task_id) err('VALIDATION_FAILED', '移动会造成循环父子关系。')
+      cursor = tasks.get(cursor)?.parent_id ?? null
+    }
+  }
+  return { items: applyMoveItems(items) }
+}
+
 async function listTags(_workspaceId: string): Promise<Page<Tag>> {
   await sleep()
   return { items: clone(tags), next_cursor: null }
@@ -318,6 +402,7 @@ export const mockTaskApi: TaskApi = {
   createChild,
   updateTask,
   claimTask,
+  moveTasks,
   releaseClaim,
   attachTaskTag,
   detachTaskTag,

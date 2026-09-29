@@ -174,20 +174,32 @@ func (m *Module) CreateTaskTrees(ctx context.Context, p *auth.Principal, wsID st
 	}
 
 	created := make([]model.Task, len(flat))
+	// 容器层序位起点在事务外计数（sqlite deferred 事务首条必须是写，见
+	// createTask 同款注释）；批内新建父任务的儿子从 0 起按请求先序递增。
+	var containerNext int64
+	if err := siblingScope(m.DB.WithContext(ctx), wsID, containerParent).Count(&containerNext).Error; err != nil {
+		return taskTreesOut{}, err
+	}
 	err := m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		nextPos := map[string]int64{}
 		for i := range flat {
 			fn := &flat[i]
 			var parentID *string
+			var pos int64
 			if fn.parentIdx >= 0 {
 				parentID = &created[fn.parentIdx].ID
+				pos = nextPos[*parentID]
+				nextPos[*parentID] = pos + 1
 			} else {
 				parentID = containerParent
+				pos = containerNext
+				containerNext++
 			}
 			t := model.Task{
 				ID: ids.New(ids.Task), WorkspaceID: wsID, ParentID: parentID,
 				Title: fn.in.Title, Description: fn.in.Description,
 				Status: "open", Priority: fn.in.Priority, Revision: 1,
-				CreatedBy: p.ActorID,
+				Position: pos, CreatedBy: p.ActorID,
 			}
 			if err := tx.Create(&t).Error; err != nil {
 				return err
@@ -311,6 +323,7 @@ type taskMoveItemIn struct {
 	TaskID           string  `json:"task_id"`
 	ParentID         *string `json:"parent_id"` // null = 移到根层
 	ExpectedRevision int64   `json:"expected_revision"`
+	Position         *int    `json:"position,omitempty"` // 目标兄弟序位（0 起）；缺省 = 追加末尾
 }
 
 type taskMoveIn struct {
@@ -344,6 +357,9 @@ func (m *Module) moveTasks(w http.ResponseWriter, r *http.Request) {
 // 子孙随 parent 语义自然跟随；被移动任务的租约不随父变化（租约挂在任务上）。
 // 校验全批通过后才落库：revision 冲突/环/跨 ws 任一命中 → 整批不生效。
 // 批内互移参与统一环检测（override 视图模拟最终 parent 状态）。
+// position（2.4）：同一次调用完成换父与兄弟内重排——插入到目标列表摘除前
+// 下标处（同父且原位在下标之前则等效下标 -1），越界收敛到末尾；缺省追加。
+// items 按请求顺序生效；兄弟位移不 bump 兄弟 revision，仅被移动任务自身 bump。
 func (m *Module) MoveTasks(ctx context.Context, p *auth.Principal, wsID string, in taskMoveIn) (taskBatchOut, error) {
 	order, byID, err := m.preloadBatch(ctx, wsID, batchItems(in.Items))
 	if err != nil {
@@ -352,6 +368,9 @@ func (m *Module) MoveTasks(ctx context.Context, p *auth.Principal, wsID string, 
 	for _, it := range in.Items {
 		if it.ExpectedRevision != byID[it.TaskID].Revision {
 			return taskBatchOut{}, batchRevisionConflict(byID[it.TaskID].Revision, it.TaskID)
+		}
+		if it.Position != nil && *it.Position < 0 {
+			return taskBatchOut{}, batchInvalid("position must be >= 0", map[string]any{"task_id": it.TaskID})
 		}
 	}
 
@@ -394,9 +413,54 @@ func (m *Module) MoveTasks(ctx context.Context, p *auth.Principal, wsID string, 
 	}
 
 	err = m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, it := range in.Items {
+		for i, it := range in.Items {
+			// 批内按序生效：前序项的兄弟位移会改变行状态，后续项须事务内现读。
+			// 首项直接用预载行——事务首条语句必须是写（sqlite deferred 事务
+			// 「先读后写」升锁无视 busy_timeout 直接 SQLITE_BUSY）。
+			cur := byID[it.TaskID]
+			if i > 0 {
+				if err := tx.First(&cur, "id = ?", it.TaskID).Error; err != nil {
+					return err
+				}
+			}
+			sameParent := (it.ParentID == nil && cur.ParentID == nil) ||
+				(it.ParentID != nil && cur.ParentID != nil && *it.ParentID == *cur.ParentID)
+			// 1) 摘除：老兄弟列表补洞（原位之后的兄弟前移一位）。
+			if err := siblingScope(tx, wsID, cur.ParentID).
+				Where("id <> ? AND position > ?", cur.ID, cur.Position).
+				Update("position", gorm.Expr("position - 1")).Error; err != nil {
+				return err
+			}
+			// 2) 目标插入下标：缺省 = 当前兄弟数（末尾）；显式 position 以摘除前
+			//    列表为准（同父且原位在下标之前 → 摘除后等效下标 -1），越界收敛。
+			var cnt int64
+			if err := siblingScope(tx, wsID, it.ParentID).Count(&cnt).Error; err != nil {
+				return err
+			}
+			idx := cnt
+			if it.Position != nil {
+				idx = int64(*it.Position)
+				if sameParent && int64(*it.Position) > cur.Position {
+					idx--
+				}
+				if idx < 0 {
+					idx = 0
+				}
+				if idx > cnt {
+					idx = cnt
+				}
+			}
+			// 3) 让位：目标列表 position >= idx 的兄弟后移一位（含仍在老列表里的
+			//    被移动任务自身，落位时覆写）。
+			if err := siblingScope(tx, wsID, it.ParentID).
+				Where("position >= ?", idx).
+				Update("position", gorm.Expr("position + 1")).Error; err != nil {
+				return err
+			}
+			// 4) 落位 + revision bump（乐观并发单点 bumpRevisionTx）。
 			if err := bumpRevisionTx(tx, it.TaskID, it.ExpectedRevision, map[string]any{
 				"parent_id":  it.ParentID,
+				"position":   idx,
 				"updated_by": p.ActorID,
 			}); err != nil {
 				return err

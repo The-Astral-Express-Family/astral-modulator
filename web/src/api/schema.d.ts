@@ -372,6 +372,8 @@ export interface paths {
         /**
          * workspace 容器的子任务集合 = 根层任务（parent_id 为空），仅此一层。
          *     子层用 GET /tasks/{task_id}/children 逐容器下钻（D15：不做全量平铺）。
+         *     集合按兄弟排序键 position 升序返回（2.2；cursor 为 position 键集分页，
+         *     对客户端不透明）。
          */
         get: operations["listWorkspaceChildren"];
         put?: never;
@@ -474,7 +476,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 批量移动任务到新父（全有或全无；子孙随 parent 语义自然跟随） */
+        /** 批量移动任务到新父并/或调整兄弟序位（全有或全无；子孙随 parent 语义自然跟随） */
         post: operations["moveTasks"];
         delete?: never;
         options?: never;
@@ -1401,6 +1403,13 @@ export interface components {
             assignee_actor_id: components["schemas"]["IdOrNull"];
             /** Format: int64 */
             revision: number;
+            /**
+             * Format: int64
+             * @description 兄弟排序键（2.2）：同一父容器子层内 0 起的序位，children 集合按
+             *     position 升序（同位 id 降序兜底）返回。创建=追加兄弟尾部；调整
+             *     走 move 端点的可选 position。恒填充。
+             */
+            position?: number;
             /** @description v2 起所有 Task 响应恒填充（无 tag 时空数组；修订 D11） */
             tags: components["schemas"]["Tag"][];
             /**
@@ -1466,6 +1475,13 @@ export interface components {
             parent_id: components["schemas"]["IdOrNull"];
             /** Format: int64 */
             expected_revision: number;
+            /**
+             * @description 目标父容器子层中的 0 起下标（2.2）：任务插入到摘除前列表中该下标
+             *     当前元素之前，越界收敛到末尾；缺省 = 追加到末尾。同父移动先从原位
+             *     摘除再插入（position 以摘除前的兄弟列表为准）。items 按请求顺序
+             *     生效，后项的 position 相对其处理前的目标列表状态。负数 400。
+             */
+            position?: number;
         };
         TaskMoveBatch: {
             /** @description task_id 不得重复；不支持跨 workspace（否则 404/400） */
@@ -2783,7 +2799,9 @@ export interface operations {
             /**
              * @description 整批移动成功（单事务）。items 按请求顺序返回移动后的任务全量。
              *     语义：parent_id=null 移到根层；不支持跨 workspace；移动任务到
-             *     自己的子孙下成环 → 400 整批不生效（批内互移参与统一环检测）。
+             *     自己的子孙下成环 → 400 整批不生效（批内互移参与统一环检测）；
+             *     可选 position 同时指定目标兄弟序位（2.2，同父移动 = 重排），
+             *     缺省追加末尾。
              */
             200: {
                 headers: {

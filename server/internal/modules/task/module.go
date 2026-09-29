@@ -74,6 +74,7 @@ type taskDTO struct {
 	Priority        string       `json:"priority"`
 	AssigneeActorID *string      `json:"assignee_actor_id"`
 	Revision        int64        `json:"revision"`
+	Position        int64        `json:"position"`
 	Tags            []tag.TagDTO `json:"tags"`
 	ChildrenCount   int64        `json:"children_count"`
 	BlockedBy       []string     `json:"blocked_by"`
@@ -84,8 +85,8 @@ type taskDTO struct {
 }
 
 // toTaskDTO 组装任务响应。v2（D15 修订 D11）：tags 恒填充（nil 兜底为空数组）、
-// children_count 恒填充；2.2 起依赖视图（blocked_by/blocks/related）恒填充
-// （调用方以 depViewsForTasks 批量装填，无边时空切片在此兜底）。
+// children_count 恒填充；position 恒填充（2.4）；2.2 起依赖视图（blocked_by/blocks/related）
+// 恒填充（调用方以 depViewsForTasks 批量装填，无边时空切片在此兜底）。
 func toTaskDTO(t model.Task, tags []tag.TagDTO, childCount int64, deps depViews) taskDTO {
 	if tags == nil {
 		tags = []tag.TagDTO{}
@@ -104,7 +105,8 @@ func toTaskDTO(t model.Task, tags []tag.TagDTO, childCount int64, deps depViews)
 		Title: t.Title, Description: t.Description,
 		Status: t.Status, Priority: t.Priority,
 		AssigneeActorID: t.AssigneeActorID, Revision: t.Revision,
-		Tags: tags, ChildrenCount: childCount,
+		Position: t.Position,
+		Tags:     tags, ChildrenCount: childCount,
 		BlockedBy: deps.blockedBy, Blocks: deps.blocks, Related: deps.related,
 		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),

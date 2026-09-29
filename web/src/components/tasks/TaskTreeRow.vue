@@ -1,5 +1,7 @@
 <!-- 树行：深度缩进 + 折叠箭头（children_count>0 才显示）+ 状态/优先级/标签/负责人。
-     整行点击选中，箭头只管折叠。 -->
+     整行点击选中，箭头只管折叠。行根节点 draggable（原生 DnD）：dragstart/dragover 等
+     监听由父视图透传（未声明即落到根 button）；拖拽悬停时按父视图给的模式渲染
+     插入线（before/after）或子容器高亮（child）。 -->
 <script setup lang="ts">
 import { ChevronDown, ChevronRight } from '@lucide/vue'
 import type { Actor, Task } from '@/api/types'
@@ -22,8 +24,10 @@ const props = withDefaults(
     assignee: Actor | null
     /** SSE/模拟事件更新了该任务：短暂闪烁底色提示 */
     flash?: boolean
+    /** 拖拽悬停落点模式：before/after = 插入线；child = 挂为子任务高亮 */
+    dropMode?: 'before' | 'after' | 'child' | null
   }>(),
-  { flash: false },
+  { flash: false, dropMode: null },
 )
 
 defineEmits<{ select: []; toggle: [] }>()
@@ -37,11 +41,24 @@ const hiddenTagCount = () => Math.max(props.row.task.tags.length - 3, 0)
 <template>
   <button
     type="button"
-    class="flex w-full items-center gap-1.5 rounded-md px-1 py-1.5 text-left transition-colors hover:bg-muted/60"
-    :class="[selected ? 'bg-muted' : '', flash ? 'task-row-flash' : '']"
+    draggable="true"
+    class="relative flex w-full items-center gap-1.5 rounded-md px-1 py-1.5 text-left transition-colors hover:bg-muted/60"
+    :class="[
+      selected ? 'bg-muted' : '',
+      flash ? 'task-row-flash' : '',
+      dropMode === 'child' ? 'bg-primary/5 ring-primary/60 ring-1 ring-inset' : '',
+    ]"
     :style="{ paddingLeft: `${row.depth * 18 + 6}px` }"
     @click="$emit('select')"
   >
+    <span
+      v-if="dropMode === 'before'"
+      class="bg-primary absolute top-0 right-1 left-2 h-0.5 rounded-full"
+    />
+    <span
+      v-if="dropMode === 'after'"
+      class="bg-primary absolute right-1 bottom-0 left-2 h-0.5 rounded-full"
+    />
     <span
       v-if="row.hasChildren"
       class="text-muted-foreground hover:text-foreground inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-muted"
