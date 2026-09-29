@@ -19,7 +19,6 @@ export type ErrorCode =
   | 'WORKSPACE_NAME_TAKEN'
   | 'TASK_NOT_FOUND'
   | 'TASK_ALREADY_CLAIMED'
-  | 'TASK_LEASE_EXPIRED'
   | 'TAG_PROPOSAL_EXPIRED'
   | 'TAG_ALREADY_EXISTS'
   | 'APPROVAL_EXPIRED'
@@ -148,19 +147,12 @@ export interface InvitationCreated extends Invitation {
 
 export interface InvitationPage extends Page<Invitation> {}
 
-// ---- Tasks / Tags（手工对齐 openapi v2 Task/Tag/Lease schema）----
-// v2（D15）：集合端点（children/task-search）行内恒填充 tags 与 children_count；
-// lease 仍仅 get/claim 响应非空。
+// ---- Tasks / Tags（手工对齐 openapi v2 Task/Tag schema）----
+// v2（D15）：集合端点（children/task-search）行内恒填充 tags 与 children_count。
 
 export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled'
 
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
-
-export interface Lease {
-  holder_actor_id: ID
-  expires_at: string
-  renewed_at?: string
-}
 
 export interface Tag {
   id: ID
@@ -180,7 +172,6 @@ export interface Task {
   revision: number
   tags: Tag[]
   children_count: number
-  lease?: Lease | null
   created_at: string
   updated_at: string
 }

@@ -12,7 +12,7 @@ Use Astral as a predictable machine interface, not as an interactive shell scrip
 1. Establish server and workspace context.
 2. Check authentication with `astral auth status` when appropriate.
 3. Prefer `--json` for Agent/automation use.
-4. Read current state before mutation: Task revision, lease, messages, and sync status.
+4. Read current state before mutation: Task revision, claim, messages, and sync status.
 5. Execute the narrowest command that satisfies the request.
 6. Inspect structured errors; retry only when the error is explicitly retryable or the operation is idempotent.
 7. For long-running Agent work, keep Presence/heartbeat current and read incoming events/messages.

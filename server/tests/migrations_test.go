@@ -58,7 +58,7 @@ func TestMigrationsUpFromScratch(t *testing.T) {
 	for _, table := range []string{
 		"server_meta", "human_auth", "actors", "workspaces", "workspace_members",
 		"device_authorizations", "sessions", "credentials",
-		"tasks", "task_leases", "tags", "tag_proposals",
+		"tasks", "tags", "tag_proposals",
 		"documents", "document_conflicts", "document_versions", "outbox", "audit_log", "presence", "messages",
 	} {
 		var exists bool

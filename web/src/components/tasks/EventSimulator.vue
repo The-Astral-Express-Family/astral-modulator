@@ -13,7 +13,6 @@ import {
 import {
   simulateCreateTask,
   simulateDeleteTag,
-  simulateLeaseExpire,
   simulateOtherClaim,
   simulateOtherRelease,
   simulateOtherUpdate,
@@ -63,9 +62,6 @@ function run(label: string, action: () => unknown, requireTask = true): void {
         </Button>
         <Button variant="outline" size="sm" :disabled="needsSelection" @click="run('他人释放', () => simulateOtherRelease(selectedTaskId!))">
           他人释放
-        </Button>
-        <Button variant="outline" size="sm" :disabled="needsSelection" @click="run('租约立即过期', () => simulateLeaseExpire(selectedTaskId!))">
-          租约立即过期
         </Button>
         <Button variant="outline" size="sm" :disabled="needsSelection" @click="run('他人修改标题', () => simulateOtherUpdate(selectedTaskId!))">
           他人修改标题

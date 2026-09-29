@@ -43,7 +43,7 @@
 5. **默认最小权限。** Agent 不共享人类长期凭证，Token 按 Workspace、Scope 与 TTL 限制。
 6. **MVP 模块化单体。** 先证明协作模型，再在确有规模压力时拆服务或引入消息总线。
 7. **分发是一等架构约束。** CLI 必须从第一天考虑三端构建、签名、包管理器与升级策略。
-8. **冲突不可静默丢失。** Task 与 Document 都使用显式 revision/lease 语义，避免 last-write-wins 掩盖并发问题。
+8. **冲突不可静默丢失。** Task 与 Document 都使用显式 revision 语义（Task 另有 claim 互斥），避免 last-write-wins 掩盖并发问题。
 
 ## Skills
 

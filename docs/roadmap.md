@@ -31,7 +31,7 @@
 
 Exit criteria：
 
-- 团队对 Actor/Workspace/Task/Lease/Presence/Document/Message 定义没有根本歧义；
+- 团队对 Actor/Workspace/Task/Claim/Presence/Document/Message 定义没有根本歧义；
 - 确认首个 server language；
 - 确认 public protocol；
 - 确认 CLI build/dependency baseline。
@@ -63,7 +63,7 @@ CLI login
 ### Server
 
 - health/capabilities；
-- Actor/Workspace/Task/Lease tables；
+- Actor/Workspace/Task tables；
 - auth stub/device flow integration；
 - REST endpoints；
 - PostgreSQL；
@@ -91,7 +91,6 @@ Exit criteria：两个 CLI 实例在竞争同一 Task 时只有一个 Claim 成�
 - real Agent Credential lifecycle；
 - scope/RBAC；
 - Task full state machine；
-- lease renew/expiry；
 - presence heartbeat；
 - message inbox/thread；
 - audit；
@@ -188,10 +187,9 @@ Exit criteria：Human 可以只通过 GUI 监控协作并完成常见干预。
 - Agent uses independent scoped credential；
 - Task Claim is atomic；
 - stale Agent presence expires；
-- stale Task Lease expires/revokes；
 - Agent messaging works and is realtime；
 - Document sync catches dual edits；
-- Human can revoke token/lease；
+- Human can revoke token / force-release claim；
 - Audit can reconstruct actions；
 - CLI JSON output is documented and tested；
 - Windows/macOS/Linux downloadable assets pass smoke test；

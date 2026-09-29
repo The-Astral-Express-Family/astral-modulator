@@ -238,8 +238,8 @@ func TestCapabilitiesExposeDocumentSync(t *testing.T) {
 	for _, v := range caps["features"].([]any) {
 		features[v.(string)] = true
 	}
-	if !features["task_lease"] || !features["document_sync"] || !features["task_batch"] {
-		t.Fatalf("features = %v, want task_lease + document_sync + task_batch", caps["features"])
+	if !features["task_claim"] || !features["document_sync"] || !features["task_batch"] {
+		t.Fatalf("features = %v, want task_claim + document_sync + task_batch", caps["features"])
 	}
 }
 

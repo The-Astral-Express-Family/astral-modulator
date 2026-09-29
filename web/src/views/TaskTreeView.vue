@@ -213,7 +213,7 @@ function containerCount(containerId: string): number {
     : (childrenByContainer.value.get(containerId)?.length ?? 0)
 }
 
-// task.* 事件高频场景（lease 清扫器批量过期等）防抖合并为一次重载。
+// task.* 事件高频场景（批量操作逐任务 emit 等）防抖合并为一次重载。
 function scheduleReload(): void {
   if (reloadTimer) clearTimeout(reloadTimer)
   reloadTimer = setTimeout(() => {

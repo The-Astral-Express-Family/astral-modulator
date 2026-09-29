@@ -37,7 +37,7 @@ astral todo done <id> --summary <text>
 astral todo release <id>
 ```
 
-A Task Claim is exclusive and lease-based. If claim fails because another Actor holds the Task, do not override unless the user has explicitly requested an authorized force operation.
+A Task Claim is exclusive and held until release or completion (no time-based expiry). If claim fails because another Actor holds the Task, do not override unless the user has explicitly requested an authorized force operation.
 
 ## Presence
 
@@ -50,7 +50,7 @@ astral status set blocked --task <id> --note <text>
 astral status watch
 ```
 
-Presence does not prove Task ownership. Check the Task/lease separately.
+Presence does not prove Task ownership. Check the Task claim separately.
 
 ## Messaging
 

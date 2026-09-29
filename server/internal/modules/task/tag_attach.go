@@ -152,7 +152,7 @@ func (m *Module) attachTag(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*fresh, nil, tags,
+	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(*fresh, tags,
 		m.childCount(r.Context(), fresh.ID), m.depView(r.Context(), fresh.ID)))
 }
 

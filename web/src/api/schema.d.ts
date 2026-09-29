@@ -575,43 +575,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 原子认领（Phase 1 spike 验收核心） */
+        /** 原子认领（认领持有至释放或任务完成，无时间自动过期） */
         post: operations["claimTask"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/lease/renew": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 续租（仅 holder） */
-        post: operations["renewLease"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/lease": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** 释放（holder；human force release 走 override/approval） */
-        delete: operations["releaseLease"];
+        /** 释放认领（claimant 本人；他人需 task:override 强制释放） */
+        delete: operations["releaseClaim"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1151,9 +1118,8 @@ export interface components {
         IdOrNull: components["schemas"]["Id"] | null;
         /** Format: date-time */
         DateTimeOrNull: string | null;
-        LeaseOrNull: components["schemas"]["Lease"] | null;
         /** @enum {string} */
-        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TASK_LEASE_EXPIRED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
         ErrorEnvelope: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1180,7 +1146,7 @@ export interface components {
         Capabilities: {
             protocol_version: number;
             minimum_cli_version: string;
-            /** @description 功能开关名（如 task_lease/document_sync_v1/sse_resume）；未列出即不可用 */
+            /** @description 功能开关名（如 task_claim/document_sync/task_batch）；未列出即不可用 */
             features: string[];
         };
         DeviceAuthorization: {
@@ -1448,7 +1414,6 @@ export interface components {
             blocks: components["schemas"]["Id"][];
             /** @description 与本任务关联（relates 边）的任务 id 列表（2.2；恒填充） */
             related: components["schemas"]["Id"][];
-            lease?: components["schemas"]["LeaseOrNull"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1525,16 +1490,8 @@ export interface components {
             /** @description 按请求 items 顺序返回变更后的任务全量 */
             items: components["schemas"]["Task"][];
         };
-        Lease: {
-            holder_actor_id: components["schemas"]["Id"];
-            /** Format: date-time */
-            expires_at: string;
-            /** Format: date-time */
-            renewed_at?: string;
-        };
         ClaimResult: {
             task: components["schemas"]["Task"];
-            lease: components["schemas"]["Lease"];
         };
         Tag: {
             id: components["schemas"]["Id"];
@@ -3036,13 +2993,11 @@ export interface operations {
                 "application/json": {
                     /** Format: int64 */
                     expected_revision: number;
-                    /** @default 300 */
-                    lease_seconds?: number;
                 };
             };
         };
         responses: {
-            /** @description 认领成功 */
+            /** @description 认领成功（assignee 指派为自己 + status 转 in_progress） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3054,7 +3009,7 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
-    renewLease: {
+    releaseClaim: {
         parameters: {
             query?: never;
             header?: never;
@@ -3065,30 +3020,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 已续租 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Lease"];
-                };
-            };
-            409: components["responses"]["Error"];
-        };
-    };
-    releaseLease: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: components["parameters"]["TaskId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已释放 */
+            /** @description 已释放（未认领时幂等 204） */
             204: {
                 headers: {
                     [name: string]: unknown;
