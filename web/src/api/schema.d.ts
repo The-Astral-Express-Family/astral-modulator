@@ -403,6 +403,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/task-trees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量创建根层任务树（嵌套子树一次投递；全有或全无） */
+        post: operations["createTaskTrees"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/task-trees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量创建子任务树（投递进 task 容器；语义与 workspace 版一致） */
+        post: operations["createChildTaskTrees"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/task-search": {
         parameters: {
             query?: never;
@@ -419,6 +457,44 @@ export interface paths {
         get: operations["searchTasks"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/tasks/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量移动任务到新父（全有或全无；子孙随 parent 语义自然跟随） */
+        post: operations["moveTasks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/tasks/batch-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量更新任务的同一字段值（全有或全无；如批量完成/批量取消/批量指派） */
+        post: operations["batchUpdateTasks"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1327,6 +1403,63 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        TaskTreeNode: {
+            title: string;
+            /** @default  */
+            description: string;
+            priority?: components["schemas"]["TaskPriority"];
+            /** @description 同 TaskCreate.tags（已存在 tag 规范化名；任一未知 → 404 整批不创建） */
+            tags?: string[];
+            children?: components["schemas"]["TaskTreeNode"][];
+        };
+        TaskTreeBatch: {
+            /**
+             * @description 一次投递的根树集合。整批（含全部嵌套 children）总节点数 ≤200、
+             *     嵌套深度 ≤8，超限 400 VALIDATION_FAILED（上限计数按节点，长度
+             *     校验按 UTF-8 字节口径，TODO.md §1.2 L1）。整批单事务、全有或
+             *     全无：任一节点非法则整批不创建。
+             */
+            trees: components["schemas"]["TaskTreeNode"][];
+        };
+        TaskTreeNodeCreated: {
+            task: components["schemas"]["Task"];
+            /** @description 与请求 children 一一对应（无子任务时空数组） */
+            children: components["schemas"]["TaskTreeNodeCreated"][];
+        };
+        TaskTreeBatchCreated: {
+            /** @description 与请求 trees 一一对应，镜像嵌套结构 */
+            items: components["schemas"]["TaskTreeNodeCreated"][];
+        };
+        TaskMoveItem: {
+            task_id: components["schemas"]["Id"];
+            /** @description null = 移到根层；Id = 挂到该任务下（可为批内任务） */
+            parent_id: components["schemas"]["IdOrNull"];
+            /** Format: int64 */
+            expected_revision: number;
+        };
+        TaskMoveBatch: {
+            /** @description task_id 不得重复；不支持跨 workspace（否则 404/400） */
+            items: components["schemas"]["TaskMoveItem"][];
+        };
+        TaskBatchUpdateItem: {
+            task_id: components["schemas"]["Id"];
+            /** Format: int64 */
+            expected_revision: number;
+        };
+        TaskBatchUpdate: {
+            /** @description task_id 不得重复 */
+            items: components["schemas"]["TaskBatchUpdateItem"][];
+            /** @description 应用于选中集合的同一字段值；至少提供一项，否则 400 */
+            set: {
+                status?: components["schemas"]["TaskStatus"];
+                priority?: components["schemas"]["TaskPriority"];
+                assignee_actor_id?: components["schemas"]["IdOrNull"];
+            };
+        };
+        TaskBatchResult: {
+            /** @description 按请求 items 顺序返回变更后的任务全量 */
+            items: components["schemas"]["Task"][];
+        };
         Lease: {
             holder_actor_id: components["schemas"]["Id"];
             /** Format: date-time */
@@ -1668,6 +1801,12 @@ export interface components {
         TaskAssigneeFilter: string;
         TaskRegexFilter: string;
         TaskFuzzyFilter: string;
+        /**
+         * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+         *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+         *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+         */
+        IdempotencyKey: string;
     };
     requestBodies: never;
     headers: never;
@@ -2370,7 +2509,14 @@ export interface operations {
     createRootTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 workspace_id: components["parameters"]["WorkspaceId"];
             };
@@ -2426,7 +2572,14 @@ export interface operations {
     createChildTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 task_id: components["parameters"]["TaskId"];
             };
@@ -2447,6 +2600,79 @@ export interface operations {
                     "application/json": components["schemas"]["Task"];
                 };
             };
+            404: components["responses"]["Error"];
+        };
+    };
+    createTaskTrees: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskTreeBatch"];
+            };
+        };
+        responses: {
+            /**
+             * @description 整批创建成功（单事务；任一节点非法则整批不创建）。items 与请求
+             *     trees 一一对应并镜像嵌套结构，task 内含服务端生成的 id/revision。
+             */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTreeBatchCreated"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createChildTaskTrees: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskTreeBatch"];
+            };
+        };
+        responses: {
+            /** @description 整批创建成功（全部新任务 parent=容器任务） */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTreeBatchCreated"];
+                };
+            };
+            400: components["responses"]["Error"];
             404: components["responses"]["Error"];
         };
     };
@@ -2480,6 +2706,82 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+        };
+    };
+    moveTasks: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskMoveBatch"];
+            };
+        };
+        responses: {
+            /**
+             * @description 整批移动成功（单事务）。items 按请求顺序返回移动后的任务全量。
+             *     语义：parent_id=null 移到根层；不支持跨 workspace；移动任务到
+             *     自己的子孙下成环 → 400 整批不生效（批内互移参与统一环检测）。
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskBatchResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    batchUpdateTasks: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskBatchUpdate"];
+            };
+        };
+        responses: {
+            /** @description 整批更新成功（单事务）。items 按请求顺序返回更新后的任务全量。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskBatchResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getTask: {

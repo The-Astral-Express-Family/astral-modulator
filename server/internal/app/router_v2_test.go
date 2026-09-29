@@ -194,3 +194,143 @@ func TestTaskTreeContainersV2(t *testing.T) {
 		}
 	}
 }
+
+// doAuthedHeader 同 doAuthed，可附带额外 header（Idempotency-Key 重放测试用）。
+func doAuthedHeader(t *testing.T, ts *httptest.Server, cookie, method, path string, body any, headers map[string]string) (int, map[string]any) {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		raw, _ := json.Marshal(body)
+		reader = bytes.NewReader(raw)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequest(method, ts.URL+path, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&http.Cookie{Name: "astral_session", Value: cookie})
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+// TestTaskBatchV2：批量管理三端点的 HTTP 集成（协议 2.1 task_batch）——
+// 树创建镜像形状、批量移动、批量同值更新、Idempotency-Key 整批重放不双建。
+func TestTaskBatchV2(t *testing.T) {
+	ts := newTestServer(t)
+	cookie := loginHuman(t, ts, "batch@example.com")
+	api := "/api/v1"
+	code, ws := doAuthed(t, ts, cookie, "POST", api+"/workspaces", map[string]any{"name": "batch-demo"})
+	if code != 201 {
+		t.Fatalf("create ws: %d %v", code, ws)
+	}
+	wsID := ws["id"].(string)
+
+	// 1. 树创建：一棵带子的树 + 一棵单节点树 → 201，镜像嵌套 + tags/children_count。
+	body := map[string]any{"trees": []any{
+		map[string]any{"title": "Epic", "children": []any{map[string]any{"title": "Story"}}},
+		map[string]any{"title": "Solo"},
+	}}
+	code, out := doAuthedHeader(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/task-trees", body,
+		map[string]string{"Idempotency-Key": "itest-batch-tree-1"})
+	if code != 201 {
+		t.Fatalf("task-trees: %d %v", code, out)
+	}
+	created := items(t, out)
+	if len(created) != 2 {
+		t.Fatalf("tree roots = %d", len(created))
+	}
+	epic := created[0].(map[string]any)["task"].(map[string]any)
+	epicID := epic["id"].(string)
+	kids := created[0].(map[string]any)["children"].([]any)
+	if len(kids) != 1 || kids[0].(map[string]any)["task"].(map[string]any)["parent_id"] != epicID {
+		t.Fatalf("tree nesting broken: %v", created[0])
+	}
+	soloID := created[1].(map[string]any)["task"].(map[string]any)["id"].(string)
+
+	// 2. 同 Idempotency-Key 重放 → 同响应，且根层不重复建树。
+	code2, out2 := doAuthedHeader(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/task-trees", body,
+		map[string]string{"Idempotency-Key": "itest-batch-tree-1"})
+	if code2 != 201 {
+		t.Fatalf("idempotent replay: %d %v", code2, out2)
+	}
+	replayed := items(t, out2)
+	if replayed[0].(map[string]any)["task"].(map[string]any)["id"] != epicID {
+		t.Fatalf("replay must return first response, got new ids")
+	}
+	code, page := doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children", nil)
+	if code != 200 || len(items(t, page)) != 2 {
+		t.Fatalf("replay duplicated trees: %d %v", code, page)
+	}
+
+	// 3. 批量移动：Solo 移到 Epic 下；Story 移回根层（parent_id=null）。
+	storyID := kids[0].(map[string]any)["task"].(map[string]any)["id"].(string)
+	code, mv := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": soloID, "parent_id": epicID, "expected_revision": 1},
+			map[string]any{"task_id": storyID, "parent_id": nil, "expected_revision": 1},
+		}})
+	if code != 200 {
+		t.Fatalf("move: %d %v", code, mv)
+	}
+	moved := items(t, mv)
+	if moved[0].(map[string]any)["parent_id"] != epicID || moved[1].(map[string]any)["parent_id"] != nil {
+		t.Fatalf("move result: %v", moved)
+	}
+	if moved[0].(map[string]any)["revision"] != float64(2) {
+		t.Fatalf("move must bump revision: %v", moved[0])
+	}
+
+	// 4. 批量同值更新：全 done。set 为空 → 400。
+	code, up := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/batch-update",
+		map[string]any{
+			"items": []any{
+				map[string]any{"task_id": epicID, "expected_revision": 1}, // Epic 未被移动，仍在 rev1
+				map[string]any{"task_id": soloID, "expected_revision": 2},
+			},
+			"set": map[string]any{"status": "done"},
+		})
+	if code != 200 {
+		t.Fatalf("batch-update: %d %v", code, up)
+	}
+	for _, it := range items(t, up) {
+		if it.(map[string]any)["status"] != "done" {
+			t.Fatalf("status not applied: %v", it)
+		}
+	}
+	code, errBody := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/batch-update",
+		map[string]any{"items": []any{map[string]any{"task_id": epicID, "expected_revision": 3}}, "set": map[string]any{}})
+	if code != 400 || errCode(t, errBody) != "VALIDATION_FAILED" {
+		t.Fatalf("empty set: %d %v", code, errBody)
+	}
+
+	// 5. 环：Epic 移到自己的子孙 Solo 下 → 400 整批不生效。
+	code, errBody = doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": epicID, "parent_id": soloID, "expected_revision": 2},
+		}})
+	if code != 400 || errCode(t, errBody) != "VALIDATION_FAILED" {
+		t.Fatalf("cycle: %d %v", code, errBody)
+	}
+
+	// 6. revision 冲突 → 409，details 带 task_id。
+	code, errBody = doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": epicID, "parent_id": nil, "expected_revision": 99},
+		}})
+	if code != 409 || errCode(t, errBody) != "REVISION_CONFLICT" {
+		t.Fatalf("revision conflict: %d %v", code, errBody)
+	}
+}
