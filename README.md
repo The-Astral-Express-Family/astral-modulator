@@ -33,7 +33,7 @@ server/         Go 模块化单体（chi + GORM + goose）
 web/            Vue 3 + TS + Vite 控制台（api client/SSE 封装已就绪）
 docs/           需求/架构/协议/安全/部署等文档与 ADR
 skills/         Agent 技能（astral-install / astral-cli / astral-collaboration）
-.github/        CI（server / web / openapi 三道门）
+.github/        CI（ci.yml 三道质量门 + docker.yml 镜像构建/发布）
 ```
 
 ## 快速开始（开发）
@@ -103,6 +103,27 @@ cd web && npm run build
 
 与 CI 三道门（`.github/workflows/ci.yml`：server / web / openapi）对应；web 门
 另含 `npm run gen:api` 后 `schema.d.ts` 逐字节一致的 drift 检查。
+
+## 镜像与发布（semver tag 驱动）
+
+镜像 `ghcr.io/the-astral-express-family/astral-modulator`（amd64），由
+`.github/workflows/docker.yml` 构建发布：
+
+| 事件 | 镜像标签 | GitHub Release |
+|---|---|---|
+| PR | 只验证可构建，不推送 | — |
+| merge 到 main | `dev`（滚动）、`dev-<短sha>`（可回溯） | — |
+| push `v1.2.3` | `1.2.3`、`1.2`、`1`、`latest` | ✅ 自动（含变更日志） |
+| push `v1.2.3-rc.1` | 仅 `1.2.3-rc.1`（不动 latest/移动标签） | ✅ 自动（标记 prerelease） |
+
+发布就是打 tag：
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+tag 需匹配严格 semver（`vMAJOR.MINOR.PATCH[-prerelease]`，非法如 `v1.2`/
+`v01.2.3` 会被 CI 拦截）；含 `-` 的 tag 视为预发布，不更新 `latest`。
 
 ## 协议变更流程
 

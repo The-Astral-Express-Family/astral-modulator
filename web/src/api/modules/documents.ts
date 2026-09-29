@@ -7,6 +7,13 @@
 // - delete：DELETE /workspaces/{id}/documents/{path}?base_revision= —— 版本化
 //   tombstone（禁止盲删）；base 失配走 409 DOCUMENT_CONFLICT 冲突工件，由
 //   ConflictsView 解决；
+// - push：PUT /workspaces/{id}/documents/{path} —— 四路分发（create /
+//   fast-forward / revive / 冲突工件）：不存在且 base_revision=0 即新建
+//   （revision=1）；tombstone 且 base_revision=0 即恢复（revive，版本号
+//   续增）；revision 匹配且 hash 匹配即快进；否则 409 DOCUMENT_CONFLICT。
+//   content 上限 1MiB，base_hash 失配 400 base_hash_mismatch；携带
+//   Idempotency-Key 防双击重复提交（新建分支才有意义，服务端仅对 create
+//   分支生效）。
 // - conflicts 列表：GET /workspaces/{id}/conflicts —— status=open|resolved|all，
 //   created_at DESC + id 游标（共享 Limit）；
 // - conflicts 详情：GET /workspaces/{id}/conflicts/{cid} —— 列表形状 + 双方全文
@@ -88,6 +95,36 @@ export function deleteDocument(
       { base_revision: baseRevision },
     ),
     { method: 'DELETE', ...opts },
+  )
+}
+
+// push 输入：base_revision + base_hash + content（content_hash 可选，服务端
+// 以重算值为准）。创建新文档传 base_revision=0 + base_hash 为 64 位零 hash
+// （协议占位；服务端对不存在行不校验 hash）。
+export interface PushDocumentInput {
+  base_revision: number
+  base_hash: string
+  content: string
+}
+
+// 保存文档（PUT pushDocument）。返回最新 DocumentDto；409 DOCUMENT_CONFLICT
+// 时 reject（调用方引导去冲突裁决）；400 base_hash_mismatch / content 超 1MiB
+// 同样 reject，由 UI 就地展示。Idempotency-Key 默认随机生成（幂等窗口内
+// 重复点击不会产生两个 revision），可显式传入以便重试复用同一 key。
+export function pushDocument(
+  workspaceId: string,
+  path: string,
+  input: PushDocumentInput,
+  opts: CallOpts & { idempotencyKey?: string } = {},
+): Promise<DocumentDto> {
+  return apiFetch<DocumentDto>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeDocPath(path)}`,
+    {
+      method: 'PUT',
+      body: input,
+      idempotencyKey: opts.idempotencyKey ?? crypto.randomUUID(),
+      ...opts,
+    },
   )
 }
 

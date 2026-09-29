@@ -11,21 +11,33 @@
        不可见（未加入 / 服务端未铺）→ 说明文案（见下方 ORG_MEMORY_NOTE）。
      - R4 文档活动栏：SSE document.updated / document.conflict 事件流小面板
        （最近 20 条：path+revision+deleted / conflict_id），点击可跳详情或
-       冲突视图；document.updated 同时防抖静默刷新清单与已选文档。 -->
+       冲突视图；document.updated 同时防抖静默刷新清单与已选文档。
+     - 内容渲染：默认走 MarkdownDoc 渲染视图（marked 解析 + DOMPurify 清洗，
+       可切回源码、偏好 localStorage 记忆），见 components/shared/MarkdownDoc。
+     - 编辑（会话级状态）：详情卡「编辑」进入 DocEditPanel（CM6 编辑、预览、
+       保存带乐观并发 base；409 冲突引导去 ConflictsView）；清单头「新建文档」
+       （path 预校验，push base_revision=0 create 分支）；tombstone 详情「恢复」
+       走 revive 分支。编辑器与解析器均惰性 chunk，查看态零成本。 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { Activity, ArrowRight, Brain, FileText } from '@lucide/vue'
+import { RouterLink, onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { Activity, ArrowRight, Brain, FilePlusIcon, FileText, PencilIcon } from '@lucide/vue'
 import { getDocument, getDocumentManifest } from '@/api/modules/documents'
 import type { DocumentDto, ManifestItemDto } from '@/api/modules/documents'
 import { listWorkspaces } from '@/api/modules/core'
 import type { Workspace } from '@/api/types'
 import { useCursorList } from '@/composables/useCursorList'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { useEventStream } from '@/composables/useEventStream'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import { fmtTime } from '@/lib/format'
 import { SSE_VARIANTS } from '@/lib/sse'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import MarkdownDoc from '@/components/shared/MarkdownDoc.vue'
+import DocEditPanel from '@/components/shared/DocEditPanel.vue'
+import { pushDocument } from '@/api/modules/documents'
+import { formatApiError } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -128,6 +140,98 @@ async function loadDoc(opts: { silent?: boolean } = {}): Promise<void> {
   } finally {
     docLoading.value = false
   }
+}
+
+// ---- 编辑态（会话级，不进路由；编辑器惰性 chunk）----
+
+const editing = ref(false)
+const editDirty = ref(false)
+
+// 路由离开守卫：脏编辑时确认，防止误触导航丢稿。
+onBeforeRouteLeave(() => {
+  if (editing.value && editDirty.value && !window.confirm('文档尚未保存，确定离开？'))
+    return false
+  return true
+})
+
+function startEdit(): void {
+  if (!doc.value) return
+  // tombstone 也允许进入编辑态：保存即走 revive 分支（base_revision=0）。
+  editing.value = true
+}
+
+function stopEdit(): void {
+  editing.value = false
+}
+
+function onSaved(d: DocumentDto): void {
+  editing.value = false
+  doc.value = d
+  void loadManifest({ silent: true })
+}
+
+function goConflicts(): void {
+  void router.push(`/workspaces/${workspaceId.value}/conflicts`)
+}
+
+// ---- 新建文档（清单头入口，create 分支 base_revision=0）----
+
+const createOpen = ref(false)
+const newPath = ref('')
+const newPathError = ref('')
+const creating = ref(false)
+
+const PATH_RE = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/i
+
+function validateNewPath(): boolean {
+  const p = newPath.value.trim()
+  if (!p) {
+    newPathError.value = '请输入路径。'
+    return false
+  }
+  if (!PATH_RE.test(p)) {
+    newPathError.value = '路径仅限字母数字与 . _ - 与 /，且不含空段。'
+    return false
+  }
+  if (p.includes('..') || p.startsWith('/') || p.toLowerCase().startsWith('memory/')) {
+    newPathError.value = '不允许 ..、绝对路径或 memory/ 保留前缀。'
+    return false
+  }
+  if (visibleItems.value.some((it) => it.path === p)) {
+    newPathError.value = '该路径已存在（可开启「含已删除」确认 tombstone）。'
+    return false
+  }
+  newPathError.value = ''
+  return true
+}
+
+async function createDoc(): Promise<void> {
+  if (!validateNewPath() || creating.value) return
+  creating.value = true
+  try {
+    const d = await pushDocument(
+      workspaceId.value,
+      newPath.value.trim(),
+      { base_revision: 0, base_hash: `sha256:${'0'.repeat(64)}`, content: '' },
+      { silent: true },
+    )
+    createOpen.value = false
+    newPath.value = ''
+    await refreshManifestAfterWrite()
+    selectedPath.value = d.path
+    doc.value = d
+    editing.value = true
+  } catch (e) {
+    newPathError.value = formatApiError(e)
+  } finally {
+    creating.value = false
+  }
+}
+
+// 写后刷新：清游标重拉首页，保持清单与新 revision 同步。
+async function refreshManifestAfterWrite(): Promise<void> {
+  nextCursor.value = null
+  await loadManifest({ silent: true })
 }
 
 // ---- R4 文档活动栏（document.updated / document.conflict）----
@@ -298,6 +402,10 @@ watch([workspaceId], () => {
             <span class="text-muted-foreground ml-auto text-xs">
               已加载 {{ visibleItems.length }} 项（path 升序）
             </span>
+            <Button size="xs" variant="outline" @click="createOpen = true">
+              <FilePlusIcon class="size-3" />
+              新建文档
+            </Button>
           </div>
 
           <div v-if="loading && !items.length" class="flex flex-col gap-2">
@@ -369,6 +477,17 @@ watch([workspaceId], () => {
                 记忆
               </Badge>
               <Badge v-if="doc?.deleted" variant="destructive" class="shrink-0">已删除（tombstone）</Badge>
+              <span class="grow" />
+              <Button
+                v-if="doc && !editing"
+                size="xs"
+                variant="outline"
+                :disabled="docLoading"
+                @click="startEdit"
+              >
+                <PencilIcon class="size-3" />
+                {{ doc.deleted ? '恢复' : '编辑' }}
+              </Button>
             </template>
             <template v-else>内容</template>
           </CardTitle>
@@ -381,6 +500,19 @@ watch([workspaceId], () => {
               <Skeleton class="h-5 w-2/3" />
             </div>
             <template v-else-if="doc">
+              <template v-if="editing">
+                <DocEditPanel
+                  :workspace-id="workspaceId"
+                  :path="selectedPath"
+                  :base="doc"
+                  :revive="doc.deleted"
+                  @saved="onSaved"
+                  @cancel="stopEdit"
+                  @conflict="goConflicts"
+                  @dirty-change="editDirty = $event"
+                />
+              </template>
+              <template v-else>
               <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span class="text-muted-foreground">revision <code class="font-mono">r{{ doc.revision }}</code></span>
                 <span class="text-muted-foreground font-mono" :title="doc.content_hash">
@@ -392,7 +524,8 @@ watch([workspaceId], () => {
                 该文档已打 tombstone（版本化删除）：行保留、revision 继续递增；对它的下
                 一次 push（base_revision=0）会将其复活。
               </p>
-              <pre class="bg-muted/40 max-h-[28rem] overflow-auto rounded-lg p-3 font-mono text-xs whitespace-pre-wrap break-all">{{ doc.content }}</pre>
+              <MarkdownDoc :content="doc.content" />
+              </template>
             </template>
             <Empty v-else class="border">
               <EmptyHeader>
@@ -456,4 +589,35 @@ watch([workspaceId], () => {
       </CardContent>
     </Card>
   </div>
+
+  <!-- 新建文档：path 客户端预校验 + push create 分支（base_revision=0）。
+       错误就地展示（silent 调用），成功后关对话框、刷新清单、直达编辑态。 -->
+  <Dialog :open="createOpen" @update:open="createOpen = $event">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>新建文档</DialogTitle>
+        <DialogDescription>
+          输入仓库相对路径（如 docs/plan.md）；创建后直接进入编辑。
+        </DialogDescription>
+      </DialogHeader>
+      <div class="flex flex-col gap-2">
+        <Input
+          v-model="newPath"
+          placeholder="docs/plan.md"
+          class="font-mono"
+          :disabled="creating"
+          @keyup.enter="createDoc"
+        />
+        <p v-if="newPathError" class="text-destructive text-xs">{{ newPathError }}</p>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" size="sm" :disabled="creating" @click="createOpen = false">
+          取消
+        </Button>
+        <Button size="sm" :disabled="creating" @click="createDoc">
+          {{ creating ? '创建中…' : '创建并编辑' }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>

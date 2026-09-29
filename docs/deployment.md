@@ -74,6 +74,17 @@ Secrets 只走环境变量/secret manager，不提交配置库。
 - NATS JetStream（多实例事件广播成为产品需求后，见 architecture §19）；
 - object storage、worker、集中式 logs/metrics/traces。
 
+### 容器镜像（semver tag 驱动，2026-09-28 起）
+
+镜像 `ghcr.io/the-astral-express-family/astral-modulator`（amd64）由
+`.github/workflows/docker.yml` 驱动多阶段 `Containerfile` 构建发布：web
+（npm build）与 server 二进制都在镜像内构建，webdist 同源托管产物随镜像
+分发。标签映射：tag `vX.Y.Z` → `X.Y.Z`/`X.Y`/`X`/`latest` + 自动创建
+GitHub Release（prerelease 后缀只推完整版本号、不动 latest 且标记预发布）；
+main 推送 → `dev` 滚动 + `dev-<短sha>`；PR 仅验证构建不推送。标签细节以
+仓库根 README「镜像与发布」一节为准。数据库升级仍走 §2 goose 流程，
+容器不改写 schema。
+
 ## 2. 数据库升级
 
 - migration 为 goose 版本化 SQL（`server/migrations/`），单调递增、幂等；
