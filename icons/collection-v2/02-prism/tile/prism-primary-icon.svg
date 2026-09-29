@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="prism-primary-tile-icon-title prism-primary-tile-icon-description">
+  <title id="prism-primary-tile-icon-title">Astral Prism logo tile · primary · icon</title>
+  <desc id="prism-primary-tile-icon-description">由四个平面组成的几何 A，厚重、锐利，适合产品图标。 Pure icon on a rounded primary color tile.</desc>
+
+  <rect width="512" height="512" rx="112" fill="#f1f3f3"/>
+  <rect x="1" y="1" width="510" height="510" rx="111" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="2"/>
+  <g transform="translate(20 20) scale(0.921875)">
+
+  <g fill="#161b1d">
+    <path d="M 238 62 L 250 62 L 181 418 L 86 418 Z"/>
+    <path d="M 262 62 L 274 62 L 426 418 L 331 418 Z"/>
+    <path d="M 238 62 L 274 62 L 306 136 L 207 136 Z"/>
+    <path d="M 150 260 L 362 260 L 389 322 L 123 322 Z"/>
+  </g>
+  </g>
+</svg>

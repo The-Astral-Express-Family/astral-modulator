@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="constellation-white-icon-title constellation-white-icon-description">
+  <title id="constellation-white-icon-title">Astral Constellation logo · white · icon</title>
+  <desc id="constellation-white-icon-description">节点星群与四向星芒，精确、开放、具有天体导航感。 Pure transparent icon artwork.</desc>
+
+  <g fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 114 206 L 146 142 L 214 108"/>
+    <path d="M 298 108 L 366 142 L 398 206"/>
+    <path d="M 398 306 L 366 370 L 298 404"/>
+    <path d="M 214 404 L 146 370 L 114 306"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="114" cy="206" r="18"/>
+    <circle cx="398" cy="206" r="18"/>
+    <circle cx="398" cy="306" r="18"/>
+    <circle cx="114" cy="306" r="18"/>
+    <circle cx="214" cy="108" r="12"/>
+    <circle cx="298" cy="108" r="12"/>
+    <circle cx="214" cy="404" r="12"/>
+    <circle cx="298" cy="404" r="12"/>
+    <path d="M 256 144 L 281 231 L 368 256 L 281 281 L 256 368 L 231 281 L 144 256 L 231 231 Z"/>
+  </g>
+</svg>

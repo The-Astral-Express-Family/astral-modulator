@@ -76,7 +76,6 @@ Testing/
 # ---- Go server ----
 server/astral-server
 server/astral-server.exe
-server/astral-server-linux
 server/*.test
 server/coverage.out
 # webdist 构建产物（make web-dist 拷入；.gitkeep 占位必须入库，勿删）
@@ -93,9 +92,6 @@ web/*.local
 .env.*
 !.env.example
 
-# ---- astral CLI 本机绑定（server URL 因机器而异，凭证在 ~/.astral-cli）----
-.astral/
-
 # ---- editors/tooling ----
 .idea/
 .vscode/
@@ -109,6 +105,34 @@ redocly.ignore
 # 真身在 .agents/skills/（入库，pi/zcode 直接扫）；.claude 下是给 Claude Code 的本机符号链接
 .claude/skills/repo-hygiene
 
-# ---- agent session state ----
-# 会话工作计划是一次性产物，不入库（曾被误提交，2026-09 清理）
-.zcode/plans/
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

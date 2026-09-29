@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="prism-primary-icon-title prism-primary-icon-description">
+  <title id="prism-primary-icon-title">Astral Prism logo · primary · icon</title>
+  <desc id="prism-primary-icon-description">由四个平面组成的几何 A，厚重、锐利，适合产品图标。 Pure transparent icon artwork.</desc>
+
+  <g fill="#161b1d">
+    <path d="M 238 62 L 250 62 L 181 418 L 86 418 Z"/>
+    <path d="M 262 62 L 274 62 L 426 418 L 331 418 Z"/>
+    <path d="M 238 62 L 274 62 L 306 136 L 207 136 Z"/>
+    <path d="M 150 260 L 362 260 L 389 322 L 123 322 Z"/>
+  </g>
+</svg>

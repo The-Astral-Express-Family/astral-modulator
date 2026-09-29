@@ -1,0 +1,84 @@
+{
+  "collection": "Astral Brand Logo Collection v2",
+  "generator": "generate.mjs",
+  "sourceTheme": "../../web/src/assets/index.css",
+  "theme": {
+    "primary": "#161b1d",
+    "secondary": "#f1f3f3",
+    "palette": {
+      "white": "#ffffff",
+      "black": "#000000",
+      "primary": "#161b1d"
+    },
+    "tileBackground": {
+      "white": "#161b1d",
+      "black": "#ffffff",
+      "primary": "#f1f3f3"
+    }
+  },
+  "concepts": [
+    {
+      "id": "constellation",
+      "number": "01",
+      "name": "Constellation · 星群",
+      "description": "节点星群与四向星芒，精确、开放、具有天体导航感。"
+    },
+    {
+      "id": "prism",
+      "number": "02",
+      "name": "Prism · 折面",
+      "description": "由四个平面组成的几何 A，厚重、锐利，适合产品图标。"
+    },
+    {
+      "id": "modwave",
+      "number": "03",
+      "name": "Modwave · 调制波",
+      "description": "平滑 Bézier 调制波穿过解构 A，最直接回应 Modulator 与草图。"
+    }
+  ],
+  "variantsPerConcept": 12,
+  "svgCount": 36,
+  "naming": "<concept>-<white|black|primary>-<icon|lockup>.svg",
+  "surfaces": {
+    "transparent": "No canvas background; place on a controlled surface.",
+    "tile": "512x512 rounded background with the foreground color paired for contrast."
+  },
+  "files": [
+    "01-constellation/transparent/constellation-white-icon.svg",
+    "01-constellation/transparent/constellation-white-lockup.svg",
+    "01-constellation/tile/constellation-white-icon.svg",
+    "01-constellation/tile/constellation-white-lockup.svg",
+    "01-constellation/transparent/constellation-black-icon.svg",
+    "01-constellation/transparent/constellation-black-lockup.svg",
+    "01-constellation/tile/constellation-black-icon.svg",
+    "01-constellation/tile/constellation-black-lockup.svg",
+    "01-constellation/transparent/constellation-primary-icon.svg",
+    "01-constellation/transparent/constellation-primary-lockup.svg",
+    "01-constellation/tile/constellation-primary-icon.svg",
+    "01-constellation/tile/constellation-primary-lockup.svg",
+    "02-prism/transparent/prism-white-icon.svg",
+    "02-prism/transparent/prism-white-lockup.svg",
+    "02-prism/tile/prism-white-icon.svg",
+    "02-prism/tile/prism-white-lockup.svg",
+    "02-prism/transparent/prism-black-icon.svg",
+    "02-prism/transparent/prism-black-lockup.svg",
+    "02-prism/tile/prism-black-icon.svg",
+    "02-prism/tile/prism-black-lockup.svg",
+    "02-prism/transparent/prism-primary-icon.svg",
+    "02-prism/transparent/prism-primary-lockup.svg",
+    "02-prism/tile/prism-primary-icon.svg",
+    "02-prism/tile/prism-primary-lockup.svg",
+    "03-modwave/transparent/modwave-white-icon.svg",
+    "03-modwave/transparent/modwave-white-lockup.svg",
+    "03-modwave/tile/modwave-white-icon.svg",
+    "03-modwave/tile/modwave-white-lockup.svg",
+    "03-modwave/transparent/modwave-black-icon.svg",
+    "03-modwave/transparent/modwave-black-lockup.svg",
+    "03-modwave/tile/modwave-black-icon.svg",
+    "03-modwave/tile/modwave-black-lockup.svg",
+    "03-modwave/transparent/modwave-primary-icon.svg",
+    "03-modwave/transparent/modwave-primary-lockup.svg",
+    "03-modwave/tile/modwave-primary-icon.svg",
+    "03-modwave/tile/modwave-primary-lockup.svg"
+  ]
+}
