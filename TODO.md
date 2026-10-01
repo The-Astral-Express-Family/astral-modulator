@@ -324,6 +324,9 @@ docs/                               architecture/protocol/sync-semantics/registr
 | 开放注册 / 邮箱验证 / 邀请授 owner | 永不（MVP） | docs/registration.md §8（「服务器级邀请」项已被 ADR-0009 吸收为注册轨） |
 | 邀请配对签发 / 站内通知发邀请 | 否决（ADR-0009） | 破坏注册资格稀缺性 / 需 per-actor 事件通道；重启条件见 registration.md §8 |
 | CLI `astral join <code>` | 移交 | astral-cli 仓；CLI 入组需求薄，出现需求再做（redeem 端点已就绪） |
+| 登录计时均衡（unknown email 分支走 dummy bcrypt） | 触发式 | Login 无此邮箱分支 ~1ms 即返、命中分支 ~75ms（bcrypt），邮箱可枚举——2026-10-01 线上日志计时签名实证；加 dummy verify 时注意别引入真实用户 fast-path 回归 |
+| 密码修改/重置流程（自助改密、admin 重置） | 触发式 | 当前无任何改密端点，密码遗忘只能 DB 直写 human_auth.password_hash（2026-10-01 用户锁号，靠日志旁证排除服务端状态损坏）；出现真实运营需求再启 |
+| GORM Error 级 SQL 日志脱敏（ParameterizedQueries） | 触发式 | 唯一索引冲突等错误行把 email + bcrypt 哈希整行打进 journald（2026-10 线上日志实证）；评估 ops 日志留存敏感面后再定 |
 
 ## 4. 代码内 TODO(phase-x) 处置映射
 
