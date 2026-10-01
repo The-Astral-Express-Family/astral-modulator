@@ -109,6 +109,14 @@ export const router = createRouter({
           meta: { auth: 'required' },
         },
         {
+          // /join?ws=<code>：工作区邀请链接落点（ADR-0009）。匿名先经守卫
+          // 跳登录并原路返回；登录态进入 JoinView 自动兑换。
+          path: 'join',
+          name: 'join',
+          component: () => import('../views/JoinView.vue'),
+          meta: { auth: 'required' },
+        },
+        {
           path: ':pathMatch(.*)*',
           name: 'not-found',
           component: () => import('../views/NotFoundView.vue'),
@@ -145,12 +153,19 @@ router.beforeEach(async (to) => {
   if (to.meta.auth === 'required' && !session.isLoggedIn) {
     return loginLocation(to.fullPath)
   }
-  // 已登录访问 /login、/register：直接送去 from 目标或总览
-  // （两页都是匿名专属动作；sanitize 已排除 /login 自身，无循环）。
+  // 已登录访问 /login：直接送去 from 目标或总览（匿名专属动作；
+  // sanitize 已排除 /login 自身，无循环）。已登录访问 /register 则转
+  // /join——账号已存在，注册页对它唯一有意义的邻接动作是兑码入伙
+  // （ADR-0009：注册与入伙两码分离）。
   // mock 演示身份不算真实登录态，否则 VITE_TASKS_MOCK=1 的开发模式下
   // 匿名注册/登录入口会被误弹走。
-  if ((to.name === 'login' || to.name === 'register') && session.isLoggedIn && !session.isDemo) {
-    return sanitizeRedirect(to.query.from) ?? '/'
+  if (session.isLoggedIn && !session.isDemo) {
+    if (to.name === 'login') {
+      return sanitizeRedirect(to.query.from) ?? '/'
+    }
+    if (to.name === 'register') {
+      return { path: '/join' }
+    }
   }
 
   const isLanding = firstNavigation

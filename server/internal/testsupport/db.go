@@ -27,7 +27,7 @@ func AllModels() []any {
 		&model.Document{}, &model.DocumentConflict{}, &model.DocumentVersion{},
 		&model.OutboxEvent{}, &model.AuditEntry{},
 		&model.Presence{}, &model.Message{},
-		&model.IdempotencyKey{}, &model.Approval{}, &model.Invitation{}, &model.PlatformInvitation{},
+		&model.IdempotencyKey{}, &model.Approval{}, &model.Invitation{}, &model.RegistrationInvitation{},
 	}
 }
 

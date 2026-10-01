@@ -1,3 +1,7 @@
+// 注册端点契约门（ADR-0009 双轨分离）：注册只认注册邀请码；工作区邀请码
+// 与一切未知码在 /auth/register 一律 INVITE_INVALID（同码同文案防探测），
+// 不消耗、不留 actor 残留。注册码的边界语义（统一文案/失败不消耗/归一化）
+// 也归本文件；兑换建号主路径见 registration_invite_test.go。
 package auth
 
 import (
@@ -9,11 +13,10 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
-	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
 )
 
-// seedInviteWorld 造一个可用邀请的全部前置：签发人、workspace、签发人成员行。
-// 前置行（签发人/workspace/成员行）按 workspace 存在性幂等，可多次调用。
+// seedInviteWorld 造一张有效的工作区邀请（契约门测试的诱饵码）：
+// 签发人、workspace、签发人成员行齐备。前置行按 workspace 存在性幂等。
 func seedInviteWorld(t *testing.T, s *Service, role string, mutate func(*model.Invitation)) (string, model.Invitation) {
 	t.Helper()
 	var existing model.Workspace
@@ -60,82 +63,66 @@ func inviteErr(t *testing.T, err error) *httpx.APIError {
 	return apiErr
 }
 
-func TestRegisterWithInviteCode(t *testing.T) {
+// TestRegisterRejectsWorkspaceCode 是双轨分离的契约门：有效的工作区邀请码
+// 在注册端点也必须被拒——工作区码是入伙资格，不是注册资格。
+// （取代旧 TestWorkspaceInviteStillRedeems / TestRegisterWithInviteCode：
+// 断言变更有据——用户裁决注册/工作区邀请必须分离，见行为 delta log。）
+func TestRegisterRejectsWorkspaceCode(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
 	code, _ := seedInviteWorld(t, s, "contributor", nil)
 
-	actor, refresh, err := s.Register(ctx, RegisterInput{
-		Email: "new@example.com", Password: "hunter2safe", InviteCode: code,
+	_, _, err := s.Register(ctx, RegisterInput{
+		Email: "gate@example.com", Password: "hunter2safe", RegistrationCode: code,
 	}, "ip", "ua")
-	if err != nil {
-		t.Fatalf("register with invite: %v", err)
+	apiErr := inviteErr(t, err)
+	if apiErr.Code != httpx.CodeInviteInvalid || apiErr.Status != 400 {
+		t.Fatalf("workspace code at register must be 400 INVITE_INVALID, got %+v", apiErr)
 	}
-	if refresh == "" || !strings.HasPrefix(refresh, "atr_") {
-		t.Fatalf("register must establish a web session, refresh = %q", refresh)
-	}
-	var mem model.WorkspaceMember
-	if err := s.DB.First(&mem, "workspace_id = ? AND actor_id = ?", "ws_inv", actor.ID).Error; err != nil {
-		t.Fatalf("membership row missing: %v", err)
-	}
-	if mem.Role != "contributor" {
-		t.Fatalf("membership role = %q", mem.Role)
-	}
+	// 码不被消耗；无 actor 残留（只剩诱饵世界的 usr_owner）。
 	var inv model.Invitation
 	if err := s.DB.First(&inv, "id = ?", "inv_test1").Error; err != nil {
 		t.Fatal(err)
 	}
-	if inv.Status != "redeemed" || inv.RedeemedBy == nil || *inv.RedeemedBy != actor.ID {
-		t.Fatalf("invitation not redeemed properly: %+v", inv)
+	if inv.Status != "invited" {
+		t.Fatalf("workspace invitation must stay invited, got %q", inv.Status)
 	}
-	var audits []model.AuditEntry
-	if err := s.DB.Where("action IN ?", []string{"invite.redeem", "auth.register"}).Find(&audits).Error; err != nil {
+	var actors int64
+	if err := s.DB.Model(&model.Actor{}).Where("kind = ?", "human").Count(&actors).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(audits) != 2 {
-		t.Fatalf("audit rows = %d, want invite.redeem + auth.register", len(audits))
-	}
-	var ev model.OutboxEvent
-	if err := s.DB.First(&ev, "type = ?", outbox.TypeSecurityInviteRedeemed).Error; err != nil {
-		t.Fatalf("outbox event missing: %v", err)
-	}
-
-	// 同码重用：邀请已兑换 → INVITE_INVALID。
-	_, _, err = s.Register(ctx, RegisterInput{Email: "again@example.com", Password: "hunter2safe", InviteCode: code}, "ip", "ua")
-	if apiErr := inviteErr(t, err); apiErr.Code != httpx.CodeInviteInvalid {
-		t.Fatalf("reuse code = %s (%s)", apiErr.Code, apiErr.Message)
+	if actors != 1 {
+		t.Fatalf("no actor may be created by a rejected register, humans = %d", actors)
 	}
 }
 
-// 防探测：四种失效 + 查无必须同码同文案。
-func TestInviteInvalidUnified(t *testing.T) {
+// 防探测：查无/已撤销/已过期/畸形/工作区码五种失效必须同码同文案。
+func TestRegistrationCodeInvalidUnified(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	code, _ := seedInviteWorld(t, s, "viewer", nil)
+	wsCode, _ := seedInviteWorld(t, s, "viewer", nil)
+
+	revoked := seedRegistrationInvite(t, s, nil)
+	expired := seedRegistrationInvite(t, s, func(inv *model.RegistrationInvitation) {
+		inv.ID = "reg_exp"
+		inv.ExpiresAt = time.Now().Add(-time.Hour)
+	})
+	if err := s.DB.Model(&model.RegistrationInvitation{}).
+		Where("code_hash = ?", HashToken(NormalizeInviteCode(revoked))).
+		Update("status", "revoked").Error; err != nil {
+		t.Fatal(err)
+	}
 
 	cases := []struct {
 		name string
 		in   RegisterInput
 	}{
-		{"unknown", RegisterInput{Email: "a@example.com", Password: "hunter2safe", InviteCode: "AAAAA-AAAAA-AAAAA-AAAAA"}},
-		{"revoked", RegisterInput{Email: "b@example.com", Password: "hunter2safe", InviteCode: code}},
-		{"expired", RegisterInput{Email: "c@example.com", Password: "hunter2safe"}},
-		{"malformed", RegisterInput{Email: "d@example.com", Password: "hunter2safe", InviteCode: "short"}},
+		{"unknown", RegisterInput{Email: "a@example.com", Password: "hunter2safe", RegistrationCode: "AAAAA-AAAAA-AAAAA-AAAAA"}},
+		{"revoked", RegisterInput{Email: "b@example.com", Password: "hunter2safe", RegistrationCode: revoked}},
+		{"expired", RegisterInput{Email: "c@example.com", Password: "hunter2safe", RegistrationCode: expired}},
+		{"malformed", RegisterInput{Email: "d@example.com", Password: "hunter2safe", RegistrationCode: "short"}},
+		{"workspace_code", RegisterInput{Email: "e@example.com", Password: "hunter2safe", RegistrationCode: wsCode}},
 	}
-	var inv model.Invitation
-	if err := s.DB.First(&inv, "id = ?", "inv_test1").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := s.DB.Model(&model.Invitation{}).Where("id = ?", inv.ID).Update("status", "revoked").Error; err != nil {
-		t.Fatal(err)
-	}
-
-	code2, _ := seedInviteWorld(t, s, "viewer", func(inv *model.Invitation) {
-		inv.ID = "inv_test2"
-		inv.ExpiresAt = time.Now().Add(-time.Hour)
-	})
-	cases[2].in.InviteCode = code2
-
 	var wantMsg string
 	for _, tc := range cases {
 		name, in := tc.name, tc.in
@@ -157,55 +144,56 @@ func TestInviteInvalidUnified(t *testing.T) {
 	}
 }
 
-func TestInviteRedeemDoesNotConsumeOnFailure(t *testing.T) {
+// 失败不消耗：email 撞车（409 EMAIL_TAKEN 整体回滚）与弱口令（400，码校验
+// 先于口令策略之后的守卫）后，注册码必须仍是 invited。
+func TestRegistrationCodeNotConsumedOnFailure(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	code, _ := seedInviteWorld(t, s, "maintainer", nil)
-
-	// email 撞车：先用另一张邀请占用邮箱，再持新码用同邮箱兑换 → 409，邀请不消耗。
-	preCode, _ := seedInviteWorld(t, s, "viewer", func(inv *model.Invitation) {
-		inv.ID = "inv_test0"
+	preCode := seedRegistrationInvite(t, s, nil)
+	code := seedRegistrationInvite(t, s, func(inv *model.RegistrationInvitation) {
+		inv.ID = "reg_second"
 	})
+
 	if _, _, err := s.Register(ctx, RegisterInput{
-		Email: "taken@example.com", Password: "hunter2safe", InviteCode: preCode,
+		Email: "taken@example.com", Password: "hunter2safe", RegistrationCode: preCode,
 	}, "ip", "ua"); err != nil {
 		t.Fatalf("pre-register: %v", err)
 	}
 	_, _, err := s.Register(ctx, RegisterInput{
-		Email: "taken@example.com", Password: "hunter2safe", InviteCode: code,
+		Email: "taken@example.com", Password: "hunter2safe", RegistrationCode: code,
 	}, "ip", "ua")
 	if apiErr := inviteErr(t, err); apiErr.Code != httpx.CodeEmailTaken || apiErr.Status != 409 {
 		t.Fatalf("email taken: %+v", apiErr)
 	}
-	var inv model.Invitation
-	if err := s.DB.First(&inv, "id = ?", "inv_test1").Error; err != nil {
+	var inv model.RegistrationInvitation
+	if err := s.DB.First(&inv, "id = ?", "reg_second").Error; err != nil {
 		t.Fatal(err)
 	}
 	if inv.Status != "invited" {
-		t.Fatalf("invitation must stay invited after EMAIL_TAKEN, got %q", inv.Status)
+		t.Fatalf("registration code must stay invited after EMAIL_TAKEN, got %q", inv.Status)
 	}
 
-	// 弱口令同样不消耗邀请。
-	_, _, err = s.Register(ctx, RegisterInput{Email: "weak@example.com", Password: "short", InviteCode: code}, "ip", "ua")
+	// 弱口令同样不消耗注册码。
+	_, _, err = s.Register(ctx, RegisterInput{Email: "weak@example.com", Password: "short", RegistrationCode: code}, "ip", "ua")
 	if apiErr := inviteErr(t, err); apiErr.Code != httpx.CodeValidationFailed {
 		t.Fatalf("weak password: %+v", apiErr)
 	}
-	if err := s.DB.First(&inv, "id = ?", "inv_test1").Error; err != nil {
+	if err := s.DB.First(&inv, "id = ?", "reg_second").Error; err != nil {
 		t.Fatal(err)
 	}
 	if inv.Status != "invited" {
-		t.Fatalf("invitation must stay invited after weak password, got %q", inv.Status)
+		t.Fatalf("registration code must stay invited after weak password, got %q", inv.Status)
 	}
 }
 
-func TestInviteCodeNormalization(t *testing.T) {
+func TestRegistrationCodeNormalization(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
-	code, _ := seedInviteWorld(t, s, "viewer", nil)
+	code := seedRegistrationInvite(t, s, nil)
 
 	lower := strings.ToLower(code)
 	if _, _, err := s.Register(ctx, RegisterInput{
-		Email: "norm@example.com", Password: "hunter2safe", InviteCode: lower,
+		Email: "norm@example.com", Password: "hunter2safe", RegistrationCode: lower,
 	}, "ip", "ua"); err != nil {
 		t.Fatalf("normalized code should redeem: %v", err)
 	}

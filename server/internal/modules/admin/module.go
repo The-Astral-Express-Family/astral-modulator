@@ -37,9 +37,9 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/users/{actor_id}/enable", m.enableUser)
 	r.Post("/admin/users/{actor_id}/role", m.changeRole)
 	r.Get("/admin/audit", m.listAudit)
-	r.Post("/admin/invitations", m.createPlatformInvitation)
-	r.Get("/admin/invitations", m.listPlatformInvitations)
-	r.Post("/admin/invitations/{invitation_id}/revoke", m.revokePlatformInvitation)
+	r.Post("/admin/registration-invitations", m.createRegistrationInvitation)
+	r.Get("/admin/registration-invitations", m.listRegistrationInvitations)
+	r.Post("/admin/registration-invitations/{invitation_id}/revoke", m.revokeRegistrationInvitation)
 }
 
 // listAudit 是 GET /admin/audit（round 38 T5 / TODO.md S4-2）：平台级审计

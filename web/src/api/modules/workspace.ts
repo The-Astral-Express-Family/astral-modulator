@@ -8,9 +8,11 @@ import type {
   ApprovalPage,
   InvitationCreated,
   InvitationPage,
+  InvitationRole,
   Member,
   Page,
   Tag,
+  Workspace,
 } from '../types'
 
 /** 待裁决列表：手动加载走全局 toast；15s 轮询传 silent（避免后端失联时刷屏）。 */
@@ -73,5 +75,21 @@ export function listInvitations(
 export function revokeInvitation(invitationId: string): Promise<void> {
   return apiFetch(`/api/v1/invitations/${encodeURIComponent(invitationId)}/revoke`, {
     method: 'POST',
+  })
+}
+
+// ---- 兑码入伙（ADR-0009：工作区码=权限授予，任何已登录 human 可兑）----
+
+export interface InvitationRedeemed {
+  workspace: Workspace
+  role: InvitationRole
+}
+
+/** 凭工作区邀请码入伙。本人重复兑已兑码幂等 200；已是成员 409 ALREADY_MEMBER；
+ * 失效/注册码 400 INVITE_INVALID（全局拦截器 toast）。 */
+export function redeemInvitation(code: string): Promise<InvitationRedeemed> {
+  return apiFetch('/api/v1/invitations/redeem', {
+    method: 'POST',
+    body: { code },
   })
 }

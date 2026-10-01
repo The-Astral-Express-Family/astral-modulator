@@ -51,7 +51,7 @@ ASTRAL_HTTP_ADDR=:8080
 ASTRAL_LOG_LEVEL=info                           # 可选
 
 # 限流（TODO.md S5 / docs/protocol.md §6；进程内 token bucket，单实例 MVP）
-ASTRAL_RATELIMIT_SENSITIVE_PER_MIN=10           # 敏感桶/min/IP：login/register/refresh/device 授权面（含 user_code 防枚举与 approve/deny）
+ASTRAL_RATELIMIT_SENSITIVE_PER_MIN=10           # 敏感桶/min/IP：login/register/device 授权面（含 user_code 防枚举与 approve/deny）
 ASTRAL_RATELIMIT_POLL_PER_MIN=60                # 轮询桶/min/IP：device token 交换（CLI interval=3s 轮询必须容纳）
 ASTRAL_RATELIMIT_API_PER_MIN=300                # 通用桶/min/actor：其余 /api/v1
 ASTRAL_RATELIMIT_SSE_PER_MIN=30                 # SSE 桶/min/actor：events 连接建立（独立于通用桶，重连风暴不占额度）

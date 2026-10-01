@@ -305,7 +305,7 @@ func TestClassifyTables(t *testing.T) {
 	}{
 		{"login", "POST", "/api/v1/auth/login", classSensitive, classAPI},
 		{"register", "POST", "/api/v1/auth/register", classSensitive, classAPI},
-		{"refresh", "POST", "/api/v1/auth/token/refresh", classSensitive, classAPI},
+		{"refresh", "POST", "/api/v1/auth/token/refresh", classAPI, classAPI},
 		{"device_create", "POST", "/api/v1/auth/device/authorizations", classSensitive, classAPI},
 		{"device_get", "GET", "/api/v1/auth/device/authorizations", classNone, classSensitive},
 		{"approve", "POST", "/api/v1/auth/device/authorizations/appr_1/approve", classNone, classSensitive},

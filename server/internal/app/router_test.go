@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
@@ -31,7 +32,11 @@ import (
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return newTestServerWithLog(t, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func newTestServerWithLog(t *testing.T, log *slog.Logger) *httptest.Server {
+	t.Helper()
 	db := testsupport.NewTestDB(t)
 	svc := auth.NewService(db, log)
 	t.Cleanup(svc.DrainBackgroundWrites) // 先于关库/TempDir 清理 drain 后台写（cleanup LIFO）
@@ -89,6 +94,33 @@ func errCode(t *testing.T, body map[string]any) string {
 	}
 	c, _ := e["code"].(string)
 	return c
+}
+
+// TestAccessLogCarriesClientRequestId 是中间件装配顺序的回归测试：
+// RequestIDMiddleware 必须先于 Logger/Recover 挂载，否则访问日志与 panic
+// 日志读不到注入到下游 context 的 request id（线上表现为 request_id 恒为
+// 空串，客户端报错里的 req_* 无法与日志关联）。
+func TestAccessLogCarriesClientRequestId(t *testing.T) {
+	var buf bytes.Buffer
+	ts := newTestServerWithLog(t, slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(ts.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/healthz", nil)
+	req.Header.Set("X-Astral-Request-Id", "req_log_probe")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Astral-Request-Id"); got != "req_log_probe" {
+		t.Fatalf("response request id header = %q, want req_log_probe", got)
+	}
+	if s := buf.String(); !strings.Contains(s, "req_log_probe") {
+		t.Fatalf("access log missing request id:\n%s", s)
+	}
 }
 
 func TestWellKnownAndCapabilities(t *testing.T) {

@@ -70,12 +70,13 @@ type DocHistoryConfig struct {
 // 容量 = 每分钟令牌数，匀速回填；某项 <=0 表示禁用对应桶——显式设
 // ASTRAL_RATELIMIT_*=0 或零值构造）。
 type RateLimitConfig struct {
-	// SensitivePerMin 敏感桶/min/IP：login、register、token/refresh、
+	// SensitivePerMin 敏感桶/min/IP：login、register、
 	// device 授权面（含 GET authorizations 的 user_code 防枚举与 approve/deny）。
 	SensitivePerMin int
 	// PollPerMin 轮询桶/min/IP：device token 交换（CLI interval=3s 轮询必须容纳）。
 	PollPerMin int
-	// APIPerMin 通用桶/min/actor：其余 /api/v1。
+	// APIPerMin 通用桶/min/actor：其余 /api/v1（Public 段的 token/refresh、
+	// logout 按 IP 记入此桶）。
 	APIPerMin int
 	// SSEPerMin SSE 桶/min/actor：events 连接建立（独立，重连风暴不占通用桶）。
 	SSEPerMin int

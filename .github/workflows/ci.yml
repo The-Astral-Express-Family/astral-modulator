@@ -6,7 +6,7 @@ name: ci
 
 on:
   push:
-    # branches 与 tags 是 OR 关系：任意分支 push + v* tag push 都跑。
+    # branches 与 tags 是 OR 关系：任意分支 push（含 dev 工作分支）+ v* tag push 都跑。
     branches: ['**']
     tags: ['v*.*.*']
   pull_request:

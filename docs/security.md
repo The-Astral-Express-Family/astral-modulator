@@ -86,8 +86,9 @@ Agent 声称自己在工作但实际已离线。
 
 ### Human
 
-Human 账号经**一次性邀请码**注册产生（workspace 绑定，设计见
-[registration.md](registration.md) / ADR-0008）；首个账号由 bootstrap 创建。
+Human 账号经**一次性注册邀请码**产生（ADR-0009 双轨分离：注册码仅平台
+管理员签发、只建号不入伙；工作区邀请码是入伙凭证，任何已存在 human 可兑，
+设计见 [registration.md](registration.md)）；首个账号由 bootstrap 创建。
 CLI 推荐 Device Authorization Grant 登录（终端应用不需要内嵌 WebView 或接收
 密码）；OAuth/OIDC federation 属未来能力（§18）。
 

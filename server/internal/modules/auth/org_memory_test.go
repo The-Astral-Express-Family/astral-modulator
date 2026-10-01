@@ -10,7 +10,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 )
 
-// TestRegisterBootstrapSeedsOrgMemory：冷启动注册（无 invite_code 的首账号
+// TestRegisterBootstrapSeedsOrgMemory：冷启动注册（无 registration_code 的首账号
 // 路径）在同一事务内种子组织记忆 workspace（M1 裁决，round 37）——
 // slug=org-memory + 新 actor 的 owner membership + workspace.create audit。
 func TestRegisterBootstrapSeedsOrgMemory(t *testing.T) {
@@ -62,28 +62,24 @@ func TestRegisterWithInviteDoesNotSeedOrgMemory(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
 
-	// 冷启动建首号（种子发生在此），再为另一 workspace 造可用邀请。
+	// 冷启动建首号（种子发生在此），再签发一张注册邀请。
 	first, _, err := s.Register(ctx, RegisterInput{Email: "first@example.com", Password: "hunter2safe"}, "ip", "ua")
 	if err != nil {
-		t.Fatal(err)
-	}
-	ws := model.Workspace{ID: "ws_inv", Name: "inv", Slug: "inv", CreatedBy: first.ID}
-	if err := s.DB.Create(&ws).Error; err != nil {
 		t.Fatal(err)
 	}
 	code, err := NewInviteCode()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DB.Create(&model.Invitation{
-		ID: "inv_orgmem", WorkspaceID: ws.ID, Role: "contributor",
+	if err := s.DB.Create(&model.RegistrationInvitation{
+		ID:       "inv_orgmem",
 		CodeHash: HashToken(NormalizeInviteCode(code)), CreatedBy: first.ID,
 		Status: "invited", ExpiresAt: time.Now().Add(24 * time.Hour),
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.Register(ctx, RegisterInput{
-		Email: "invitee@example.com", Password: "hunter2safe", InviteCode: code,
+		Email: "invitee@example.com", Password: "hunter2safe", RegistrationCode: code,
 	}, "ip", "ua"); err != nil {
 		t.Fatalf("invite register: %v", err)
 	}

@@ -6,11 +6,11 @@
 import { ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
-  createPlatformInvitation,
-  listPlatformInvitations,
-  revokePlatformInvitation,
-  type PlatformInvitation,
-  type PlatformInvitationCreated,
+  createRegistrationInvitation,
+  listRegistrationInvitations,
+  revokeRegistrationInvitation,
+  type RegistrationInvitation,
+  type RegistrationInvitationCreated,
 } from '@/api/modules/admin'
 import { fmtTime } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
@@ -43,20 +43,20 @@ const TTL_OPTIONS = [
   { value: '604800', label: '7 天' },
   { value: '2592000', label: '30 天' },
 ]
-const STATUS_VARIANTS: Record<PlatformInvitation['status'], BadgeVariants['variant']> = {
+const STATUS_VARIANTS: Record<RegistrationInvitation['status'], BadgeVariants['variant']> = {
   invited: 'secondary',
   redeemed: 'default',
   revoked: 'destructive',
 }
-const STATUS_LABELS: Record<PlatformInvitation['status'], string> = {
+const STATUS_LABELS: Record<RegistrationInvitation['status'], string> = {
   invited: '待使用',
   redeemed: '已兑换',
   revoked: '已撤销',
 }
 
 const ttl = ref('604800')
-const issued = ref<PlatformInvitationCreated | null>(null)
-const recent = ref<PlatformInvitation[]>([])
+const issued = ref<RegistrationInvitationCreated | null>(null)
+const recent = ref<RegistrationInvitation[]>([])
 const listLoading = ref(false)
 const revokingId = ref<string | null>(null)
 const { busy: issuing, run } = useApiAction()
@@ -73,7 +73,7 @@ watch(
 async function loadRecent(): Promise<void> {
   listLoading.value = true
   try {
-    recent.value = (await listPlatformInvitations({ limit: 5 })).items
+    recent.value = (await listRegistrationInvitations({ limit: 5 })).items
   } catch {
     recent.value = [] // silent：空态自行引导
   } finally {
@@ -83,7 +83,7 @@ async function loadRecent(): Promise<void> {
 
 async function issue(): Promise<void> {
   const ok = await run(async () => {
-    issued.value = await createPlatformInvitation(Number(ttl.value))
+    issued.value = await createRegistrationInvitation(Number(ttl.value))
   })
   if (ok) {
     toast.success('邀请已生成，请立即复制保存')
@@ -91,10 +91,10 @@ async function issue(): Promise<void> {
   }
 }
 
-async function revoke(inv: PlatformInvitation): Promise<void> {
+async function revoke(inv: RegistrationInvitation): Promise<void> {
   revokingId.value = inv.id
   const ok = await run(async () => {
-    await revokePlatformInvitation(inv.id)
+    await revokeRegistrationInvitation(inv.id)
   })
   revokingId.value = null
   if (ok) {
@@ -115,7 +115,7 @@ async function copy(text: string, what: string): Promise<void> {
       <DialogHeader>
         <DialogTitle>生成注册邀请</DialogTitle>
         <DialogDescription>
-          平台级邀请：兑换者注册为普通用户，不自动加入任何工作区。邀请码明文仅生成时显示一次。
+          注册邀请码仅用于创建账号（唯一注册资格来源），不含任何工作区资格——加入工作区需另行兑换工作区邀请码。明文仅生成时显示一次。
         </DialogDescription>
       </DialogHeader>
 
@@ -152,7 +152,7 @@ async function copy(text: string, what: string): Promise<void> {
             <Spinner v-if="listLoading" class="size-3.5" />
           </div>
           <p v-if="recent.length === 0 && !listLoading" class="text-xs text-muted-foreground">
-            还没有平台邀请。生成第一个邀请码后，被邀请人即可通过链接注册。
+            还没有注册邀请。生成第一个邀请码后，收到的人即可通过链接注册账号。
           </p>
           <ul v-else class="flex flex-col gap-1.5">
             <li

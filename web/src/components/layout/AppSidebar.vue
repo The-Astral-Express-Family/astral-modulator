@@ -5,8 +5,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { FileTextIcon, GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, MenuIcon, PlusIcon, UsersRoundIcon } from '@lucide/vue'
+import { DoorOpenIcon, FileTextIcon, GavelIcon, HomeIcon, KeyRoundIcon, ListTreeIcon, MenuIcon, PlusIcon, UsersRoundIcon } from '@lucide/vue'
 import CreateWorkspaceDialog from '@/components/layout/CreateWorkspaceDialog.vue'
+import JoinWorkspaceDialog from '@/components/layout/JoinWorkspaceDialog.vue'
 import SessionBox from '@/components/layout/SessionBox.vue'
 import SidebarLink from '@/components/layout/SidebarLink.vue'
 import WorkspaceSwitcher from '@/components/layout/WorkspaceSwitcher.vue'
@@ -21,6 +22,7 @@ const workspaceId = computed(() =>
 )
 
 const createOpen = ref(false)
+const joinOpen = ref(false)
 const drawerOpen = ref(false)
 
 // 移动端抽屉：路由变化即收起（导航后不留残影）。
@@ -67,16 +69,28 @@ watch(() => route.fullPath, () => {
           <p class="px-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
             工作区
           </p>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            class="text-muted-foreground hover:text-foreground"
-            aria-label="新建工作区"
-            title="新建工作区"
-            @click="createOpen = true"
-          >
-            <PlusIcon />
-          </Button>
+          <div class="flex items-center">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="text-muted-foreground hover:text-foreground"
+              aria-label="加入工作区"
+              title="加入工作区（凭邀请码）"
+              @click="joinOpen = true"
+            >
+              <DoorOpenIcon />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="text-muted-foreground hover:text-foreground"
+              aria-label="新建工作区"
+              title="新建工作区"
+              @click="createOpen = true"
+            >
+              <PlusIcon />
+            </Button>
+          </div>
         </div>
         <WorkspaceSwitcher />
         <div v-if="workspaceId" class="mt-1 flex flex-col gap-1">
@@ -101,6 +115,7 @@ watch(() => route.fullPath, () => {
       </div>
 
       <CreateWorkspaceDialog v-model:open="createOpen" />
+      <JoinWorkspaceDialog v-model:open="joinOpen" />
 
       <div class="flex flex-col gap-1">
         <SidebarLink label="总览" :icon="HomeIcon" to="/" />

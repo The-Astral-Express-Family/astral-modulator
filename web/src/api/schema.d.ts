@@ -47,7 +47,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 注册 Human（A5）：带 invite_code 走邀请兑换；不带则为 bootstrap（仅当服务器无 human） */
+        /** 注册 Human（A5/ADR-0009）：带 registration_code 走注册码兑换（仅注册，不入伙）；不带则为 bootstrap（仅当服务器无 human） */
         post: operations["register"];
         delete?: never;
         options?: never;
@@ -892,8 +892,25 @@ export interface paths {
         /** 邀请列表（授权同签发；不含 code——库中只有 hash） */
         get: operations["listInvitations"];
         put?: never;
-        /** 签发一次性邀请码（A5；需 human session + workspace:manage_members，agent credential 403） */
+        /** 签发一次性工作区邀请码（A5/ADR-0009；需 human session + workspace:manage_members，agent credential 403；码供已注册用户经 /invitations/redeem 入伙） */
         post: operations["createInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 凭工作区邀请码入伙（ADR-0009：工作区码=权限授予，任何已存在 human 可兑； 本人重复兑已兑码幂等 200；已是成员 409 ALREADY_MEMBER 且码不消耗） */
+        post: operations["redeemInvitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1073,25 +1090,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/invitations": {
+    "/admin/registration-invitations": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 平台邀请列表（platform:users:manage；id 降序游标分页；不回传 code） */
-        get: operations["listPlatformInvitations"];
+        /** 注册邀请列表（platform:users:manage；id 降序游标分页；不回传 code） */
+        get: operations["listRegistrationInvitations"];
         put?: never;
-        /** 签发平台级注册邀请（platform:users:manage；兑换后为普通 user，不入任何 workspace） */
-        post: operations["createPlatformInvitation"];
+        /** 签发注册邀请（platform:users:manage；唯一注册资格来源——兑换后为普通 user，不入任何 workspace） */
+        post: operations["createRegistrationInvitation"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/admin/invitations/{invitation_id}/revoke": {
+    "/admin/registration-invitations/{invitation_id}/revoke": {
         parameters: {
             query?: never;
             header?: never;
@@ -1100,8 +1117,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 撤销平台邀请（platform:users:manage；重复撤销幂等 204） */
-        post: operations["revokePlatformInvitation"];
+        /** 撤销注册邀请（platform:users:manage；重复撤销幂等 204） */
+        post: operations["revokeRegistrationInvitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1113,7 +1130,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * @description 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/dvh/prs/msg/evt/cred/ses/dev/req/aud/apv/inv。
+         * @description 不透明 ID：prefix_uuidv7。前缀 usr/agt/svc/srv/ws/tsk/tgp/tag/doc/cfl/dvh/prs/msg/evt/cred/ses/dev/req/aud/apv/inv/reg（reg=注册邀请，00019；存量注册邀请行残留 inv）。
          * @example ws_0192ab34-56cd-7ef8-9a01-234567890abc
          */
         Id: string;
@@ -1121,7 +1138,7 @@ export interface components {
         /** Format: date-time */
         DateTimeOrNull: string | null;
         /** @enum {string} */
-        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "ALREADY_MEMBER" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
         ErrorEnvelope: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1326,21 +1343,26 @@ export interface components {
             code: string;
             /**
              * Format: uri
-             * @description {WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host
+             * @description {WebBaseURL}/join?ws=<code>（面向已注册用户的入伙链接，ADR-0009）；基址回退链 WebBaseURL→PublicURL→请求 Host
              */
             invite_url: string;
         };
         InvitationPage: components["schemas"]["PageMeta"] & {
             items?: components["schemas"]["Invitation"][];
         };
-        PlatformInvitationCreate: {
+        /** @description POST /invitations/redeem 的入伙结果（幂等重试同形状） */
+        InvitationRedeemed: {
+            workspace: components["schemas"]["Workspace"];
+            role: components["schemas"]["InvitationRole"];
+        };
+        RegistrationInvitationCreate: {
             /**
              * @description 有效期（秒）；缺省 7 天，上限 30 天
              * @default 604800
              */
             expires_in: number;
         };
-        PlatformInvitation: {
+        RegistrationInvitation: {
             id: components["schemas"]["Id"];
             /**
              * @description expired 为派生态（invited 且 now > expires_at），不落库
@@ -1355,17 +1377,17 @@ export interface components {
             redeemed_by?: components["schemas"]["IdOrNull"];
             redeemed_at?: components["schemas"]["DateTimeOrNull"];
         };
-        PlatformInvitationCreated: components["schemas"]["PlatformInvitation"] & {
-            /** @description 邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次 */
+        RegistrationInvitationCreated: components["schemas"]["RegistrationInvitation"] & {
+            /** @description 注册邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次 */
             code: string;
             /**
              * Format: uri
-             * @description {WebBaseURL}/register?code=<code>；基址回退链 WebBaseURL→PublicURL→请求 Host
+             * @description {WebBaseURL}/register?code=<code>（注册链接，ADR-0009）；基址回退链 WebBaseURL→PublicURL→请求 Host
              */
             invite_url: string;
         };
-        PlatformInvitationPage: components["schemas"]["PageMeta"] & {
-            items?: components["schemas"]["PlatformInvitation"][];
+        RegistrationInvitationPage: components["schemas"]["PageMeta"] & {
+            items?: components["schemas"]["RegistrationInvitation"][];
         };
         /** @enum {string} */
         TaskStatus: "open" | "in_progress" | "blocked" | "review" | "done" | "cancelled";
@@ -1914,8 +1936,8 @@ export interface operations {
                     /** @description 需含字母与数字 */
                     password: string;
                     display_name?: string;
-                    /** @description 一次性邀请码（XXXXX-XXXXX-XXXXX-XXXXX，比对前归一化：去分隔符+大写）。 兑换即建号 + 入伙 + 建立 web 会话（docs/registration.md §4）。 */
-                    invite_code?: string;
+                    /** @description 一次性注册邀请码（XXXXX-XXXXX-XXXXX-XXXXX，比对前归一化：去分隔符+大写）。 兑换即建号 + 建立 web 会话，不加入任何 workspace——入伙走 POST /invitations/redeem（docs/registration.md §4，ADR-0009）。 */
+                    registration_code?: string;
                 };
             };
         };
@@ -3649,7 +3671,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已签发；code 明文仅本次返回，invite_url 为拼好的注册链接 */
+            /** @description 已签发；code 明文仅本次返回，invite_url 为拼好的入伙链接（/join?ws=） */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -3661,6 +3683,35 @@ export interface operations {
             400: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    redeemInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 一次性工作区邀请码（比对前归一化：去分隔符+大写） */
+                    code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已入伙（含幂等重试；返回 workspace 与生效角色） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationRedeemed"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     revokeInvitation: {
@@ -3953,7 +4004,7 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
-    listPlatformInvitations: {
+    listRegistrationInvitations: {
         parameters: {
             query?: {
                 status?: "invited" | "redeemed" | "revoked";
@@ -3972,7 +4023,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformInvitationPage"];
+                    "application/json": components["schemas"]["RegistrationInvitationPage"];
                 };
             };
             400: components["responses"]["Error"];
@@ -3980,7 +4031,7 @@ export interface operations {
             403: components["responses"]["Error"];
         };
     };
-    createPlatformInvitation: {
+    createRegistrationInvitation: {
         parameters: {
             query?: never;
             header?: never;
@@ -3989,7 +4040,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PlatformInvitationCreate"];
+                "application/json": components["schemas"]["RegistrationInvitationCreate"];
             };
         };
         responses: {
@@ -3999,7 +4050,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformInvitationCreated"];
+                    "application/json": components["schemas"]["RegistrationInvitationCreated"];
                 };
             };
             400: components["responses"]["Error"];
@@ -4007,7 +4058,7 @@ export interface operations {
             403: components["responses"]["Error"];
         };
     };
-    revokePlatformInvitation: {
+    revokeRegistrationInvitation: {
         parameters: {
             query?: never;
             header?: never;

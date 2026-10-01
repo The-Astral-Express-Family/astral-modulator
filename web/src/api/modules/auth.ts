@@ -21,11 +21,12 @@ export interface RegisterInput {
   email: string
   password: string
   display_name?: string
-  invite_code?: string
+  registration_code?: string
 }
 
-/** 注册（A5）：invite_code 非空走邀请兑换；为空则是 bootstrap（仅服务器无 human 时开放）。
- * 成功即建立 web 会话（服务端已 Set-Cookie），响应与 login 同形状（Me + session）。 */
+/** 注册（A5/ADR-0009）：registration_code 非空走注册码兑换（仅建号，不入伙）；
+ * 为空则是 bootstrap（仅服务器无 human 时开放）。成功即建立 web 会话
+ * （服务端已 Set-Cookie），响应与 login 同形状（Me + session）。 */
 export function register(input: RegisterInput): Promise<MeResponse> {
   return apiFetch('/api/v1/auth/register', { method: 'POST', body: input })
 }

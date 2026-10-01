@@ -202,9 +202,11 @@ type RegisterInput struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
-	// InviteCode 非空走邀请兑换分支（docs/registration.md §4）；为空保持
-	// bootstrap-only 守卫（服务器已有 human 即 403）。
-	InviteCode string `json:"invite_code,omitempty"`
+	// RegistrationCode 非空走注册码兑换分支（ADR-0009）；为空保持
+	// bootstrap-only 守卫（服务器已有 human 即 403）。工作区邀请码不是
+	// 注册资格：在本端点出现（或任何未知码）一律 errInviteInvalid，
+	// 与失效码同文案（防探测）。
+	RegistrationCode string `json:"registration_code,omitempty"`
 }
 
 // errInviteInvalid 是邀请码失效的统一错误：不存在/已兑换/已撤销/已过期
@@ -228,8 +230,8 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, ip, ua string)
 	if strings.TrimSpace(in.DisplayName) == "" {
 		in.DisplayName = strings.SplitN(in.Email, "@", 2)[0]
 	}
-	if in.InviteCode != "" {
-		return s.registerWithInvite(ctx, in, ip, ua)
+	if in.RegistrationCode != "" {
+		return s.registerWithRegistrationCode(ctx, in, ip, ua)
 	}
 	return s.registerBootstrap(ctx, in, ip, ua)
 }
@@ -313,29 +315,17 @@ func seedOrgMemory(tx *gorm.DB, actorID string) error {
 	})
 }
 
-// registerWithInvite 是邀请兑换注册（docs/registration.md §4）：建号 +
-// 条件更新邀请 + 入伙 + 审计/事件同事务。邀请码校验先于口令策略
-// （失效码一律 errInviteInvalid，不泄露具体原因）；email 撞车由唯一索引
-// 兜底（此时邀请不消耗，可换邮箱重试）。
-//
-// 双表查找（00018）：先查平台邀请 platform_invitations——命中则注册为
-// 普通 user，不入任何 workspace；未命中回退 workspace_invitations
-// （原逻辑不变）。两表 code_hash 同一哈希空间，碰撞概率可忽略；都未
-// 命中按失效码统一拒（防探测）。哈希预计算一次，两表共用。
-func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
-	codeHash := HashToken(NormalizeInviteCode(in.InviteCode))
-	var pInv model.PlatformInvitation
-	err := s.DB.WithContext(ctx).Where("code_hash = ?", codeHash).First(&pInv).Error
-	if err == nil {
-		return s.redeemPlatformInvite(ctx, in, pInv, ip, ua)
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, "", err
-	}
-	var inv model.Invitation
-	err = s.DB.WithContext(ctx).
-		Where("code_hash = ?", codeHash).
-		First(&inv).Error
+// registerWithRegistrationCode 是注册码兑换注册（ADR-0009 双轨分离）：
+// 建号 + 条件更新抢状态 + 审计/事件同事务，**不建任何 WorkspaceMember**——
+// 注册资格与入伙资格是两条轨道，入伙走 workspace 模块的
+// POST /invitations/redeem。只查 registration_invitations：工作区码在
+// 注册端点出现与未知码同待遇，统一 errInviteInvalid（防探测，同码同文案）。
+// 码校验先于口令策略；email 撞车由唯一索引兜底（此时注册码不消耗，
+// 可换邮箱重试）。
+func (s *Service) registerWithRegistrationCode(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
+	codeHash := HashToken(NormalizeInviteCode(in.RegistrationCode))
+	var inv model.RegistrationInvitation
+	err := s.DB.WithContext(ctx).Where("code_hash = ?", codeHash).First(&inv).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, "", errInviteInvalid
 	}
@@ -360,7 +350,7 @@ func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, 
 		}
 		// 条件更新抢状态（tag confirm 验证过的模式）：并发同码只有一个
 		// 事务成功，输家整体回滚（actor 不残留）。
-		res := tx.Model(&model.Invitation{}).
+		res := tx.Model(&model.RegistrationInvitation{}).
 			Where("id = ? AND status = 'invited'", inv.ID).
 			Updates(map[string]any{"status": "redeemed", "redeemed_by": actor.ID, "redeemed_at": time.Now()})
 		if res.Error != nil {
@@ -369,81 +359,12 @@ func (s *Service) registerWithInvite(ctx context.Context, in RegisterInput, ip, 
 		if res.RowsAffected == 0 {
 			return errInviteInvalid
 		}
-		if err := tx.Create(&model.WorkspaceMember{WorkspaceID: inv.WorkspaceID, ActorID: actor.ID, Role: inv.Role}).Error; err != nil {
-			return err
-		}
-		if err := audit.RecordInTx(tx, audit.Entry{
-			WorkspaceID: inv.WorkspaceID, ActorID: actor.ID,
-			Action: "invite.redeem", Outcome: "allowed",
-			TargetType: "invitation", TargetID: inv.ID,
-			Details: map[string]any{"role": inv.Role},
-		}); err != nil {
-			return err
-		}
-		if err := audit.RecordInTx(tx, audit.Entry{
-			WorkspaceID: inv.WorkspaceID, ActorID: actor.ID,
-			Action: "auth.register", Outcome: "allowed",
-			TargetType: "actor", TargetID: actor.ID,
-		}); err != nil {
-			return err
-		}
-		return outbox.EmitTx(tx, outbox.TypeSecurityInviteRedeemed, inv.WorkspaceID, actor.ID, 0, map[string]any{
-			"invitation_id": inv.ID, "role": inv.Role,
-		})
-	})
-	if err != nil {
-		if errors.Is(err, errInviteInvalid) {
-			return nil, "", errInviteInvalid
-		}
-		if store.IsUniqueViolation(err) {
-			return nil, "", httpx.Conflict(httpx.CodeEmailTaken, "email already registered")
-		}
-		return nil, "", err
-	}
-	refresh, _, _, err := s.createSession(ctx, actor.ID, "web", ip, ua)
-	if err != nil {
-		return nil, "", err
-	}
-	s.Log.Info("human registered via invite", "actor_id", actor.ID, "workspace_id", inv.WorkspaceID)
-	return actor, refresh, nil
-}
-
-// redeemPlatformInvite 是平台邀请的兑换事务：建号 + 抢状态 + 审计/事件，
-// 不建 WorkspaceMember（平台邀请只管「允许注册」，入伙由用户自行操作或
-// workspace 邀请补足）。失败语义与 workspace 兑换同构：errInviteInvalid
-// 整体回滚；email 撞车 409 EMAIL_TAKEN（邀请不消耗）。
-func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pInv model.PlatformInvitation, ip, ua string) (*model.Actor, string, error) {
-	if pInv.Status != "invited" || time.Now().After(pInv.ExpiresAt) {
-		return nil, "", errInviteInvalid
-	}
-	hash, apiErr := hashPasswordOrInvalid(in.Password)
-	if apiErr != nil {
-		return nil, "", apiErr
-	}
-	actor := &model.Actor{ID: ids.New(ids.User), Kind: "human", PlatformRole: "user", DisplayName: in.DisplayName}
-	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(actor).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(&model.HumanAuth{ActorID: actor.ID, Email: in.Email, PasswordHash: hash}).Error; err != nil {
-			return err
-		}
-		// 条件更新抢状态：并发同码只有一个事务成功，输家整体回滚。
-		res := tx.Model(&model.PlatformInvitation{}).
-			Where("id = ? AND status = 'invited'", pInv.ID).
-			Updates(map[string]any{"status": "redeemed", "redeemed_by": actor.ID, "redeemed_at": time.Now()})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return errInviteInvalid
-		}
-		// 平台级审计：workspace_id 留空（服务器级记录，/admin/audit 可见）。
+		// 服务器级审计：workspace_id 留空（/admin/audit 可见）。
 		if err := audit.RecordInTx(tx, audit.Entry{
 			ActorID: actor.ID,
 			Action:  "invite.redeem", Outcome: "allowed",
-			TargetType: "invitation", TargetID: pInv.ID,
-			Details: map[string]any{"scope": "platform"},
+			TargetType: "invitation", TargetID: inv.ID,
+			Details: map[string]any{"scope": "registration"},
 		}); err != nil {
 			return err
 		}
@@ -455,7 +376,7 @@ func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pI
 			return err
 		}
 		return outbox.EmitTx(tx, outbox.TypeSecurityInviteRedeemed, "", actor.ID, 0, map[string]any{
-			"invitation_id": pInv.ID, "scope": "platform",
+			"invitation_id": inv.ID, "scope": "registration",
 		})
 	})
 	if err != nil {
@@ -471,7 +392,7 @@ func (s *Service) redeemPlatformInvite(ctx context.Context, in RegisterInput, pI
 	if err != nil {
 		return nil, "", err
 	}
-	s.Log.Info("human registered via platform invite", "actor_id", actor.ID)
+	s.Log.Info("human registered via registration invite", "actor_id", actor.ID)
 	return actor, refresh, nil
 }
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 邀请管理卡（A5 P2）：签发 / 列表 / 复制链接 / 撤销。
+// 工作区邀请管理卡（A5 P2 / ADR-0009）：签发 / 列表 / 复制链接 / 撤销。
+// 码是入伙资格：发给已注册用户，经 /join 或侧栏「加入工作区」兑换。
 // 可见性按能力收敛：listInvitations 403/404 即视为无 manage_members（或非成员），
 // 整卡隐藏（fail closed，不在前端另复制一份角色判断逻辑）。
 import { onMounted, ref, watch } from 'vue'
@@ -111,7 +112,7 @@ watch(
 <template>
   <Card v-if="canManage">
     <CardHeader>
-      <CardTitle>邀请</CardTitle>
+      <CardTitle>工作区邀请</CardTitle>
     </CardHeader>
     <CardContent class="flex flex-col gap-4">
       <form class="flex items-end gap-2" @submit.prevent="issue">
@@ -153,13 +154,13 @@ watch(
           <Button size="sm" variant="outline" @click="copy(issued.code, '邀请码')">
             复制码
           </Button>
-          <Button size="sm" variant="outline" @click="copy(issued.invite_url, '注册链接')">
+          <Button size="sm" variant="outline" @click="copy(issued.invite_url, '入伙链接')">
             复制链接
           </Button>
         </div>
         <p class="text-muted-foreground text-xs">
           {{ issued.invite_url }}
-          明文码仅此一次展示，请立即分发；泄露的处置是撤销。
+          明文码仅此一次展示，请立即发给已注册成员（码只入伙、不能注册）；泄露的处置是撤销。
         </p>
       </div>
 

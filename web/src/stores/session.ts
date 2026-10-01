@@ -146,16 +146,22 @@ export const useSessionStore = defineStore('session', () => {
 
   // login/register 的响应本身就是 Me（含 actor/email），无需再 GET /auth/me：
   // 换 access token 一步即可（原 establishSession 的 3 请求收敛为 2）。
+  // 身份先落、续期后试：服务端会话已立（Cookie 已种，API 走 cookie 认证兜底），
+  // 静默续期失败（限流 429/网络抖动）不应把已成功的登录/注册整体判死。
   async function adoptMeAndRenew(me: MeResponse): Promise<void> {
-    await refreshAccess()
     adoptMe(me)
+    try {
+      await refreshAccess()
+    } catch {
+      setTimeout(() => void refreshAccess().catch(() => {}), 3_000)
+    }
   }
 
   async function login(email: string, password: string): Promise<void> {
     await adoptMeAndRenew(await authApi.login(email, password))
   }
 
-  /** 注册（A5）：invite_code 非空走邀请兑换，为空则是 bootstrap；成功即建立会话。 */
+  /** 注册（A5/ADR-0009）：registration_code 非空走注册码兑换（仅建号），为空则是 bootstrap；成功即建立会话。 */
   async function register(input: authApi.RegisterInput): Promise<void> {
     await adoptMeAndRenew(await authApi.register(input))
   }
