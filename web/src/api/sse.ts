@@ -86,7 +86,6 @@ export const KNOWN_EVENT_TYPES = [
   'actor.presence.changed',
   'task.created',
   'task.claimed',
-  'task.lease.expired',
   'task.updated',
   'task.released',
   'document.updated',

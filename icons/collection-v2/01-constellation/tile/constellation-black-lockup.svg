@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="constellation-black-tile-lockup-title constellation-black-tile-lockup-description">
+  <title id="constellation-black-tile-lockup-title">Astral Constellation logo tile · black · icon with wordmark</title>
+  <desc id="constellation-black-tile-lockup-description">节点星群与四向星芒，精确、开放、具有天体导航感。 Stacked icon and custom path wordmark on a rounded tile.</desc>
+
+  <rect width="512" height="512" rx="112" fill="#ffffff"/>
+  <rect x="1" y="1" width="510" height="510" rx="111" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="2"/>
+
+  <g transform="translate(138.00 38) scale(0.460938)">
+
+  <g fill="none" stroke="#000000" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 114 206 L 146 142 L 214 108"/>
+    <path d="M 298 108 L 366 142 L 398 206"/>
+    <path d="M 398 306 L 366 370 L 298 404"/>
+    <path d="M 214 404 L 146 370 L 114 306"/>
+  </g>
+  <g fill="#000000">
+    <circle cx="114" cy="206" r="18"/>
+    <circle cx="398" cy="206" r="18"/>
+    <circle cx="398" cy="306" r="18"/>
+    <circle cx="114" cy="306" r="18"/>
+    <circle cx="214" cy="108" r="12"/>
+    <circle cx="298" cy="108" r="12"/>
+    <circle cx="214" cy="404" r="12"/>
+    <circle cx="298" cy="404" r="12"/>
+    <path d="M 256 144 L 281 231 L 368 256 L 281 281 L 256 368 L 231 281 L 144 256 L 231 231 Z"/>
+  </g>
+  </g>
+  <g aria-label="astral wordmark">
+    <path d="M 63 58 C 63 36 49 21 32 21 C 15 21 5 37 5 59 C 5 81 16 97 32 97 C 46 97 57 88 63 77" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(124.87 322.00) scale(0.62)"/>
+    <path d="M 63 21 L 63 97" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(124.87 322.00) scale(0.62)"/>
+    <path d="M 57 32 C 50 23 40 20 29 20 C 15 20 6 28 6 40 C 6 52 15 58 30 62 C 46 66 57 72 57 84 C 57 96 46 102 31 102 C 18 102 9 98 3 90" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(179.43 322.00) scale(0.62)"/>
+    <path d="M 28 4 L 28 91 C 28 99 33 102 40 102 C 45 102 50 100 53 97" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(227.79 322.00) scale(0.62)"/>
+    <path d="M 10 27 L 50 27" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(227.79 322.00) scale(0.62)"/>
+    <path d="M 8 21 L 8 98" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(272.43 322.00) scale(0.62)"/>
+    <path d="M 8 55 C 9 34 21 21 39 21 C 48 21 55 26 59 33" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(272.43 322.00) scale(0.62)"/>
+    <path d="M 63 58 C 63 36 49 21 32 21 C 15 21 5 37 5 59 C 5 81 16 97 32 97 C 46 97 57 88 63 77" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(320.17 322.00) scale(0.62)"/>
+    <path d="M 63 21 L 63 97" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(320.17 322.00) scale(0.62)"/>
+    <path d="M 10 4 L 10 98" fill="none" stroke="#000000" stroke-width="8.68" stroke-linecap="round" stroke-linejoin="round" transform="translate(374.73 322.00) scale(0.62)"/>
+  </g>
+</svg>

@@ -10,6 +10,7 @@ package task
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -48,8 +49,8 @@ func (m *Module) listTaskChildren(w http.ResponseWriter, r *http.Request) {
 }
 
 // listChildren 容器集合查询核心。parentID == nil 表示 workspace 根层。
-// cursor 分页沿用 v1 语义：id 即游标（UUIDv7 字典序 = 创建时间序，
-// sqlite/PG 单列比较行为一致）。
+// 排序（2.4）：兄弟排序键 position 升序、同位 id 降序兜底；cursor 分页沿用
+// 键集语义，cursor 编码 <position>:<id>（对客户端不透明），谓词越过游标行。
 func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID string, parentID *string) {
 	q := r.URL.Query()
 	query := m.DB.WithContext(r.Context()).Model(&model.Task{}).Where("tasks.workspace_id = ?", wsID)
@@ -58,30 +59,65 @@ func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID strin
 	} else {
 		query = query.Where("tasks.parent_id = ?", *parentID)
 	}
-	// status/tag/assignee 三件套与 task-search 共用同一实现（filters.go）。
+	// status/tag/assignee 三件套 + 2.2 依赖过滤（blocked/blocked_by），
+	// 与 task-search 共用同一实现（filters.go）。
 	query, apiErr := applyTaskFilters(query, taskFilters{
 		Status: q.Get("status"), Tag: q.Get("tag"), Assignee: q.Get("assignee"),
+		Blocked: q.Get("blocked") == "true", BlockedBy: q.Get("blocked_by"),
 	})
 	if apiErr != nil {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
 	if v := q.Get("cursor"); v != "" {
-		query = query.Where("tasks.id < ?", v)
+		pos, id, ok := decodeSiblingCursor(v)
+		if !ok {
+			httpx.WriteError(w, r, httpx.Invalid("invalid cursor"))
+			return
+		}
+		query = query.Where("(tasks.position > ? OR (tasks.position = ? AND tasks.id < ?))", pos, pos, id)
 	}
 	limit := httpx.ParseLimit(q.Get("limit"), 50, 200)
 
 	var rows []model.Task
-	if err := query.Order("tasks.id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+	if err := query.Order("tasks.position ASC, tasks.id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}
 	next := ""
 	if len(rows) > limit {
 		rows = rows[:limit]
-		next = rows[len(rows)-1].ID
+		next = encodeSiblingCursor(rows[len(rows)-1])
 	}
 	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(m.enrichTasks(r.Context(), rows), next))
+}
+
+// encodeSiblingCursor / decodeSiblingCursor：children 集合的键集游标
+// （<position>:<id>；id 为 tsk_ 前缀不含冒号，position 可为负）。
+func encodeSiblingCursor(t model.Task) string {
+	return strconv.FormatInt(t.Position, 10) + ":" + t.ID
+}
+
+func decodeSiblingCursor(s string) (int64, string, bool) {
+	i := strings.IndexByte(s, ':')
+	if i <= 0 {
+		return 0, "", false
+	}
+	pos, err := strconv.ParseInt(s[:i], 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	return pos, s[i+1:], true
+}
+
+// siblingScope 兄弟集合查询范围（position 位移与计数共用同一实现）：
+// parentID == nil = workspace 根层（parent_id IS NULL）。
+func siblingScope(tx *gorm.DB, wsID string, parentID *string) *gorm.DB {
+	scope := tx.Model(&model.Task{}).Where("workspace_id = ?", wsID)
+	if parentID == nil {
+		return scope.Where("parent_id IS NULL")
+	}
+	return scope.Where("parent_id = ?", *parentID)
 }
 
 // ---- POST <container>/children ----
@@ -170,11 +206,18 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 		return taskDTO{}, err
 	}
 
+	// 兄弟序位（2.4）：创建一律追加尾部 = 当前兄弟数。计数在事务外完成——
+	// sqlite deferred 事务「先读后写」升锁会无视 busy_timeout 直接 SQLITE_BUSY，
+	// 事务内首条语句必须是写（并发创建撞位由 position 升序 + id 降序兜底收敛）。
+	var pos int64
+	if err := siblingScope(m.DB.WithContext(ctx), wsID, parentID).Count(&pos).Error; err != nil {
+		return taskDTO{}, err
+	}
 	t := model.Task{
 		ID: ids.New(ids.Task), WorkspaceID: wsID, ParentID: parentID,
 		Title: in.Title, Description: in.Description,
 		Status: "open", Priority: in.Priority, Revision: 1,
-		CreatedBy: p.ActorID,
+		Position: pos, CreatedBy: p.ActorID,
 	}
 	err = m.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&t).Error; err != nil {
@@ -198,7 +241,7 @@ func (m *Module) createTask(ctx context.Context, p *auth.Principal, wsID string,
 	if err != nil {
 		return taskDTO{}, err
 	}
-	return toTaskDTO(t, nil, m.loadTaskTags(ctx, t.ID), 0), nil
+	return toTaskDTO(t, m.loadTaskTags(ctx, t.ID), 0, depViews{}), nil
 }
 
 // resolveTagNames 按规范化名解析 workspace 内既有 tag；未知名字 → 404
@@ -240,9 +283,10 @@ func (m *Module) enrichTasks(ctx context.Context, rows []model.Task) []taskDTO {
 	}
 	tagsByTask := m.tagsForTasks(ctx, ids)
 	counts := m.childCounts(ctx, ids)
+	views := m.depViewsForTasks(ctx, ids)
 	items := make([]taskDTO, 0, len(rows))
 	for i := range rows {
-		items = append(items, toTaskDTO(rows[i], nil, tagsByTask[rows[i].ID], counts[rows[i].ID]))
+		items = append(items, toTaskDTO(rows[i], tagsByTask[rows[i].ID], counts[rows[i].ID], views[rows[i].ID]))
 	}
 	return items
 }

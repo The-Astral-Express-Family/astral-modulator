@@ -194,3 +194,324 @@ func TestTaskTreeContainersV2(t *testing.T) {
 		}
 	}
 }
+
+// doAuthedHeader 同 doAuthed，可附带额外 header（Idempotency-Key 重放测试用）。
+func doAuthedHeader(t *testing.T, ts *httptest.Server, cookie, method, path string, body any, headers map[string]string) (int, map[string]any) {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		raw, _ := json.Marshal(body)
+		reader = bytes.NewReader(raw)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequest(method, ts.URL+path, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&http.Cookie{Name: "astral_session", Value: cookie})
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+// TestTaskBatchV2：批量管理三端点的 HTTP 集成（协议 2.1 task_batch）——
+// 树创建镜像形状、批量移动、批量同值更新、Idempotency-Key 整批重放不双建。
+func TestTaskBatchV2(t *testing.T) {
+	ts := newTestServer(t)
+	cookie := loginHuman(t, ts, "batch@example.com")
+	api := "/api/v1"
+	code, ws := doAuthed(t, ts, cookie, "POST", api+"/workspaces", map[string]any{"name": "batch-demo"})
+	if code != 201 {
+		t.Fatalf("create ws: %d %v", code, ws)
+	}
+	wsID := ws["id"].(string)
+
+	// 1. 树创建：一棵带子的树 + 一棵单节点树 → 201，镜像嵌套 + tags/children_count。
+	body := map[string]any{"trees": []any{
+		map[string]any{"title": "Epic", "children": []any{map[string]any{"title": "Story"}}},
+		map[string]any{"title": "Solo"},
+	}}
+	code, out := doAuthedHeader(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/task-trees", body,
+		map[string]string{"Idempotency-Key": "itest-batch-tree-1"})
+	if code != 201 {
+		t.Fatalf("task-trees: %d %v", code, out)
+	}
+	created := items(t, out)
+	if len(created) != 2 {
+		t.Fatalf("tree roots = %d", len(created))
+	}
+	epic := created[0].(map[string]any)["task"].(map[string]any)
+	epicID := epic["id"].(string)
+	kids := created[0].(map[string]any)["children"].([]any)
+	if len(kids) != 1 || kids[0].(map[string]any)["task"].(map[string]any)["parent_id"] != epicID {
+		t.Fatalf("tree nesting broken: %v", created[0])
+	}
+	soloID := created[1].(map[string]any)["task"].(map[string]any)["id"].(string)
+
+	// 2. 同 Idempotency-Key 重放 → 同响应，且根层不重复建树。
+	code2, out2 := doAuthedHeader(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/task-trees", body,
+		map[string]string{"Idempotency-Key": "itest-batch-tree-1"})
+	if code2 != 201 {
+		t.Fatalf("idempotent replay: %d %v", code2, out2)
+	}
+	replayed := items(t, out2)
+	if replayed[0].(map[string]any)["task"].(map[string]any)["id"] != epicID {
+		t.Fatalf("replay must return first response, got new ids")
+	}
+	code, page := doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children", nil)
+	if code != 200 || len(items(t, page)) != 2 {
+		t.Fatalf("replay duplicated trees: %d %v", code, page)
+	}
+
+	// 3. 批量移动：Solo 移到 Epic 下；Story 移回根层（parent_id=null）。
+	storyID := kids[0].(map[string]any)["task"].(map[string]any)["id"].(string)
+	code, mv := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": soloID, "parent_id": epicID, "expected_revision": 1},
+			map[string]any{"task_id": storyID, "parent_id": nil, "expected_revision": 1},
+		}})
+	if code != 200 {
+		t.Fatalf("move: %d %v", code, mv)
+	}
+	moved := items(t, mv)
+	if moved[0].(map[string]any)["parent_id"] != epicID || moved[1].(map[string]any)["parent_id"] != nil {
+		t.Fatalf("move result: %v", moved)
+	}
+	if moved[0].(map[string]any)["revision"] != float64(2) {
+		t.Fatalf("move must bump revision: %v", moved[0])
+	}
+
+	// 4. 批量同值更新：全 done。set 为空 → 400。
+	code, up := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/batch-update",
+		map[string]any{
+			"items": []any{
+				map[string]any{"task_id": epicID, "expected_revision": 1}, // Epic 未被移动，仍在 rev1
+				map[string]any{"task_id": soloID, "expected_revision": 2},
+			},
+			"set": map[string]any{"status": "done"},
+		})
+	if code != 200 {
+		t.Fatalf("batch-update: %d %v", code, up)
+	}
+	for _, it := range items(t, up) {
+		if it.(map[string]any)["status"] != "done" {
+			t.Fatalf("status not applied: %v", it)
+		}
+	}
+	code, errBody := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/batch-update",
+		map[string]any{"items": []any{map[string]any{"task_id": epicID, "expected_revision": 3}}, "set": map[string]any{}})
+	if code != 400 || errCode(t, errBody) != "VALIDATION_FAILED" {
+		t.Fatalf("empty set: %d %v", code, errBody)
+	}
+
+	// 5. 环：Epic 移到自己的子孙 Solo 下 → 400 整批不生效。
+	code, errBody = doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": epicID, "parent_id": soloID, "expected_revision": 2},
+		}})
+	if code != 400 || errCode(t, errBody) != "VALIDATION_FAILED" {
+		t.Fatalf("cycle: %d %v", code, errBody)
+	}
+
+	// 6. revision 冲突 → 409，details 带 task_id。
+	code, errBody = doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": epicID, "parent_id": nil, "expected_revision": 99},
+		}})
+	if code != 409 || errCode(t, errBody) != "REVISION_CONFLICT" {
+		t.Fatalf("revision conflict: %d %v", code, errBody)
+	}
+}
+
+// TestTaskPositionOrderingAndCursor（协议 2.4）：children 按 position 升序返回；
+// 创建追加尾部；move 带 position 同调用完成换父与重排；游标为 position 键集
+// （对客户端不透明，翻页续传即可）。
+func TestTaskPositionOrderingAndCursor(t *testing.T) {
+	ts := newTestServer(t)
+	cookie := loginHuman(t, ts, "position@example.com")
+	api := "/api/v1"
+
+	code, ws := doAuthed(t, ts, cookie, "POST", api+"/workspaces", map[string]any{"name": "pos-demo"})
+	if code != 201 {
+		t.Fatalf("create ws: %d %v", code, ws)
+	}
+	wsID := ws["id"].(string)
+
+	ids := make([]string, 0, 3)
+	for _, title := range []string{"first", "second", "third"} {
+		code, row := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/children",
+			map[string]any{"title": title})
+		if code != 201 {
+			t.Fatalf("create %s: %d %v", title, code, row)
+		}
+		ids = append(ids, row["id"].(string))
+		if row["position"] != float64(len(ids)-1) {
+			t.Fatalf("create must append tail: %s position %v", title, row["position"])
+		}
+	}
+
+	// 排序契约：position 升序 = 创建正序（first, second, third）。
+	assertRootOrder := func(want []string) {
+		t.Helper()
+		code, page := doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children", nil)
+		if code != 200 {
+			t.Fatalf("list children: %d %v", code, page)
+		}
+		got := items(t, page)
+		if len(got) != len(want) {
+			t.Fatalf("root count = %d, want %d", len(got), len(want))
+		}
+		for i, id := range want {
+			if got[i].(map[string]any)["id"] != id {
+				t.Fatalf("root[%d] = %v, want %s", i, got[i], id)
+			}
+		}
+	}
+	assertRootOrder(ids)
+
+	// 重排：third 移到 0 位 → [third, first, second]（其余 revision 不动）。
+	code, mv := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": ids[2], "parent_id": nil, "expected_revision": 1, "position": 0},
+		}})
+	if code != 200 {
+		t.Fatalf("move with position: %d %v", code, mv)
+	}
+	if mv["items"].([]any)[0].(map[string]any)["position"] != float64(0) {
+		t.Fatalf("move result position: %v", mv)
+	}
+	assertRootOrder([]string{ids[2], ids[0], ids[1]})
+
+	// position 键集游标：limit=2 首页 + 续页恰好覆盖剩余（无重复无遗漏）。
+	code, page := doAuthed(t, ts, cookie,
+		"GET", api+"/workspaces/"+wsID+"/children?limit=2", nil)
+	if code != 200 || len(items(t, page)) != 2 || page["next_cursor"] == nil {
+		t.Fatalf("cursor page 1: %d %v", code, page)
+	}
+	firstTwo := items(t, page)
+	code, page2 := doAuthed(t, ts, cookie,
+		"GET", api+"/workspaces/"+wsID+"/children?limit=2&cursor="+page["next_cursor"].(string), nil)
+	if code != 200 || len(items(t, page2)) != 1 {
+		t.Fatalf("cursor page 2: %d %v", code, page2)
+	}
+	last := items(t, page2)[0].(map[string]any)["id"].(string)
+	if firstTwo[0].(map[string]any)["id"] == last ||
+		firstTwo[1].(map[string]any)["id"] == last {
+		t.Fatalf("cursor page overlap: %v / %v", firstTwo, last)
+	}
+
+	// 换父 + 序位一次完成：third 挂到 first 下 0 位（first 无子）。
+	code, mv = doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/move",
+		map[string]any{"items": []any{
+			map[string]any{"task_id": ids[2], "parent_id": ids[0], "expected_revision": 2, "position": 0},
+		}})
+	if code != 200 {
+		t.Fatalf("cross-parent move: %d %v", code, mv)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/tasks/"+ids[0]+"/children", nil)
+	if code != 200 || len(items(t, page)) != 1 || items(t, page)[0].(map[string]any)["id"] != ids[2] {
+		t.Fatalf("children after cross-parent move: %d %v", code, page)
+	}
+	assertRootOrder([]string{ids[0], ids[1]})
+}
+
+// TestTaskDependenciesV2：依赖边三端点的 HTTP 集成（协议 2.2）——PUT 幂等、
+// 视图字段恒填充、blocked/blocked_by 过滤、环 400、删除幂等 204。
+func TestTaskDependenciesV2(t *testing.T) {
+	ts := newTestServer(t)
+	cookie := loginHuman(t, ts, "deps@example.com")
+	api := "/api/v1"
+	code, ws := doAuthed(t, ts, cookie, "POST", api+"/workspaces", map[string]any{"name": "deps-demo"})
+	if code != 201 {
+		t.Fatalf("create ws: %d %v", code, ws)
+	}
+	wsID := ws["id"].(string)
+	mkTask := func(title string) string {
+		code, out := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/children",
+			map[string]any{"title": title})
+		if code != 201 {
+			t.Fatalf("create %s: %d %v", title, code, out)
+		}
+		return out["id"].(string)
+	}
+	a := mkTask("A") // 依赖 B
+	b := mkTask("B")
+	c := mkTask("C") // 无依赖
+
+	// 1. PUT 建边：A 依赖 B → 201；重复 PUT → 200 幂等。
+	depPath := func(from, to string) string {
+		return api + "/tasks/" + from + "/dependencies/" + to
+	}
+	code, out := doAuthed(t, ts, cookie, "PUT", depPath(a, b), map[string]any{"kind": "blocks"})
+	if code != 201 {
+		t.Fatalf("put dep: %d %v", code, out)
+	}
+	code, out = doAuthed(t, ts, cookie, "PUT", depPath(a, b), map[string]any{})
+	if code != 200 {
+		t.Fatalf("idempotent put dep: %d %v", code, out)
+	}
+
+	// 2. Task 视图恒填充：A.blocked_by=[B]。
+	code, out = doAuthed(t, ts, cookie, "GET", api+"/tasks/"+a, nil)
+	if code != 200 {
+		t.Fatalf("get A: %d %v", code, out)
+	}
+	if bb, ok := out["blocked_by"].([]any); !ok || len(bb) != 1 || bb[0] != b {
+		t.Fatalf("A.blocked_by = %v", out["blocked_by"])
+	}
+	if blocks, ok := out["blocks"].([]any); !ok || len(blocks) != 0 {
+		t.Fatalf("A.blocks = %v", out["blocks"])
+	}
+
+	// 3. 过滤：blocked=true 只回 A；blocked_by=B 只回 A。
+	code, page := doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children?blocked=true", nil)
+	if code != 200 || len(items(t, page)) != 1 {
+		t.Fatalf("blocked filter: %d %v", code, page)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children?blocked_by="+b, nil)
+	if code != 200 || len(items(t, page)) != 1 {
+		t.Fatalf("blocked_by filter: %d %v", code, page)
+	}
+
+	// 4. 环：B 依赖 A → 400。
+	code, errBody := doAuthed(t, ts, cookie, "PUT", depPath(b, a), map[string]any{})
+	if code != 400 || errCode(t, errBody) != "VALIDATION_FAILED" {
+		t.Fatalf("cycle: %d %v", code, errBody)
+	}
+
+	// 5. 依赖边列表。
+	code, out = doAuthed(t, ts, cookie, "GET", api+"/tasks/"+a+"/dependencies", nil)
+	if code != 200 {
+		t.Fatalf("list deps: %d %v", code, out)
+	}
+	if edges, ok := out["items"].([]any); !ok || len(edges) != 1 {
+		t.Fatalf("dep list = %v", out)
+	}
+
+	// 6. DELETE 幂等 204；再查 blocked 过滤为空。
+	code, _ = doAuthed(t, ts, cookie, "DELETE", depPath(a, b)+"?kind=blocks", nil)
+	if code != 204 {
+		t.Fatalf("delete dep: %d", code)
+	}
+	code, _ = doAuthed(t, ts, cookie, "DELETE", depPath(a, b)+"?kind=blocks", nil)
+	if code != 204 {
+		t.Fatalf("idempotent delete dep: %d", code)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/children?blocked=true", nil)
+	if code != 200 || len(items(t, page)) != 0 {
+		t.Fatalf("blocked filter after delete: %d %v", code, page)
+	}
+	_ = c
+}

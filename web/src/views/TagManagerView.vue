@@ -19,6 +19,7 @@ import type { TaskSearchHit } from '@/api/types'
 import { useCursorList } from '@/composables/useCursorList'
 import { useWorkspaceId } from '@/composables/useWorkspaceId'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import TaskStatusBadge from '@/components/tasks/TaskStatusBadge.vue'
 import {
   AlertDialog,
@@ -270,11 +271,13 @@ watch(workspaceId, () => {
 
     <Card>
       <CardContent class="flex flex-col gap-2 p-4">
-        <div v-if="loading && !tags.length" class="flex flex-col gap-2">
-          <Skeleton v-for="i in 4" :key="i" class="h-10" :style="{ width: `${92 - i * 8}%` }" />
-        </div>
-
-        <template v-else-if="tags.length">
+        <LoadSwap :loading="loading && !tags.length">
+          <template #skeleton>
+            <div class="flex flex-col gap-2">
+              <Skeleton v-for="i in 4" :key="i" class="h-10" :style="{ width: `${92 - i * 8}%` }" />
+            </div>
+          </template>
+          <template v-if="tags.length">
           <div v-for="tag in tags" :key="tag.id" class="flex flex-col gap-1">
             <div class="hover:bg-muted/40 flex items-center gap-2 rounded-lg px-2 py-1.5">
               <Button
@@ -317,26 +320,30 @@ watch(workspaceId, () => {
               v-if="expandedTagIds.has(tag.id)"
               class="bg-muted/30 ml-9 flex flex-col gap-1 rounded-lg border p-2"
             >
-              <template v-if="taskLists.get(tag.id)?.items.length">
-                <div
-                  v-for="hit in taskLists.get(tag.id)!.items"
-                  :key="hit.id"
-                  class="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm"
-                >
-                  <TaskStatusBadge :status="hit.status" />
-                  <span class="min-w-0 flex-1 truncate">{{ hit.title }}</span>
-                  <code class="text-muted-foreground hidden shrink-0 font-mono text-xs lg:inline">
-                    {{ hit.id.slice(0, 12) }}…
-                  </code>
-                </div>
-              </template>
-              <p v-else-if="!taskLists.get(tag.id)?.loading" class="text-muted-foreground px-1.5 py-1 text-xs">
-                没有任务挂载该标签。
-              </p>
-              <div v-if="taskLists.get(tag.id)?.loading" class="flex flex-col gap-1.5 px-1.5 py-1">
-                <Skeleton class="h-5 w-2/3" />
-                <Skeleton class="h-5 w-1/2" />
-              </div>
+              <LoadSwap :loading="!!taskLists.get(tag.id)?.loading">
+                <template #skeleton>
+                  <div class="flex flex-col gap-1.5 px-1.5 py-1">
+                    <Skeleton class="h-5 w-2/3" />
+                    <Skeleton class="h-5 w-1/2" />
+                  </div>
+                </template>
+                <template v-if="taskLists.get(tag.id)?.items.length">
+                  <div
+                    v-for="hit in taskLists.get(tag.id)!.items"
+                    :key="hit.id"
+                    class="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm"
+                  >
+                    <TaskStatusBadge :status="hit.status" />
+                    <span class="min-w-0 flex-1 truncate">{{ hit.title }}</span>
+                    <code class="text-muted-foreground hidden shrink-0 font-mono text-xs lg:inline">
+                      {{ hit.id.slice(0, 12) }}…
+                    </code>
+                  </div>
+                </template>
+                <p v-else class="text-muted-foreground px-1.5 py-1 text-xs">
+                  没有任务挂载该标签。
+                </p>
+              </LoadSwap>
               <div class="flex items-center gap-2 px-1.5 pt-1">
                 <Button
                   v-if="taskLists.get(tag.id)?.nextCursor"
@@ -377,6 +384,7 @@ watch(workspaceId, () => {
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
+        </LoadSwap>
       </CardContent>
     </Card>
 

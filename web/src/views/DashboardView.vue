@@ -9,6 +9,7 @@ import { useRoute } from 'vue-router'
 import { FolderOpenIcon, KeyRoundIcon, PlusIcon, UserRoundIcon, UsersRoundIcon } from '@lucide/vue'
 import CreateWorkspaceDialog from '@/components/layout/CreateWorkspaceDialog.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import LoadSwap from '@/components/shared/LoadSwap.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -110,11 +111,13 @@ const personalLinks = computed(() => {
           </Button>
         </div>
 
-        <div v-if="!workspaces.loaded" class="grid gap-3 sm:grid-cols-2">
-          <Skeleton v-for="i in 4" :key="i" class="h-24 rounded-xl" />
-        </div>
-
-        <ul v-else-if="workspaces.items.length" class="grid gap-3 sm:grid-cols-2">
+        <LoadSwap :loading="!workspaces.loaded">
+          <template #skeleton>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <Skeleton v-for="i in 4" :key="i" class="h-24 rounded-xl" />
+            </div>
+          </template>
+          <ul v-if="workspaces.items.length" class="grid gap-3 sm:grid-cols-2">
           <li v-for="ws in workspaces.items" :key="ws.id">
             <RouterLink
               :to="`/workspaces/${ws.id}`"
@@ -146,6 +149,7 @@ const personalLinks = computed(() => {
             </Button>
           </EmptyContent>
         </Empty>
+        </LoadSwap>
       </section>
 
       <aside class="flex min-w-0 flex-col gap-3">

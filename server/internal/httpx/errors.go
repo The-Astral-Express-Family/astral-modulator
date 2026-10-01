@@ -24,7 +24,6 @@ const (
 	CodeWorkspaceAlreadyBound = "WORKSPACE_ALREADY_BOUND"
 	CodeTaskNotFound          = "TASK_NOT_FOUND"
 	CodeTaskAlreadyClaimed    = "TASK_ALREADY_CLAIMED"
-	CodeTaskLeaseExpired      = "TASK_LEASE_EXPIRED"
 	CodeTagProposalExpired    = "TAG_PROPOSAL_EXPIRED"
 	CodeTagAlreadyExists      = "TAG_ALREADY_EXISTS"
 	CodeRevisionConflict      = "REVISION_CONFLICT"

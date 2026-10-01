@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="modwave-white-tile-icon-title modwave-white-tile-icon-description">
+  <title id="modwave-white-tile-icon-title">Astral Modwave logo tile · white · icon</title>
+  <desc id="modwave-white-tile-icon-description">平滑 Bézier 调制波穿过解构 A，最直接回应 Modulator 与草图。 Pure icon on a rounded white color tile.</desc>
+
+  <rect width="512" height="512" rx="112" fill="#161b1d"/>
+  <g transform="translate(20 20) scale(0.921875)">
+
+  <g fill="none" stroke="#ffffff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 170 192 C 184 116 211 72 256 72 C 301 72 328 116 342 192"/>
+    <path d="M 190 330 L 150 440"/>
+    <path d="M 322 330 L 362 440"/>
+  </g>
+  <path d="M 68 260 C 120 216 170 216 210 250 C 236 273 276 273 302 250 C 342 216 392 216 444 260" fill="none" stroke="#ffffff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="256" cy="268" r="21" fill="#ffffff"/>
+  </g>
+</svg>

@@ -126,13 +126,15 @@ func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) 
 
 		api.Get("/meta/capabilities", func(w http.ResponseWriter, req *http.Request) {
 			// features 按实现进度逐步开放；未列出即不可用（docs/protocol.md §7）。
-			// task_lease：原子 claim + lease renew/release 已实装（见 task 模块测试）。
+			// task_claim：原子认领（持有至释放/完成，无时间自动过期）已实装（见 task 模块测试）。
 			// document_sync：documents/conflicts 七端点已实装（round 38 T4；
 			// memory 无独立 feature——复用 documents 端点，M1 裁决）。
+			// task_batch：批量树创建/move/batch-update 已实装（协议 2.1）。
+			// task_dependencies：依赖边（blocked_by/blocks/related）已实装（协议 2.2）。
 			httpx.WriteOK(w, req, http.StatusOK, Capabilities{
 				ProtocolVersion:   httpx.ProtocolVersion,
 				MinimumCliVersion: "0.1.0",
-				Features:          []string{"task_lease", "document_sync"},
+				Features:          []string{"task_claim", "document_sync", "task_batch", "task_dependencies"},
 			})
 		})
 

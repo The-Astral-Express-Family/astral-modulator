@@ -31,7 +31,7 @@ ADR-0008 落地后，邀请体系经历了一次增补（00018 平台级注册�
 
 **纯双码分离**——两轨结构同构、彻底解耦：
 
-1. **注册轨**（`registration_invitations`，00018 落地、00019 自
+1. **注册轨**（`registration_invitations`，00018 落地、00022 自
    `platform_invitations` 更名）：只管「允许注册」，仅平台管理员
    （`platform:users:manage`）经 `/admin/registration-invitations` 签发。
    `POST /auth/register` 只查此表（字段 `invite_code` → `registration_code`，

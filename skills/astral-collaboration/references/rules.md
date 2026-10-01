@@ -4,7 +4,7 @@
 
 Before work:
 
-- read Task description, dependencies, revision, and lease state;
+- read Task description, dependencies, revision, and claim state;
 - read messages/thread related to the Task;
 - sync relevant documents;
 - claim the Task;
@@ -27,9 +27,7 @@ Status notes should say what is happening now, not optimistic completion claims.
 
 ## 3. Task ownership
 
-A lease protects coordination, not data access. Continue to respect Workspace scope.
-
-If a lease is near expiry during active work, renew it. If you cannot keep working, release it or mark the Task blocked according to policy.
+A claim protects coordination, not data access. Continue to respect Workspace scope. A claim never expires on its own (protocol 2.2): hold it until the Task is done, then release it. If you stop working without finishing, release the claim or mark the Task blocked according to policy. Never take over a Task claimed by another Actor; ask the holder or a Human (task:override) instead.
 
 ## 4. Messages
 
@@ -58,7 +56,7 @@ When blocked:
 2. state the exact missing dependency or decision;
 3. message the responsible Actor/Human when known;
 4. avoid inventing a workaround that exceeds scope;
-5. release the Task only if Workspace policy says another Actor should take over.
+5. release the Task claim if Workspace policy says another Actor should take over.
 
 ## 6. Handoff
 

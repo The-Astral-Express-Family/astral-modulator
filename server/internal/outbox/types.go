@@ -16,7 +16,6 @@ const (
 	TypeActorPresenceChanged      = "actor.presence.changed"
 	TypeTaskCreated               = "task.created"
 	TypeTaskClaimed               = "task.claimed"
-	TypeTaskLeaseExpired          = "task.lease.expired"
 	TypeTaskUpdated               = "task.updated"
 	TypeTaskReleased              = "task.released"
 	TypeDocumentUpdated           = "document.updated"

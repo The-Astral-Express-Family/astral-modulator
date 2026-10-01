@@ -58,7 +58,7 @@
 
 两个 Agent 同时修改 Task/Document。
 
-缓解：Task Lease + revision + Document conflict，禁止静默覆盖。
+缓解：Task claim 互斥 + revision + Document conflict，禁止静默覆盖。
 
 ### T4 Workspace 越界
 
@@ -70,7 +70,7 @@
 
 Agent 声称自己在工作但实际已离线。
 
-缓解：Presence heartbeat TTL；Task ownership 使用独立 Lease，不信任 note/state。
+缓解：Presence heartbeat TTL；Task ownership 使用 claim/release（task:override 人工强制释放），不信任 note/state。
 
 ### T6 Event/Message 重放
 

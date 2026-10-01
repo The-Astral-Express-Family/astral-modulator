@@ -267,7 +267,7 @@ func TestSpikeE2E(t *testing.T) {
 	taskID := tk["id"].(string)
 
 	code, claim1 := do(t, "POST", base+"/tasks/"+taskID+"/claim", secretA,
-		map[string]any{"expected_revision": 1, "lease_seconds": 300})
+		map[string]any{"expected_revision": 1})
 	if code != 200 {
 		t.Fatalf("claim1: %d %v", code, claim1)
 	}

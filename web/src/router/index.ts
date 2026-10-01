@@ -87,7 +87,8 @@ export const router = createRouter({
           path: 'workspaces/:workspaceId/documents',
           name: 'workspace-documents',
           component: () => import('../views/DocumentsView.vue'),
-          meta: { auth: 'required' },
+          // wide：目录树 + 编辑/预览双栏需要 7xl 容器（MainLayout 按 meta 放宽）。
+          meta: { auth: 'required', wide: true },
         },
         {
           path: 'workspaces/:workspaceId/conflicts',

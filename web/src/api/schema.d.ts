@@ -372,6 +372,8 @@ export interface paths {
         /**
          * workspace 容器的子任务集合 = 根层任务（parent_id 为空），仅此一层。
          *     子层用 GET /tasks/{task_id}/children 逐容器下钻（D15：不做全量平铺）。
+         *     集合按兄弟排序键 position 升序返回（2.2；cursor 为 position 键集分页，
+         *     对客户端不透明）。
          */
         get: operations["listWorkspaceChildren"];
         put?: never;
@@ -403,6 +405,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/task-trees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量创建根层任务树（嵌套子树一次投递；全有或全无） */
+        post: operations["createTaskTrees"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/task-trees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量创建子任务树（投递进 task 容器；语义与 workspace 版一致） */
+        post: operations["createChildTaskTrees"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/task-search": {
         parameters: {
             query?: never;
@@ -419,6 +459,44 @@ export interface paths {
         get: operations["searchTasks"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/tasks/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量移动任务到新父并/或调整兄弟序位（全有或全无；子孙随 parent 语义自然跟随） */
+        post: operations["moveTasks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/tasks/batch-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量更新任务的同一字段值（全有或全无；如批量完成/批量取消/批量指派） */
+        post: operations["batchUpdateTasks"];
         delete?: never;
         options?: never;
         head?: never;
@@ -445,6 +523,51 @@ export interface paths {
         patch: operations["updateTask"];
         trace?: never;
     };
+    "/tasks/{task_id}/dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        /** 任务依赖边列表（双向：作为依赖方与作为 blocker 的全部边） */
+        get: operations["listTaskDependencies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/dependencies/{dependency_task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                /** @description 被依赖方（blocker）；必须与 task_id 同 workspace */
+                dependency_task_id: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 增加依赖边（task_id 依赖 dependency_task_id；body.kind 缺省 blocks）。
+         *     blocks 边写入时沿依赖链防环；同边已存在则幂等 200 不 bump。
+         *     边变更两端任务各 revision+1 并发 task.updated（data.dep_change）。
+         */
+        put: operations["addTaskDependency"];
+        post?: never;
+        /** 删除依赖边（?kind= 缺省 blocks；边不存在幂等 204） */
+        delete: operations["removeTaskDependency"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/claim": {
         parameters: {
             query?: never;
@@ -454,43 +577,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 原子认领（Phase 1 spike 验收核心） */
+        /** 原子认领（认领持有至释放或任务完成，无时间自动过期） */
         post: operations["claimTask"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/lease/renew": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 续租（仅 holder） */
-        post: operations["renewLease"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/lease": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** 释放（holder；human force release 走 override/approval） */
-        delete: operations["releaseLease"];
+        /** 释放认领（claimant 本人；他人需 task:override 强制释放） */
+        delete: operations["releaseClaim"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1047,9 +1137,8 @@ export interface components {
         IdOrNull: components["schemas"]["Id"] | null;
         /** Format: date-time */
         DateTimeOrNull: string | null;
-        LeaseOrNull: components["schemas"]["Lease"] | null;
         /** @enum {string} */
-        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TASK_LEASE_EXPIRED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "ALREADY_MEMBER" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "ALREADY_MEMBER" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
         ErrorEnvelope: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1076,7 +1165,7 @@ export interface components {
         Capabilities: {
             protocol_version: number;
             minimum_cli_version: string;
-            /** @description 功能开关名（如 task_lease/document_sync_v1/sse_resume）；未列出即不可用 */
+            /** @description 功能开关名（如 task_claim/document_sync/task_batch）；未列出即不可用 */
             features: string[];
         };
         DeviceAuthorization: {
@@ -1336,6 +1425,13 @@ export interface components {
             assignee_actor_id: components["schemas"]["IdOrNull"];
             /** Format: int64 */
             revision: number;
+            /**
+             * Format: int64
+             * @description 兄弟排序键（2.2）：同一父容器子层内 0 起的序位，children 集合按
+             *     position 升序（同位 id 降序兜底）返回。创建=追加兄弟尾部；调整
+             *     走 move 端点的可选 position。恒填充。
+             */
+            position?: number;
             /** @description v2 起所有 Task 响应恒填充（无 tag 时空数组；修订 D11） */
             tags: components["schemas"]["Tag"][];
             /**
@@ -1343,22 +1439,97 @@ export interface components {
              * @description 直接子任务数（UI 展开徽标；恒填充）
              */
             children_count: number;
-            lease?: components["schemas"]["LeaseOrNull"];
+            /** @description 本任务依赖（等待）的任务 id 列表（2.2；blocks 边出向；恒填充） */
+            blocked_by: components["schemas"]["Id"][];
+            /** @description 依赖本任务（被本任务阻塞）的任务 id 列表（2.2；blocks 边入向；恒填充） */
+            blocks: components["schemas"]["Id"][];
+            /** @description 与本任务关联（relates 边）的任务 id 列表（2.2；恒填充） */
+            related: components["schemas"]["Id"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        Lease: {
-            holder_actor_id: components["schemas"]["Id"];
+        DependencyEdge: {
+            from_task_id: components["schemas"]["Id"];
+            to_task_id: components["schemas"]["Id"];
+            /**
+             * @description from 依赖 to（blocks = to 完成前 from 处于阻塞语义）
+             * @enum {string}
+             */
+            kind: "blocks" | "relates";
             /** Format: date-time */
-            expires_at: string;
-            /** Format: date-time */
-            renewed_at?: string;
+            created_at: string;
+        };
+        DependencyList: {
+            items: components["schemas"]["DependencyEdge"][];
+        };
+        TaskTreeNode: {
+            title: string;
+            /** @default  */
+            description: string;
+            priority?: components["schemas"]["TaskPriority"];
+            /** @description 同 TaskCreate.tags（已存在 tag 规范化名；任一未知 → 404 整批不创建） */
+            tags?: string[];
+            children?: components["schemas"]["TaskTreeNode"][];
+        };
+        TaskTreeBatch: {
+            /**
+             * @description 一次投递的根树集合。整批（含全部嵌套 children）总节点数 ≤200、
+             *     嵌套深度 ≤8，超限 400 VALIDATION_FAILED（上限计数按节点，长度
+             *     校验按 UTF-8 字节口径，TODO.md §1.2 L1）。整批单事务、全有或
+             *     全无：任一节点非法则整批不创建。
+             */
+            trees: components["schemas"]["TaskTreeNode"][];
+        };
+        TaskTreeNodeCreated: {
+            task: components["schemas"]["Task"];
+            /** @description 与请求 children 一一对应（无子任务时空数组） */
+            children: components["schemas"]["TaskTreeNodeCreated"][];
+        };
+        TaskTreeBatchCreated: {
+            /** @description 与请求 trees 一一对应，镜像嵌套结构 */
+            items: components["schemas"]["TaskTreeNodeCreated"][];
+        };
+        TaskMoveItem: {
+            task_id: components["schemas"]["Id"];
+            /** @description null = 移到根层；Id = 挂到该任务下（可为批内任务） */
+            parent_id: components["schemas"]["IdOrNull"];
+            /** Format: int64 */
+            expected_revision: number;
+            /**
+             * @description 目标父容器子层中的 0 起下标（2.2）：任务插入到摘除前列表中该下标
+             *     当前元素之前，越界收敛到末尾；缺省 = 追加到末尾。同父移动先从原位
+             *     摘除再插入（position 以摘除前的兄弟列表为准）。items 按请求顺序
+             *     生效，后项的 position 相对其处理前的目标列表状态。负数 400。
+             */
+            position?: number;
+        };
+        TaskMoveBatch: {
+            /** @description task_id 不得重复；不支持跨 workspace（否则 404/400） */
+            items: components["schemas"]["TaskMoveItem"][];
+        };
+        TaskBatchUpdateItem: {
+            task_id: components["schemas"]["Id"];
+            /** Format: int64 */
+            expected_revision: number;
+        };
+        TaskBatchUpdate: {
+            /** @description task_id 不得重复 */
+            items: components["schemas"]["TaskBatchUpdateItem"][];
+            /** @description 应用于选中集合的同一字段值；至少提供一项，否则 400 */
+            set: {
+                status?: components["schemas"]["TaskStatus"];
+                priority?: components["schemas"]["TaskPriority"];
+                assignee_actor_id?: components["schemas"]["IdOrNull"];
+            };
+        };
+        TaskBatchResult: {
+            /** @description 按请求 items 顺序返回变更后的任务全量 */
+            items: components["schemas"]["Task"][];
         };
         ClaimResult: {
             task: components["schemas"]["Task"];
-            lease: components["schemas"]["Lease"];
         };
         Tag: {
             id: components["schemas"]["Id"];
@@ -1688,8 +1859,21 @@ export interface components {
         TaskStatusFilter: components["schemas"]["TaskStatus"];
         TaskTagFilter: string;
         TaskAssigneeFilter: string;
+        /**
+         * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+         *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+         */
+        TaskBlockedFilter: boolean;
+        /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+        TaskBlockedByFilter: string;
         TaskRegexFilter: string;
         TaskFuzzyFilter: string;
+        /**
+         * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+         *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+         *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+         */
+        IdempotencyKey: string;
     };
     requestBodies: never;
     headers: never;
@@ -2367,6 +2551,13 @@ export interface operations {
                 status?: components["parameters"]["TaskStatusFilter"];
                 tag?: components["parameters"]["TaskTagFilter"];
                 assignee?: components["parameters"]["TaskAssigneeFilter"];
+                /**
+                 * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+                 *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+                 */
+                blocked?: components["parameters"]["TaskBlockedFilter"];
+                /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+                blocked_by?: components["parameters"]["TaskBlockedByFilter"];
                 limit?: components["parameters"]["Limit"];
                 cursor?: components["parameters"]["Cursor"];
             };
@@ -2392,7 +2583,14 @@ export interface operations {
     createRootTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 workspace_id: components["parameters"]["WorkspaceId"];
             };
@@ -2422,6 +2620,13 @@ export interface operations {
                 status?: components["parameters"]["TaskStatusFilter"];
                 tag?: components["parameters"]["TaskTagFilter"];
                 assignee?: components["parameters"]["TaskAssigneeFilter"];
+                /**
+                 * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+                 *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+                 */
+                blocked?: components["parameters"]["TaskBlockedFilter"];
+                /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+                blocked_by?: components["parameters"]["TaskBlockedByFilter"];
                 limit?: components["parameters"]["Limit"];
                 cursor?: components["parameters"]["Cursor"];
             };
@@ -2448,7 +2653,14 @@ export interface operations {
     createChildTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 task_id: components["parameters"]["TaskId"];
             };
@@ -2472,6 +2684,79 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    createTaskTrees: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskTreeBatch"];
+            };
+        };
+        responses: {
+            /**
+             * @description 整批创建成功（单事务；任一节点非法则整批不创建）。items 与请求
+             *     trees 一一对应并镜像嵌套结构，task 内含服务端生成的 id/revision。
+             */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTreeBatchCreated"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createChildTaskTrees: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskTreeBatch"];
+            };
+        };
+        responses: {
+            /** @description 整批创建成功（全部新任务 parent=容器任务） */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTreeBatchCreated"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     searchTasks: {
         parameters: {
             query?: {
@@ -2481,6 +2766,13 @@ export interface operations {
                 tag?: components["parameters"]["TaskTagFilter"];
                 status?: components["parameters"]["TaskStatusFilter"];
                 assignee?: components["parameters"]["TaskAssigneeFilter"];
+                /**
+                 * @description 仅返回存在未完成 blocks 依赖的任务（2.2）：依赖对端 status != done
+                 *     即视为阻塞中（cancelled 不算完成，T1 下它是可复活状态）。
+                 */
+                blocked?: components["parameters"]["TaskBlockedFilter"];
+                /** @description 仅返回被指定任务阻塞（存在 blocks 边指向该任务）的任务（2.2）。 */
+                blocked_by?: components["parameters"]["TaskBlockedByFilter"];
                 limit?: components["parameters"]["Limit"];
                 cursor?: components["parameters"]["Cursor"];
             };
@@ -2502,6 +2794,84 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+        };
+    };
+    moveTasks: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskMoveBatch"];
+            };
+        };
+        responses: {
+            /**
+             * @description 整批移动成功（单事务）。items 按请求顺序返回移动后的任务全量。
+             *     语义：parent_id=null 移到根层；不支持跨 workspace；移动任务到
+             *     自己的子孙下成环 → 400 整批不生效（批内互移参与统一环检测）；
+             *     可选 position 同时指定目标兄弟序位（2.2，同父移动 = 重排），
+             *     缺省追加末尾。
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskBatchResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    batchUpdateTasks: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description 幂等键（可选）：同一 Actor+端点+键在 24h 窗口内重放返回首次 2xx 响应
+                 *     （docs/protocol.md §4；4xx/5xx 不入缓存）。批量端点整批共用一个键，
+                 *     建议由内容确定性派生，使网络重试安全（不会重复建树/重复移动）。
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskBatchUpdate"];
+            };
+        };
+        responses: {
+            /** @description 整批更新成功（单事务）。items 按请求顺序返回更新后的任务全量。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskBatchResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getTask: {
@@ -2554,6 +2924,101 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    listTaskDependencies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 依赖边全量（边数有界，单任务每方向上限 50，不分页） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyList"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    addTaskDependency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                /** @description 被依赖方（blocker）；必须与 task_id 同 workspace */
+                dependency_task_id: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description blocks = 硬阻塞（防环校验）；relates = 对称关联
+                     * @default blocks
+                     * @enum {string}
+                     */
+                    kind?: "blocks" | "relates";
+                };
+            };
+        };
+        responses: {
+            /** @description 边已存在（幂等，不 bump） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyEdge"];
+                };
+            };
+            /** @description 已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyEdge"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    removeTaskDependency: {
+        parameters: {
+            query?: {
+                kind?: "blocks" | "relates";
+            };
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                /** @description 被依赖方（blocker）；必须与 task_id 同 workspace */
+                dependency_task_id: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除（或边本不存在） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     claimTask: {
         parameters: {
             query?: never;
@@ -2568,13 +3033,11 @@ export interface operations {
                 "application/json": {
                     /** Format: int64 */
                     expected_revision: number;
-                    /** @default 300 */
-                    lease_seconds?: number;
                 };
             };
         };
         responses: {
-            /** @description 认领成功 */
+            /** @description 认领成功（assignee 指派为自己 + status 转 in_progress） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2586,7 +3049,7 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
-    renewLease: {
+    releaseClaim: {
         parameters: {
             query?: never;
             header?: never;
@@ -2597,30 +3060,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 已续租 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Lease"];
-                };
-            };
-            409: components["responses"]["Error"];
-        };
-    };
-    releaseLease: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: components["parameters"]["TaskId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已释放 */
+            /** @description 已释放（未认领时幂等 204） */
             204: {
                 headers: {
                     [name: string]: unknown;

@@ -13,7 +13,6 @@ export function fakeId(prefix: string, n: number): string {
 }
 
 const hoursAgo = (h: number): string => new Date(Date.now() - h * 3_600_000).toISOString()
-const minutesLater = (m: number): string => new Date(Date.now() + m * 60_000).toISOString()
 
 // ---- 演示身份（session store 在后端不可达/未登录时的兜底登录态）----
 
@@ -37,7 +36,7 @@ export const DEMO_WELL_KNOWN: WellKnown = {
 export const DEMO_CAPABILITIES: Capabilities = {
   protocol_version: 2,
   minimum_cli_version: '0.2.0',
-  features: ['task_lease'],
+  features: ['task_claim'],
 }
 
 // ---- 成员 / 标签 / 任务 ----
@@ -90,14 +89,13 @@ interface TaskDef {
   tags?: string[]
   desc?: string
   createdHoursAgo: number
-  lease?: { holder: Actor; minutesLeft: number }
 }
 
 const DEFS: TaskDef[] = [
-  { n: 101, title: '后端重构：审批与租约', status: 'in_progress', priority: 'high', assignee: DEMO_ACTOR, tags: ['backend'], desc: '收敛 approvals 状态机与 lease 清扫器的边界行为，统一事件出口。', createdHoursAgo: 72, lease: { holder: DEMO_ACTOR, minutesLeft: 5 } },
+  { n: 101, title: '后端重构：审批与认领', status: 'in_progress', priority: 'high', assignee: DEMO_ACTOR, tags: ['backend'], desc: '收敛 approvals 状态机与任务认领（持有至释放）的边界行为，统一事件出口。', createdHoursAgo: 72 },
   { n: 102, title: 'approvals 状态机补测试', parent: 101, status: 'done', assignee: ALING, tags: ['backend', 'docs'], desc: '覆盖 approve 原子提升 / 裁决单次使用 / TTL 惰性过期。', createdHoursAgo: 60 },
   { n: 103, title: '过期路径边界用例', parent: 102, status: 'done', priority: 'low', createdHoursAgo: 58 },
-  { n: 104, title: 'lease 清扫器条件删除', parent: 101, status: 'in_progress', assignee: AGENT_NOVA, tags: ['backend'], desc: '快照后已续租的行不再被误删；条件更新 + RowsAffected 校验。', createdHoursAgo: 40, lease: { holder: AGENT_NOVA, minutesLeft: 45 } },
+  { n: 104, title: 'claim 互斥条件更新', parent: 101, status: 'in_progress', assignee: AGENT_NOVA, tags: ['backend'], desc: 'assignee 条件更新防并发；他人持有 409、revision 漂移 409 两种来源区分。', createdHoursAgo: 40 },
   { n: 105, title: 'revision 冲突 UX 文案', parent: 101, status: 'open', priority: 'low', tags: ['docs'], createdHoursAgo: 30 },
   { n: 106, title: 'Web 任务树视图', status: 'in_progress', priority: 'urgent', assignee: DEMO_ACTOR, tags: ['frontend', 'feature'], desc: '逐容器懒加载 + 双栏布局：左侧缩进树 + 右侧详情面板。', createdHoursAgo: 26 },
   { n: 107, title: '双栏布局与树渲染', parent: 106, status: 'in_progress', priority: 'high', assignee: DEMO_ACTOR, tags: ['frontend'], createdHoursAgo: 24 },
@@ -121,20 +119,17 @@ function buildTask(def: TaskDef): Task {
     status: def.status,
     priority: def.priority ?? 'normal',
     assignee_actor_id: def.assignee?.id ?? null,
-    revision: 1 + (def.lease ? 1 : 0) + (def.status !== 'open' ? 1 : 0),
+    revision: 1 + (def.status !== 'open' ? 1 : 0),
+    position: 0, // 由下方第二遍填充
+    blocked_by: [],
+    blocks: [],
+    related: [],
     tags: (def.tags ?? []).map((name) => {
       const t = DEMO_TAGS.find((cand) => cand.name === name)
       if (!t) throw new Error(`fixture: unknown tag ${name}`)
       return t
     }),
     children_count: 0, // 由下方第二遍填充
-    lease: def.lease
-      ? {
-          holder_actor_id: def.lease.holder.id,
-          expires_at: minutesLater(def.lease.minutesLeft),
-          renewed_at: hoursAgo(1),
-        }
-      : null,
     created_at: hoursAgo(def.createdHoursAgo),
     updated_at: hoursAgo(Math.max(def.createdHoursAgo - 2, 0)),
   }
@@ -148,6 +143,20 @@ for (const t of DEMO_TASKS) {
   if (t.parent_id) countById.set(t.parent_id, (countById.get(t.parent_id) ?? 0) + 1)
 }
 for (const t of DEMO_TASKS) t.children_count = countById.get(t.id) ?? 0
+
+// 第三遍（协议 2.2）：兄弟排序键 position——夹具 n 大 = 创建晚（展示序为
+// n 降序），按同父分组以 n 降序编 0..k-1，保持演示数据既有视觉顺序。
+const siblingsById = new Map<string, Task[]>()
+for (const t of DEMO_TASKS) {
+  const key = t.parent_id ?? '(root)'
+  const list = siblingsById.get(key) ?? []
+  list.push(t)
+  siblingsById.set(key, list)
+}
+for (const list of siblingsById.values()) {
+  list.sort((a, b) => (a.id < b.id ? 1 : -1)) // id 含 n，n 降序
+  list.forEach((t, i) => (t.position = i))
+}
 
 // 「模拟他人操作」用的演员池（排除当前用户在视图里的身份）。
 export const OTHER_ACTORS: Actor[] = [AGENT_NOVA, ALING]

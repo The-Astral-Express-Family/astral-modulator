@@ -25,11 +25,11 @@
 
 ## 2. 模型
 
-### 2.1 RegistrationInvitation（`registration_invitations`，00018 落地为 platform_invitations，00019 更名）
+### 2.1 RegistrationInvitation（`registration_invitations`，00018 落地为 platform_invitations，00022 更名）
 
 | 字段 | 说明 |
 |------|------|
-| `id` | `reg_<uuidv7>`（00019 起新前缀 `reg`；更名前存量行残留 `inv_`，前缀只服务可读性） |
+| `id` | `reg_<uuidv7>`（00022 起新前缀 `reg`；更名前存量行残留 `inv_`，前缀只服务可读性） |
 | `code_hash` | 码的 sha256（唯一索引）；**明文码不落库** |
 | `created_by` | 签发人 actor_id（platform admin） |
 | `created_at` / `expires_at` | TTL 默认 7d，签发可指定，上限 30d |
@@ -200,7 +200,7 @@
 | P2 web（round 30） | /register 页 + 邀请卡 |
 | P3 CLI（astral-cli 3822b29） | `astral register` |
 | 平台邀请（00018） | `platform_invitations` + `/admin/invitations` + register 双表回退 |
-| **双轨分离（00019 / ADR-0009，2026-09-29）** | 更名 registration_invitations；register 收窄为 `registration_code`（删回退）；新增 `POST /invitations/redeem`（ALREADY_MEMBER 幂等语义）；`/admin/registration-invitations` 改名；web `/join` + 侧栏兑码；CLI 字段/flag 更名 |
+| **双轨分离（00022 / ADR-0009，2026-09-29）** | 更名 registration_invitations；register 收窄为 `registration_code`（删回退）；新增 `POST /invitations/redeem`（ALREADY_MEMBER 幂等语义）；`/admin/registration-invitations` 改名；web `/join` + 侧栏兑码；CLI 字段/flag 更名 |
 
 ## 8. 明确不做与后续项
 
