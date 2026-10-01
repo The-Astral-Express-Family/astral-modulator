@@ -3,6 +3,7 @@
 package workspace
 
 import (
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/mail"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
@@ -28,6 +30,19 @@ type Module struct {
 	// 见 auth.ResolveWebBaseURL）；可留空（兜底请求 Host）。
 	WebBaseURL string
 	PublicURL  string
+	// Mailer 是工作区邀请的邮件投递（00024）。nil = log transport
+	// （mail.OrLog 兜底——邮件全文写日志，管理员可手动转发链接）。
+	Mailer mail.Sender
+	// Log 供邮件投递失败路径记日志；nil 回退 slog.Default()。
+	Log *slog.Logger
+}
+
+// inviteMailLog 是邮件投递路径的日志器（nil 兜底 slog.Default）。
+func (m *Module) inviteMailLog() *slog.Logger {
+	if m.Log != nil {
+		return m.Log
+	}
+	return slog.Default()
 }
 
 // RegisterRoutes 全部端点已实装（原 501 桩移除）。

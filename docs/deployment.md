@@ -63,6 +63,29 @@ ASTRAL_TRUSTED_PROXY=false                      # true=限流 key 采信 X-Forwa
 独立计数，达到 scale-out 形态后需换集中式计数器（architecture §19）。默认值与
 语义以 `server/internal/config/config.go` 为准。
 
+### 出站邮件（可选，单环境变量）
+
+忘记密码重置链接与工作区邀请投递依赖出站邮件。配置面**只有一个可选变量**
+（连接串形式，与 `DATABASE_URL` 同风格）：
+
+```text
+# smtps = 465 隐式 TLS（QQ 邮箱等）；smtp = 587 STARTTLS。
+# userinfo 即 SMTP 账号与授权码（密码含特殊字符需 URL 百分号编码；
+# QQ 邮箱授权码为 16 位小写字母数字，无需编码）。
+# 发件人默认 = 账号；可用 ?from= 覆盖。
+ASTRAL_SMTP_URL=smtps://bot%40qq.com:授权码@smtp.qq.com
+```
+
+- **不配置 = log transport**：邮件全文（含一次性重置链接）写服务器日志
+  （`podman logs astral` / journald 可见）。自托管小部署零成本即可用——
+  用户申请重置后管理员从日志捞链接转给他。注意此模式下**日志即凭据**，
+  应限制日志读取面（security.md §7.2）；
+- 纯出站连接，无需开任何入站端口；QQ 邮箱开启 SMTP 服务即得授权码
+  （设置 → 账号 → POP3/IMAP/SMTP）；
+- 部分云厂商默认封出站 25/465/587（阿里云/腾讯云需工单解封），落地前
+  `curl -v telnet://smtp.example.com:465` 验证连通性；
+- 配置非法（scheme 错/缺 host/缺账号）启动即 fail fast。
+
 （非全集；完整说明以 `server/internal/config/config.go` 为准。）
 
 Secrets 只走环境变量/secret manager，不提交配置库。

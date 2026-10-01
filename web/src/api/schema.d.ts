@@ -72,6 +72,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 忘记密码：请求重置邮件（恒 204 防枚举——无论邮箱是否存在；两端口点均入敏感限流桶） */
+        post: operations["requestPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 凭一次性 token 设置新密码（成功后该账号全部会话被吊销，需重新登录） */
+        post: operations["confirmPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/device/authorizations": {
         parameters: {
             query?: never;
@@ -1138,7 +1172,7 @@ export interface components {
         /** Format: date-time */
         DateTimeOrNull: string | null;
         /** @enum {string} */
-        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "ALREADY_MEMBER" | "EMAIL_TAKEN" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "TOKEN_EXPIRED" | "TOKEN_REVOKED" | "INSUFFICIENT_SCOPE" | "SERVER_NOT_FOUND" | "WORKSPACE_NOT_FOUND" | "WORKSPACE_ALREADY_BOUND" | "WORKSPACE_NAME_TAKEN" | "TASK_NOT_FOUND" | "TASK_ALREADY_CLAIMED" | "TAG_PROPOSAL_EXPIRED" | "APPROVAL_EXPIRED" | "INVITE_INVALID" | "ALREADY_MEMBER" | "EMAIL_TAKEN" | "PASSWORD_RESET_INVALID" | "TAG_ALREADY_EXISTS" | "REVISION_CONFLICT" | "DOCUMENT_CONFLICT" | "RATE_LIMITED" | "CLIENT_VERSION_UNSUPPORTED" | "VALIDATION_FAILED" | "NOT_FOUND" | "AUTHORIZATION_PENDING" | "SLOW_DOWN" | "INTERNAL_ERROR";
         ErrorEnvelope: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1320,6 +1354,11 @@ export interface components {
              * @default 604800
              */
             expires_in: number;
+            /**
+             * Format: email
+             * @description 可选投递目标（00024）：提供即经邮件投递入伙链接与明文码（链接与 站内码同一行同一生命周期——撤销/过期/兑换两渠道同时失效）；同 (workspace, email) 的在途邀请在签发事务内整批撤销（重签即旧链接 立即失效）。投递结果以响应/列表的 email_sent_at 呈现（NULL = 未送达或未配置 ASTRAL_SMTP_URL，明文码仍在响应中可手动转发）。
+             */
+            email?: string;
         };
         Invitation: {
             id: components["schemas"]["Id"];
@@ -1337,6 +1376,16 @@ export interface components {
             expires_at: string;
             redeemed_by?: components["schemas"]["IdOrNull"];
             redeemed_at?: components["schemas"]["DateTimeOrNull"];
+            /**
+             * Format: email
+             * @description 邮件投递目标（仅邮件渠道签发时出现；小写归一化）
+             */
+            email?: string;
+            /**
+             * Format: date-time
+             * @description 邮件投递成功时刻（字段缺席 = 未送达或未走邮件渠道）
+             */
+            email_sent_at?: string;
         };
         InvitationCreated: components["schemas"]["Invitation"] & {
             /** @description 邀请码明文（XXXXX-XXXXX-XXXXX-XXXXX，Crockford base32，100 bit 熵），仅签发响应返回一次 */
@@ -1986,6 +2035,62 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    requestPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已受理。邮箱存在且账号未停用时投递含一次性链接的邮件（30 分钟有效， {WebBaseURL}/reset-password?token=prt_…）；单活跃——新请求使旧 token/邮件立即失效。投递依赖服务端 ASTRAL_SMTP_URL（未配置时链接 写服务器日志，见 docs/deployment.md）。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    confirmPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 重置邮件链接中的 prt_ token（一次性，30 分钟） */
+                    token: string;
+                    /** @description 需含字母与数字 */
+                    new_password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已重置（口令已换、全部会话已吊销） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["RateLimited"];
         };
     };
     findDeviceAuthorization: {
@@ -3671,7 +3776,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已签发；code 明文仅本次返回，invite_url 为拼好的入伙链接（/join?ws=） */
+            /** @description 已签发；code 明文仅本次返回，invite_url 为拼好的入伙链接（/join?ws=）。 带 email 签发时同时经邮件投递链接与明文码（00024）：投递成功响应带 email_sent_at，失败则缺席（行已落库、码仍可用，可重签重投）。 */
             201: {
                 headers: {
                     [name: string]: unknown;

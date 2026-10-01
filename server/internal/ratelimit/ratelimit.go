@@ -318,6 +318,10 @@ func classifyPublic(method, path string) bucketClass {
 	case method == http.MethodPost &&
 		((len(segs) == 2 && segs[1] == "login") ||
 			(len(segs) == 2 && segs[1] == "register") ||
+			// password-reset 请求是邮件触发面（轰垃圾邮件），confirm 是
+			// token 猜测面——都按 IP 入敏感桶（auth/reset.go）。
+			(len(segs) == 2 && segs[1] == "password-reset") ||
+			(len(segs) == 3 && segs[1] == "password-reset" && segs[2] == "confirm") ||
 			(len(segs) == 3 && segs[1] == "device" && segs[2] == "authorizations")):
 		return classSensitive
 	case method == http.MethodPost &&

@@ -19,6 +19,7 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/config"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/idempotency"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/mail"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/admin"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
@@ -53,6 +54,14 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// 出站邮件（忘记密码链接 / 邀请投递）：ASTRAL_SMTP_URL 未配置 = log
+	// transport（全文写日志），配置错误在此 fail fast（启动即可见）。
+	mailer, mailDesc, err := mail.SenderFromURL(cfg.Mail.SMTPURL, log)
+	if err != nil {
+		return err
+	}
+	log.Info("mail transport", "mode", mailDesc)
 
 	// 可选数据库：DSN 为空时以无存储模式启动（healthz ok / readyz 503 / 受保护端点 401）。
 	var db *gorm.DB
@@ -89,7 +98,8 @@ func run() error {
 		authSvc = auth.NewService(gormDB, log)
 		// security.md：凭证/会话撤销后主动断开该 actor 的 SSE 流。
 		authSvc.OnRevoke = func(actorID string) { hub.DisconnectActor(actorID) }
-		wsMod := &workspace.Module{DB: gormDB, Auth: authSvc, PublicURL: cfg.PublicURL, WebBaseURL: cfg.WebBaseURL}
+		authSvc.Mailer = mailer
+		wsMod := &workspace.Module{DB: gormDB, Auth: authSvc, PublicURL: cfg.PublicURL, WebBaseURL: cfg.WebBaseURL, Mailer: mailer, Log: log}
 		taskMod := &task.Module{DB: gormDB, Auth: authSvc, Log: log}
 		msgMod := &message.Module{DB: gormDB, Auth: authSvc, Tasks: taskMod}
 		presMod := &presence.Module{DB: gormDB, Auth: authSvc}

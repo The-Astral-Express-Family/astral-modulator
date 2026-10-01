@@ -15,6 +15,7 @@ import (
 //   human refresh token atr_<32B base64url>
 //   device code         adc_<32B base64url>   （≥128-bit 随机）
 //   agent credential    astral_<32B base64url>
+//   password reset      prt_<32B base64url>   （00023，30 分钟一次性）
 // 库中一律只存 sha256 hex。比较用常数时间。
 
 const tokenRandomBytes = 32
@@ -30,6 +31,10 @@ func newOpaque(prefix string) (string, error) {
 func NewAccessToken() (string, error)  { return newOpaque("ata_") }
 func NewRefreshToken() (string, error) { return newOpaque("atr_") }
 func NewDeviceCode() (string, error)   { return newOpaque("adc_") }
+
+// NewPasswordResetToken 生成忘记密码的一次性重置 token（00023）。
+// 与 access/refresh 同族同强度：邮件明文传递、库中 sha256、30 分钟过期。
+func NewPasswordResetToken() (string, error) { return newOpaque("prt_") }
 
 // CredentialPrefix 是 agent/service credential secret 的固定前缀。
 // 服务端通过前缀区分 access token 与 credential（两者同为 Bearer）。

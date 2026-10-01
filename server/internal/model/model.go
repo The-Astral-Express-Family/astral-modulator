@@ -361,9 +361,12 @@ type Approval struct {
 
 func (Approval) TableName() string { return "approvals" }
 
-// Invitation 见 00013_workspace_invitations.sql / docs/registration.md。
+// Invitation 见 00013_workspace_invitations.sql（email 列见 00024）/ docs/registration.md。
 // 一次性邀请码：库中只存归一化码的 sha256；expired 不落库（读路径按
 // status='invited' 且 now > expires_at 派生）；redemption 走条件更新抢状态。
+// email 非空 = 邮件投递的邀请（00024）：站内链接与邮件链接是同一码同一行，
+// 撤销/过期/兑换对两个渠道同时生效；email_sent_at 记投递时刻（NULL =
+// 未送达或未走邮件渠道）。
 type Invitation struct {
 	ID          string `gorm:"primaryKey;size:40"`
 	WorkspaceID string `gorm:"index:idx_invitations_ws_status;size:40"`
@@ -375,6 +378,10 @@ type Invitation struct {
 	ExpiresAt   time.Time
 	RedeemedBy  *string `gorm:"size:40"`
 	RedeemedAt  *time.Time
+	// Email 是可选投递目标（00024）；小写归一化存储。
+	Email *string `gorm:"size:254"`
+	// EmailSentAt 非 nil = 邮件投递成功。
+	EmailSentAt *time.Time
 }
 
 func (Invitation) TableName() string { return "workspace_invitations" }
@@ -396,3 +403,20 @@ type RegistrationInvitation struct {
 }
 
 func (RegistrationInvitation) TableName() string { return "registration_invitations" }
+
+// PasswordResetToken 见 00023_password_reset_tokens.sql：忘记密码的一次性
+// 重置凭据（auth 模块 reset.go）。明文 prt_<32B> 只出现在邮件链接里，库中
+// sha256；30 分钟过期；单活跃（新请求补写旧 token 的 used_at 使其立即失效）；
+// 兑换走条件更新抢状态（并发双用只有一个赢家）。
+type PasswordResetToken struct {
+	ID          string `gorm:"primaryKey;size:40"`
+	HumanAuthID string `gorm:"index;size:40"`
+	TokenHash   string `gorm:"uniqueIndex;size:128"`
+	ExpiresAt   time.Time
+	UsedAt      *time.Time
+	CreatedAt   time.Time
+	// RequestIP 是签发来源 IP（审计排障用，非授权依据）。
+	RequestIP string
+}
+
+func (PasswordResetToken) TableName() string { return "password_reset_tokens" }

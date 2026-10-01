@@ -189,6 +189,31 @@ JWT vs opaque token 不在 v0.1 强制：
 
 MVP 推荐 opaque 或 short JWT + server session metadata，先优先安全和可撤销性。
 
+### 7.1 密码重置 token（00023，忘记密码）
+
+- 明文 `prt_<32B base64url>` 只随邮件链接出服务器（`/reset-password?token=`），
+  库中 sha256、比对常数时间——与 refresh/invite 同一存储模式；
+- 30 分钟过期、一次性：兑换走条件更新抢状态（`used_at IS NULL AND
+  expires_at > now()`），并发双用只有一个赢家；查无/过期/已用统一
+  `PASSWORD_RESET_INVALID` 同文案（防探测，与 INVITE_INVALID 同哲学）；
+- 单活跃：同账号新请求立即作废旧 token（邮件里永远只有最新一封可兑）；
+- **请求端点恒 204**：无论邮箱是否存在/停用，响应无差别——不存在性
+  探测面为零；不存在的请求也不落审计（不给持有审计读取权的人留旁路）；
+- 新口令策略校验**先于** token 消耗：弱口令 400 VALIDATION_FAILED 不烧
+  token，用户可同链接重试；
+- 重置成功吊销该账号**全部**会话（含 CLI 设备，`RevokeActorSessions` +
+  SSE 断流）——重置的威胁模型即「当前凭证可能已泄露」；
+- 两个端点均入 S5 敏感限流桶（10/min/IP）：请求面是邮件轰炸面，confirm
+  面是 token 猜测面。
+
+### 7.2 邮件投递（internal/mail）
+
+- 配置面单一：`ASTRAL_SMTP_URL`（连接串，含凭据；格式见 deployment.md）。
+  未配置 = **log transport**：邮件全文（含一次性链接）写服务器日志——
+  此模式下日志即凭据，生产部署应配置 SMTP 或严格保护日志访问面；
+- 纯出站连接（无入站端口）；TLS 强制（smtps 隐式 / smtp+STARTTLS，
+  明文凭证绝不出网）。
+
 ## 8. 本地凭证存储
 
 抽象 `CredentialStore`：
@@ -300,6 +325,7 @@ MVP 可以存 PostgreSQL append-only 表，并限制应用角色 UPDATE/DELETE�
 - message send；
 - credential create；
 - login failure；
+- password reset 请求 / confirm（邮件轰炸面 + token 猜测面，00023）；
 - expensive document operation。
 
 Presence heartbeat 和 SSE reconnect 使用单独 budget。

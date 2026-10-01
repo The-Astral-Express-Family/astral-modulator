@@ -128,6 +128,8 @@ export type InvitationRole = 'viewer' | 'contributor' | 'maintainer'
 export type InvitationStatus = 'invited' | 'redeemed' | 'revoked'
 
 // 手工对齐 openapi Invitation schema（服务端 workspace/invitation.go invitationDTO）。
+// email/email_sent_at 仅邮件渠道签发时出现（00024）：链接与站内码同一行
+// 同一生命周期，撤销/过期/兑换两渠道同时失效。
 export interface Invitation {
   id: ID
   workspace_id: ID
@@ -138,6 +140,8 @@ export interface Invitation {
   expires_at: string
   redeemed_by?: ID | null
   redeemed_at?: string | null
+  email?: string
+  email_sent_at?: string
 }
 
 // 签发响应：Invitation 追加一次性 code 明文与拼好的注册链接（仅本次返回）。
