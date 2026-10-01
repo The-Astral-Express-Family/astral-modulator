@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/mail"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
@@ -223,5 +225,108 @@ func TestInvitationAuthorizationAndValidation(t *testing.T) {
 	}
 	if row.ExpiresAt.Sub(row.CreatedAt) != 3600e9 {
 		t.Fatalf("ttl = %v", row.ExpiresAt.Sub(row.CreatedAt))
+	}
+}
+
+// fakeInviteMailer 捕获邀请投递（00024）。
+type fakeInviteMailer struct {
+	sent []mail.Message
+	fail bool
+}
+
+func (f *fakeInviteMailer) Send(_ context.Context, msg mail.Message) error {
+	if f.fail {
+		return errors.New("smtp down")
+	}
+	f.sent = append(f.sent, msg)
+	return nil
+}
+
+func TestInvitationEmailDelivery(t *testing.T) {
+	f := inviteSetup(t)
+	fm := &fakeInviteMailer{}
+	f.m.Mailer = fm
+
+	created := f.issue(t, `{"role":"viewer","email":"Friend@Example.COM"}`)
+	// email 归一化小写；email_sent_at 标记投递成功。
+	if created["email"] != "friend@example.com" {
+		t.Fatalf("email = %v", created["email"])
+	}
+	if created["email_sent_at"] == nil {
+		t.Fatalf("email_sent_at missing: %v", created)
+	}
+	if len(fm.sent) != 1 {
+		t.Fatalf("mails = %d", len(fm.sent))
+	}
+	m := fm.sent[0]
+	if m.To != "friend@example.com" || !strings.Contains(m.Subject, "inv") {
+		t.Fatalf("mail envelope wrong: %+v", m)
+	}
+	// 正文同时携带链接与明文码（同体：两渠道消耗同一张邀请）。
+	if !strings.Contains(m.Text, created["invite_url"].(string)) {
+		t.Fatalf("mail missing invite_url:\n%s", m.Text)
+	}
+	if !strings.Contains(m.Text, created["code"].(string)) {
+		t.Fatalf("mail missing code:\n%s", m.Text)
+	}
+
+	// 不带 email：纯站内邀请，无投递、无 email 字段。
+	created2 := f.issue(t, `{"role":"viewer"}`)
+	if _, ok := created2["email"]; ok {
+		t.Fatalf("in-site invitation must not carry email: %v", created2)
+	}
+	if len(fm.sent) != 1 {
+		t.Fatalf("no extra mail expected, got %d", len(fm.sent))
+	}
+
+	// 非法 email 400（VALIDATION_FAILED）。
+	rec := f.callInvitation(t, f.owner, "POST", "/api/v1/workspaces/"+f.wsID+"/invitations", `{"role":"viewer","email":"not-an-email"}`)
+	if rec.Code != 400 {
+		t.Fatalf("malformed email status = %d", rec.Code)
+	}
+}
+
+func TestInvitationEmailSupersede(t *testing.T) {
+	f := inviteSetup(t)
+	fm := &fakeInviteMailer{}
+	f.m.Mailer = fm
+
+	first := f.issue(t, `{"role":"viewer","email":"a@example.com"}`)
+	second := f.issue(t, `{"role":"contributor","email":"a@example.com"}`)
+	// 同 (workspace, email) 在途邀请整批撤销：旧链接立即失效，新链接有效。
+	// （两次查询各用新变量：GORM First 复用带主键的 dest 会把旧 ID 拼进条件。）
+	var oldRow, newRow model.Invitation
+	if err := f.db.First(&oldRow, "id = ?", first["id"]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if oldRow.Status != "revoked" {
+		t.Fatalf("old invitation must be superseded, status = %q", oldRow.Status)
+	}
+	if err := f.db.First(&newRow, "id = ?", second["id"]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if newRow.Status != "invited" || newRow.Role != "contributor" {
+		t.Fatalf("new invitation wrong: %+v", newRow)
+	}
+	if len(fm.sent) != 2 {
+		t.Fatalf("mails = %d", len(fm.sent))
+	}
+}
+
+func TestInvitationEmailDeliveryFailure(t *testing.T) {
+	f := inviteSetup(t)
+	f.m.Mailer = &fakeInviteMailer{fail: true}
+
+	created := f.issue(t, `{"role":"viewer","email":"a@example.com"}`)
+	// 投递失败：邀请行仍在（201 + 明文码可手动转发），email_sent_at 缺席。
+	if created["email_sent_at"] != nil {
+		t.Fatalf("email_sent_at must be absent on failure: %v", created)
+	}
+	var row model.Invitation
+	if err := f.db.First(&row, "id = ?", created["id"]).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "invited" {
+		t.Fatalf("invitation must survive delivery failure, status = %q", row.Status)
 	}
 }

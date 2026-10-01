@@ -28,12 +28,15 @@ type Module struct {
 }
 
 // RegisterPublic 挂载免鉴权的 /auth/* 端点（由 app.router 在 Authenticate 之前装配）。
-// logout 携 refresh token 即可自撤，属公共端点。
+// logout 携 refresh token 即可自撤，属公共端点；password-reset 两端点入
+// S5 敏感限流桶（ratelimit.classifyPublic）。
 func (m *Module) RegisterPublic(r chi.Router) {
 	r.Post("/auth/register", m.register)
 	r.Post("/auth/login", m.login)
 	r.Post("/auth/token/refresh", m.refreshToken)
 	r.Post("/auth/logout", m.logout)
+	r.Post("/auth/password-reset", m.requestPasswordReset)
+	r.Post("/auth/password-reset/confirm", m.confirmPasswordReset)
 	r.Post("/auth/device/authorizations", m.createDeviceAuthorization)
 	r.Post("/auth/device/authorizations/{device_code}/token", m.exchangeDeviceToken)
 }
@@ -123,6 +126,40 @@ func (m *Module) logout(w http.ResponseWriter, r *http.Request) {
 		Name: CookieName, Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: isHTTPS(r), SameSite: http.SameSiteLaxMode,
 	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// requestPasswordReset 是 POST /auth/password-reset {email}：恒 204（防枚举，
+// 存在与否只影响是否真的投递了邮件——auth/reset.go）。
+func (m *Module) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Email string `json:"email"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	if err := m.Svc.RequestPasswordReset(r.Context(), in.Email, m.clientIP(r), m.deviceBaseURL(r)); err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// confirmPasswordReset 是 POST /auth/password-reset/confirm {token,new_password}：
+// 成功 204（口令已换、全部会话已吊销）；token 查无/过期/已用 400
+// PASSWORD_RESET_INVALID；新口令策略不过 400 VALIDATION_FAILED（token 不烧）。
+func (m *Module) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	if err := m.Svc.ConfirmPasswordReset(r.Context(), in.Token, in.NewPassword); err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

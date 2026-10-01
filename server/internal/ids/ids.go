@@ -38,6 +38,7 @@ const (
 	Approval           Prefix = "apv" // human approval request（architecture §22）
 	Invite             Prefix = "inv" // 一次性工作区邀请（docs/registration.md）
 	RegistrationInvite Prefix = "reg" // 一次性注册邀请（00019 起；存量行残留 inv_）
+	PasswordReset      Prefix = "prt" // 忘记密码一次性重置 token（00023）
 )
 
 // New 生成 `<prefix>_<uuidv7>`。

@@ -8,6 +8,7 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/mail"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
@@ -45,6 +47,10 @@ type invitationDTO struct {
 	ExpiresAt   string  `json:"expires_at"`
 	RedeemedBy  *string `json:"redeemed_by,omitempty"`
 	RedeemedAt  *string `json:"redeemed_at,omitempty"`
+	// Email 非空 = 邮件投递的邀请（00024）：链接与站内码同体，撤销/过期/
+	// 兑换两渠道同时失效。
+	Email       *string `json:"email,omitempty"`
+	EmailSentAt *string `json:"email_sent_at,omitempty"`
 }
 
 // invitationCreatedDTO 仅用于签发响应：code 明文只出现这一次（库中只有
@@ -57,14 +63,20 @@ type invitationCreatedDTO struct {
 }
 
 func toInvitationDTO(inv model.Invitation) invitationDTO {
-	return invitationDTO{
+	dto := invitationDTO{
 		ID: inv.ID, WorkspaceID: inv.WorkspaceID, Role: inv.Role,
 		Status: inv.Status, CreatedBy: inv.CreatedBy,
 		CreatedAt:  inv.CreatedAt.UTC().Format(time.RFC3339),
 		ExpiresAt:  inv.ExpiresAt.UTC().Format(time.RFC3339),
 		RedeemedBy: inv.RedeemedBy,
 		RedeemedAt: httpx.TimeString(inv.RedeemedAt),
+		Email:      inv.Email,
 	}
+	if inv.EmailSentAt != nil {
+		sent := inv.EmailSentAt.UTC().Format(time.RFC3339)
+		dto.EmailSentAt = &sent
+	}
+	return dto
 }
 
 // 邀请管理三端点先过 auth.RequireHuman（human session 闸，agent credential
@@ -82,8 +94,9 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	p := auth.PrincipalFrom(r.Context())
 	var in struct {
-		Role      string `json:"role"`
-		ExpiresIn *int64 `json:"expires_in"`
+		Role      string  `json:"role"`
+		ExpiresIn *int64  `json:"expires_in"`
+		Email     *string `json:"email"`
 	}
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
@@ -99,6 +112,15 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ttl = time.Duration(*in.ExpiresIn) * time.Second
+	}
+	// email 可选：提供即同时邮件投递（00024）。指针区分「未提供」与空串。
+	email := ""
+	if in.Email != nil {
+		email = strings.ToLower(strings.TrimSpace(*in.Email))
+		if email == "" || !strings.Contains(email, "@") || len(email) > 254 {
+			httpx.WriteError(w, r, httpx.Invalid("email is malformed"))
+			return
+		}
 	}
 	code, err := auth.NewInviteCode()
 	if err != nil {
@@ -116,16 +138,32 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(ttl),
 	}
+	if email != "" {
+		inv.Email = &email
+	}
 	// 签发与审计/事件同事务；失败则邀请行不落库（明文码随之作废，重签即可）。
+	// 同 (workspace, email) 在途邀请在此事务内整体撤销——邮件渠道与站内渠道
+	// 同体同生命周期：重签即旧链接立即失效（收件人手上永远只有最新一封）。
 	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if email != "" {
+			if err := tx.Model(&model.Invitation{}).
+				Where("workspace_id = ? AND email = ? AND status = 'invited'", ws.ID, email).
+				Update("status", "revoked").Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Create(&inv).Error; err != nil {
 			return err
+		}
+		details := map[string]any{"role": in.Role}
+		if email != "" {
+			details["email"] = email
 		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: ws.ID, ActorID: p.ActorID,
 			Action: "invite.create", Outcome: "allowed",
 			TargetType: "invitation", TargetID: inv.ID,
-			Details: map[string]any{"role": in.Role},
+			Details: details,
 		}); err != nil {
 			return err
 		}
@@ -136,6 +174,20 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.RespondError(w, r, err)
 		return
+	}
+	// 投递在事务外：行已落库，投递失败不回滚（签发响应仍带明文码，管理员可
+	// 手动转发）；email_sent_at 标记结果，列表可见，失败可重签（即作废本张）。
+	if email != "" {
+		inviteURL := m.inviteURL(r, code)
+		if err := mail.OrLog(m.Mailer, m.inviteMailLog()).Send(r.Context(), inviteEmail(ws.Name, in.Role, inv.ExpiresAt, email, code, inviteURL)); err != nil {
+			m.inviteMailLog().Error("invitation mail delivery failed", "invitation_id", inv.ID, "email", email, "err", err)
+		} else {
+			inv.EmailSentAt = &now
+			if err := m.DB.WithContext(r.Context()).Model(&model.Invitation{}).
+				Where("id = ?", inv.ID).Update("email_sent_at", now).Error; err != nil {
+				m.inviteMailLog().Warn("invitation email_sent_at write failed", "invitation_id", inv.ID, "err", err)
+			}
+		}
 	}
 	httpx.WriteOK(w, r, http.StatusCreated, invitationCreatedDTO{
 		invitationDTO: toInvitationDTO(inv),
@@ -381,4 +433,37 @@ func (m *Module) writeRedeemed(w http.ResponseWriter, r *http.Request, workspace
 		return
 	}
 	httpx.WriteOK(w, r, http.StatusOK, redeemedDTO{Workspace: toWorkspaceDTO(ws), Role: role})
+}
+
+// inviteRoleNames 是邮件正文里的角色中文名（协议枚举保持英文，仅展示层翻译）。
+var inviteRoleNames = map[string]string{
+	"viewer":      "只读（viewer）",
+	"contributor": "读写（contributor）",
+	"maintainer":  "管理（maintainer）",
+}
+
+// inviteEmail 组装工作区邀请邮件（00024）。链接与站内码同体：正文同时给
+// 链接和明文码，任一渠道兑换都消耗同一张邀请。
+func inviteEmail(workspaceName, role string, expiresAt time.Time, to, code, inviteURL string) mail.Message {
+	roleName := inviteRoleNames[role]
+	if roleName == "" {
+		roleName = role
+	}
+	expiry := expiresAt.Local().Format("2006-01-02 15:04")
+	subject := "邀请你加入工作区「" + workspaceName + "」"
+	text := fmt.Sprintf(`你被邀请加入 Astral 工作区「%s」，授予角色：%s。
+
+打开链接直接入伙（需已注册 Astral 账号；没有账号请先找管理员注册）：
+%s
+
+也可以登录后在「加入工作区」中输入邀请码：
+%s
+
+有效期至 %s。邀请被撤销或兑换后，链接与邀请码同时失效。`, workspaceName, roleName, inviteURL, code, expiry)
+	html := fmt.Sprintf(`<p>你被邀请加入 Astral 工作区「%s」，授予角色：%s。</p>
+<p><a href="%s">点击入伙</a>（需已注册 Astral 账号；没有账号请先找管理员注册）</p>
+<p>也可以登录后在「加入工作区」中输入邀请码：<code>%s</code></p>
+<p>有效期至 %s。邀请被撤销或兑换后，链接与邀请码同时失效。</p>`,
+		workspaceName, roleName, inviteURL, code, expiry)
+	return mail.Message{To: to, Subject: subject, Text: text, HTML: html}
 }

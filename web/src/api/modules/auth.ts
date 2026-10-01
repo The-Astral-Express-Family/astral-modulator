@@ -49,6 +49,24 @@ export function logout(): Promise<void> {
   return apiFetch('/api/v1/auth/logout', { method: 'POST', body: {} })
 }
 
+// ---- 忘记密码（00023，恒 204 防枚举）----
+
+/** 请求重置邮件：无论邮箱是否存在都 204——存在且未停用才真的投递
+ * （30 分钟一次性链接；新请求作废旧邮件链接）。 */
+export function requestPasswordReset(email: string): Promise<void> {
+  return apiFetch('/api/v1/auth/password-reset', { method: 'POST', body: { email } })
+}
+
+/** 凭邮件链接里的一次性 token 设置新密码。成功后该账号全部会话被吊销
+ * （本浏览器也会被登出，需重新登录）。失败由全局拦截器 toast
+ * （PASSWORD_RESET_INVALID / VALIDATION_FAILED）。 */
+export function confirmPasswordReset(token: string, newPassword: string): Promise<void> {
+  return apiFetch('/api/v1/auth/password-reset/confirm', {
+    method: 'POST',
+    body: { token, new_password: newPassword },
+  })
+}
+
 /** boot 会话恢复探测：未登录是常态（401 不提示，匿名期正常路径）。 */
 export function getMe(): Promise<MeResponse> {
   return apiFetch('/api/v1/auth/me', { silent: true })

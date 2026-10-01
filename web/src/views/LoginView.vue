@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Spinner } from '@/components/ui/spinner'
 
 const session = useSessionStore()
@@ -50,10 +51,9 @@ async function submit(): Promise<void> {
               </Field>
               <Field>
                 <FieldLabel for="password">密码</FieldLabel>
-                <Input
+                <PasswordInput
                   id="password"
                   v-model="password"
-                  type="password"
                   required
                   autocomplete="current-password"
                 />
@@ -64,6 +64,11 @@ async function submit(): Promise<void> {
               {{ busy ? '登录中…' : '登录' }}
             </Button>
           </form>
+          <p class="mt-3 text-right">
+            <RouterLink to="/forgot-password" class="text-primary text-sm hover:underline">
+              忘记密码？
+            </RouterLink>
+          </p>
         </CardContent>
         <CardFooter>
           <p class="text-muted-foreground text-sm">

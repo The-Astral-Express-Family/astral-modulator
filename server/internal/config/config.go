@@ -10,6 +10,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -53,6 +54,16 @@ type Config struct {
 	// DocHistory 是文档历史版本保留窗口（00017；TODO §1.2 P3）：
 	// 两道闸先到即剪，直接构造 Config 零值 = 双 0 无限保留（测试口径）。
 	DocHistory DocHistoryConfig
+	// Mail 是出站邮件配置（internal/mail；忘记密码链接 / 邀请投递）。
+	Mail MailConfig
+}
+
+// MailConfig 只有一个配置面：ASTRAL_SMTP_URL 连接串
+// （smtps://user:pass@host:465 或 smtp://user:pass@host:587，格式见
+// mail.SenderFromURL）。为空 = log transport——邮件全文写服务器日志，
+// 自托管小部署零成本兜底（deployment.md §邮件）。
+type MailConfig struct {
+	SMTPURL string
 }
 
 // DocHistoryConfig 是 document_versions 保留窗口（internal/modules/document/
@@ -104,6 +115,7 @@ func Load() Config {
 			MaxPerDoc: envInt("ASTRAL_DOC_HISTORY_MAX_PER_DOC", 50),
 			TTLHours:  envInt("ASTRAL_DOC_HISTORY_TTL_HOURS", 720),
 		},
+		Mail: MailConfig{SMTPURL: strings.TrimSpace(os.Getenv("ASTRAL_SMTP_URL"))},
 	}
 	switch strings.ToLower(os.Getenv("ASTRAL_LOG_LEVEL")) {
 	case "debug":
@@ -124,10 +136,17 @@ func (c Config) Describe() string {
 	if c.DatabaseDSN != "" {
 		db = "postgres"
 	}
-	return fmt.Sprintf("addr=%s public_url=%s web_base_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v ratelimit=sensitive:%d/poll:%d/api:%d/sse:%d trusted_proxy=%v doc_history=max:%d/ttl:%dh",
+	mailMode := "log"
+	if c.Mail.SMTPURL != "" {
+		mailMode = "smtp"
+		if u, err := url.Parse(c.Mail.SMTPURL); err == nil && u.Host != "" {
+			mailMode = "smtp:" + u.Host
+		}
+	}
+	return fmt.Sprintf("addr=%s public_url=%s web_base_url=%s db=%s server_id=%s auto_migrate=%v cors_origins=%v ratelimit=sensitive:%d/poll:%d/api:%d/sse:%d trusted_proxy=%v doc_history=max:%d/ttl:%dh mail=%s",
 		c.HTTPAddr, c.PublicURL, c.WebBaseURL, db, c.ServerID, c.AutoMigrate, c.DevCORSOrigins,
 		c.RateLimit.SensitivePerMin, c.RateLimit.PollPerMin, c.RateLimit.APIPerMin, c.RateLimit.SSEPerMin, c.TrustedProxy,
-		c.DocHistory.MaxPerDoc, c.DocHistory.TTLHours)
+		c.DocHistory.MaxPerDoc, c.DocHistory.TTLHours, mailMode)
 }
 
 func env(key, def string) string {

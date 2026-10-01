@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/ids"
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/mail"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/audit"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/outbox"
@@ -37,7 +38,10 @@ type Service struct {
 	// OnRevoke 在凭证/会话被撤销后以 actorID 回调（装配层把它接到
 	// Hub.DisconnectActor，实现 security.md 的「撤销后主动断流」）。
 	// 可为 nil。
-	OnRevoke        func(actorID string)
+	OnRevoke func(actorID string)
+	// Mailer 是出站邮件投递（忘记密码重置链接）。nil = log transport
+	// （mail.OrLog 兜底：全文写日志，自托管零配置可用）。
+	Mailer          mail.Sender
 	DeviceTTL       time.Duration // 默认 10m
 	DevicePollEvery time.Duration // CLI 轮询间隔约定，默认 3s
 

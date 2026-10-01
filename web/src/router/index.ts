@@ -26,6 +26,18 @@ export const router = createRouter({
       component: () => import('../views/RegisterView.vue'),
     },
     {
+      // 忘记密码 / 重置密码（00023）：匿名过渡页，与 /login 同构；
+      // reset-password 由邮件链接 ?token=prt_… 直达。
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('../views/ForgotPasswordView.vue'),
+    },
+    {
+      path: '/reset-password',
+      name: 'reset-password',
+      component: () => import('../views/ResetPasswordView.vue'),
+    },
+    {
       path: '/',
       component: MainLayout,
       children: [
@@ -180,7 +192,15 @@ router.beforeEach(async (to) => {
 // 匿名浏览与演示身份不记录（不污染真实恢复目标）；login/register 是过渡页、
 // not-found 不是有效停留位置，同样跳过。
 router.afterEach((to) => {
-  if (to.name === 'login' || to.name === 'register' || to.name === 'not-found') return
+  if (
+    to.name === 'login' ||
+    to.name === 'register' ||
+    to.name === 'forgot-password' ||
+    to.name === 'reset-password' ||
+    to.name === 'not-found'
+  ) {
+    return
+  }
   const session = useSessionStore()
   if (session.isLoggedIn && !session.isDemo) recordLocation(to.fullPath)
 })

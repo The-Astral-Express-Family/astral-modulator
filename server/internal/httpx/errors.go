@@ -63,6 +63,11 @@ const (
 	// CodeEmailTaken：email 已被注册（409）。仅在邀请码验证通过后才会暴露
 	// （要求持有效码才可探测，泄露面可接受，docs/registration.md §3）。
 	CodeEmailTaken = "EMAIL_TAKEN"
+
+	// CodePasswordResetInvalid：忘记密码的重置 token 查无/过期/已用/停用
+	// 账号统一此码同文案（400，与 INVITE_INVALID 同哲学：不给探测者区分
+	// 信号，docs/security.md 密码重置节）。
+	CodePasswordResetInvalid = "PASSWORD_RESET_INVALID"
 )
 
 // Error 是公网错误 envelope，契约见 api/schemas/error.json（语义见 docs/protocol.md §3）。

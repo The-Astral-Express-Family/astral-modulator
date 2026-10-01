@@ -4,8 +4,12 @@
 // 匿名专属：已登录由路由守卫弹走。?code= 预填注册邀请码（注册邀请链接直达场景），
 // 也支持手动输入；注册只建号不入伙——加入工作区需另行兑换工作区邀请码
 // （登录后侧栏「加入工作区」）。注册成功即登录（服务端已建会话），跳回 from 或总览。
-import { ref } from 'vue'
+//
+// 二次密码确认（2026-10-01 生产 case：注册口令输错 → 无法登录且无自助恢复）：
+// 两次不一致就地拦截，不发起请求；密码框带小眼睛可在提交前核对明文。
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { toast } from 'vue-sonner'
 import { useApiAction } from '@/composables/useApiAction'
 import { useLoginRedirect } from '@/composables/useLoginRedirect'
 import { useSessionStore } from '@/stores/session'
@@ -14,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Spinner } from '@/components/ui/spinner'
 
 const session = useSessionStore()
@@ -25,9 +30,18 @@ const { busy, run } = useApiAction()
 const registrationCode = ref(typeof route.query.code === 'string' ? route.query.code : '')
 const email = ref('')
 const password = ref('')
+const passwordConfirm = ref('')
 const displayName = ref('')
 
+const confirmMismatch = computed(
+  () => passwordConfirm.value !== '' && passwordConfirm.value !== password.value,
+)
+
 async function submit(): Promise<void> {
+  if (password.value !== passwordConfirm.value) {
+    toast.error('两次输入的密码不一致')
+    return
+  }
   const ok = await run(() =>
     session.register({
       email: email.value,
@@ -64,21 +78,38 @@ async function submit(): Promise<void> {
               </Field>
               <Field>
                 <FieldLabel for="password">密码</FieldLabel>
-                <Input
+                <PasswordInput
                   id="password"
                   v-model="password"
-                  type="password"
                   required
                   minlength="8"
                   autocomplete="new-password"
                 />
               </Field>
               <Field>
+                <FieldLabel for="password-confirm">确认密码</FieldLabel>
+                <PasswordInput
+                  id="password-confirm"
+                  v-model="passwordConfirm"
+                  required
+                  minlength="8"
+                  autocomplete="new-password"
+                  :aria-invalid="confirmMismatch || undefined"
+                />
+                <p
+                  v-if="confirmMismatch"
+                  class="text-destructive text-sm"
+                  role="alert"
+                >
+                  两次输入的密码不一致
+                </p>
+              </Field>
+              <Field>
                 <FieldLabel for="display-name">显示名（可选）</FieldLabel>
                 <Input id="display-name" v-model="displayName" autocomplete="nickname" />
               </Field>
             </FieldGroup>
-            <Button type="submit" :disabled="busy">
+            <Button type="submit" :disabled="busy || confirmMismatch">
               <Spinner v-if="busy" data-icon="inline-start" />
               {{ busy ? '注册中…' : '注册' }}
             </Button>

@@ -3,6 +3,8 @@
 // 码是入伙资格：发给已注册用户，经 /join 或侧栏「加入工作区」兑换。
 // 可见性按能力收敛：listInvitations 403/404 即视为无 manage_members（或非成员），
 // 整卡隐藏（fail closed，不在前端另复制一份角色判断逻辑）。
+// 邮件投递（00024）：签发时可选填邮箱——链接与明文码同体同生命周期，
+// 撤销/过期/兑换两渠道同时失效；同邮箱重签自动作废旧链接。
 import { onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
@@ -17,6 +19,7 @@ import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -42,6 +45,7 @@ const items = ref<Invitation[]>([])
 const issued = ref<InvitationCreated | null>(null)
 const role = ref<string>('contributor')
 const ttl = ref<string>('604800')
+const email = ref('')
 const busyId = ref<string | null>(null)
 const { busy: issuing, run } = useApiAction()
 
@@ -71,14 +75,19 @@ async function load(): Promise<void> {
 }
 
 async function issue(): Promise<void> {
+  const trimmed = email.value.trim()
   const ok = await run(async () => {
     issued.value = await createInvitation(props.workspaceId, {
       role: role.value as Invitation['role'],
       expires_in: Number(ttl.value),
+      email: trimmed || undefined,
     })
     toast.success('邀请已签发')
   })
-  if (ok) await load()
+  if (ok) {
+    email.value = ''
+    await load()
+  }
 }
 
 async function revoke(inv: Invitation): Promise<void> {
@@ -115,36 +124,47 @@ watch(
       <CardTitle>工作区邀请</CardTitle>
     </CardHeader>
     <CardContent class="flex flex-col gap-4">
-      <form class="flex items-end gap-2" @submit.prevent="issue">
+      <form class="flex flex-col gap-2" @submit.prevent="issue">
+        <div class="flex items-end gap-2">
+          <Field>
+            <FieldLabel for="invite-role">角色</FieldLabel>
+            <Select v-model="role">
+              <SelectTrigger id="invite-role" class="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="opt in ROLE_OPTIONS" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel for="invite-ttl">有效期</FieldLabel>
+            <Select v-model="ttl">
+              <SelectTrigger id="invite-ttl" class="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="opt in TTL_OPTIONS" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Button type="submit" :disabled="issuing">
+            {{ issuing ? '签发中…' : '签发邀请' }}
+          </Button>
+        </div>
         <Field>
-          <FieldLabel for="invite-role">角色</FieldLabel>
-          <Select v-model="role">
-            <SelectTrigger id="invite-role" class="w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="opt in ROLE_OPTIONS" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <FieldLabel for="invite-email">邮件送达（可选）</FieldLabel>
+          <Input
+            id="invite-email"
+            v-model="email"
+            type="email"
+            placeholder="friend@example.com — 填写即同时把入伙链接与邀请码发到该邮箱"
+          />
         </Field>
-        <Field>
-          <FieldLabel for="invite-ttl">有效期</FieldLabel>
-          <Select v-model="ttl">
-            <SelectTrigger id="invite-ttl" class="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="opt in TTL_OPTIONS" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Button type="submit" :disabled="issuing">
-          {{ issuing ? '签发中…' : '签发邀请' }}
-        </Button>
       </form>
 
       <!-- 签发结果：明文码与链接仅本次可见，重点呈现并给一键复制。 -->
@@ -157,10 +177,16 @@ watch(
           <Button size="sm" variant="outline" @click="copy(issued.invite_url, '入伙链接')">
             复制链接
           </Button>
+          <Badge v-if="issued.email" :variant="issued.email_sent_at ? 'default' : 'destructive'">
+            {{ issued.email_sent_at ? `已邮件送达 ${issued.email}` : `邮件未送达 ${issued.email}` }}
+          </Badge>
         </div>
         <p class="text-muted-foreground text-xs">
           {{ issued.invite_url }}
           明文码仅此一次展示，请立即发给已注册成员（码只入伙、不能注册）；泄露的处置是撤销。
+          <template v-if="issued.email && !issued.email_sent_at">
+            邮件投递失败（服务端未配置 SMTP 或投递出错）——请手动转发上面的链接/码，或重签重投。
+          </template>
         </p>
       </div>
 
@@ -169,6 +195,7 @@ watch(
           <TableRow>
             <TableHead>角色</TableHead>
             <TableHead>状态</TableHead>
+            <TableHead>邮箱</TableHead>
             <TableHead>签发时间</TableHead>
             <TableHead>过期时间</TableHead>
             <TableHead>兑换者</TableHead>
@@ -182,6 +209,10 @@ watch(
             </TableCell>
             <TableCell>
               <Badge :variant="STATUS_VARIANTS[item.status]">{{ item.status }}</Badge>
+            </TableCell>
+            <TableCell>
+              <span v-if="item.email" class="text-sm">{{ item.email }}</span>
+              <span v-else class="text-muted-foreground">站内分发</span>
             </TableCell>
             <TableCell>{{ fmtTime(item.created_at) }}</TableCell>
             <TableCell>{{ fmtTime(item.expires_at) }}</TableCell>

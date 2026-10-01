@@ -28,6 +28,7 @@ func AllModels() []any {
 		&model.OutboxEvent{}, &model.AuditEntry{},
 		&model.Presence{}, &model.Message{},
 		&model.IdempotencyKey{}, &model.Approval{}, &model.Invitation{}, &model.RegistrationInvitation{},
+		&model.PasswordResetToken{},
 	}
 }
 
