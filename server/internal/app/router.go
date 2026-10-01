@@ -72,9 +72,12 @@ type Modules struct {
 // NewRouter 构建完整 http.Handler。db 为 nil 表示无数据库开发模式。
 func NewRouter(cfg config.Config, log *slog.Logger, db *gorm.DB, mods *Modules) http.Handler {
 	r := chi.NewRouter()
+	// RequestID 必须先于 Recover/Logger：它用 r.WithContext 向下游注入
+	// request id，后挂的中间件闭包若持有外层 r 就永远读到空串——访问日志
+	// 与 panic 日志会丢掉链路排查线索（曾致 req_* 无法与日志关联）。
+	r.Use(httpx.RequestIDMiddleware)
 	r.Use(httpx.Recover(log))
 	r.Use(httpx.Logger(log))
-	r.Use(httpx.RequestIDMiddleware)
 	if len(cfg.DevCORSOrigins) > 0 {
 		r.Use(httpx.CORS(cfg.DevCORSOrigins))
 	}
