@@ -38,7 +38,7 @@
 
 无 workspace/role 维度：兑换只建号（普通 user），不入任何 workspace。
 
-### 2.2 Invitation（`workspace_invitations`，00013，结构不变）
+### 2.2 Invitation（`workspace_invitations`，00013；00024 增邮件列）
 
 | 字段 | 说明 |
 |------|------|
@@ -46,6 +46,15 @@
 | `workspace_id` | 绑定的 workspace（码即「加入该 workspace」的凭证） |
 | `role` | `viewer` / `contributor` / `maintainer`（**不含 owner**，见 §6.3） |
 | `code_hash` / `created_by` / TTL / `status` / `redeemed_*` | 与注册邀请同构 |
+| `email`（00024，可空） | 邮件投递目标（小写归一化）；NULL = 纯站内分发 |
+| `email_sent_at`（00024，可空） | 投递成功时刻；NULL = 未送达或未走邮件渠道 |
+
+**邮件邀请与站内邀请同体同生命周期**（00024）：签发带 `email` 时，同一张
+邀请行同时经邮件送达（正文含入伙链接与明文码）——链接与站内码消耗的是
+同一行同一 `code_hash`，撤销 / 过期 / 兑换对两个渠道**同时生效**。同
+`(workspace, email)` 的在途邀请在签发事务内整批撤销：重签即旧链接立即
+失效，收件人手上永远只有最新一封。投递失败不回滚（行已落库、明文码仍
+在响应里可手动转发；`email_sent_at` 缺席即未送达，重签重投即可）。
 
 两表共用同一码形状与哈希空间，但**互不通用**：查表是端点语义决定的，
 不存在跨表回退（00018 时期 register 的双表回退已于 ADR-0009 删除）。
@@ -83,9 +92,9 @@
 
 | 端点 | 授权 | 语义 |
 |------|------|------|
-| `POST /workspaces/{id}/invitations` | human session + `workspace:manage_members` | 签发；body `{role, expires_in?}` → 201 `{..., code, invite_url}`（/join?ws=），明文仅本次返回 |
-| `GET /workspaces/{id}/invitations?status=` | human session + `workspace:manage_members` | 列表；**不含 code** |
-| `POST /invitations/{id}/revoke` | human session + `workspace:manage_members` | `invited`→`revoked`；幂等 204；不存在 404 |
+| `POST /workspaces/{id}/invitations` | human session + `workspace:manage_members` | 签发；body `{role, expires_in?, email?}` → 201 `{..., code, invite_url}`（/join?ws=），明文仅本次返回；带 `email` 即同体邮件投递（00024，见 §2.2） |
+| `GET /workspaces/{id}/invitations?status=` | human session + `workspace:manage_members` | 列表；**不含 code**；邮件渠道行带 `email`/`email_sent_at` |
+| `POST /invitations/{id}/revoke` | human session + `workspace:manage_members` | `invited`→`revoked`；幂等 204；不存在 404；邮件链接随行同时失效 |
 | `POST /invitations/redeem` | human session（agent 403——入伙是人的行为） | body `{code}`：兑换入伙，见 §4.2 |
 
 **错误码**：
