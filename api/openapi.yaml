@@ -12,7 +12,7 @@
 openapi: 3.1.0
 info:
   title: Astral Modulator Public API
-  version: 2.5.0
+  version: 2.6.0
   license:
     name: MIT
     identifier: MIT
@@ -50,6 +50,13 @@ info:
     签发即经邮件投递链接与明文码（与站内渠道同一行同一码，撤销/过期/兑换
     两渠道同时失效），Invitation 增 email / email_sent_at 视图字段。
     邮件投递依赖服务端 ASTRAL_SMTP_URL（未配置 = 链接写服务器日志）。
+
+    2.6（密码管理，TODO.md §9 2026-10-02）：新增自助改密端点
+    POST /auth/password（验证当前密码后换新口令，成功吊销除当前会话外的
+    全部会话；错误码增 PASSWORD_MISMATCH——当前密码不符，400 防止客户端
+    误判为会话失效）与管理员重置端点 POST /admin/users/{actor_id}/
+    password-reset（platform:users:manage，直接设置新口令并吊销目标全部
+    会话；禁止自重置——改自己的密码走 /auth/password）。
 
     已裁决的文档分歧（详见 TODO.md「文档分歧裁决」D1-D4）：
     - Device flow 采用 `/auth/device/authorizations*` 路径。
@@ -214,6 +221,28 @@ paths:
         "204": { description: 已重置（口令已换、全部会话已吊销） }
         "400": { $ref: "#/components/responses/Error" }   # PASSWORD_RESET_INVALID（查无/过期/已用，统一防探测）或 VALIDATION_FAILED（新口令策略不过；token 不消耗）
         "429": { $ref: "#/components/responses/RateLimited" }
+
+  /auth/password:
+    post:
+      tags: [auth]
+      summary: 修改自己的密码：验证当前密码后设置新口令（human session 专属；agent credential 无口令，403）
+      operationId: changeMyPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, description: 当前口令（防会话劫持者直接换锁） }
+                new_password: { type: string, minLength: 8, maxLength: 72, description: 需含字母与数字 }
+      responses:
+        "204": { description: 已修改（除发起请求的当前会话外，该账号全部会话被吊销） }
+        "400": { $ref: "#/components/responses/Error" }   # PASSWORD_MISMATCH（当前口令不符）或 VALIDATION_FAILED（新口令策略不过）
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }   # agent/service credential 无本地口令
+        "429": { $ref: "#/components/responses/RateLimited" }   # 当前口令验证是猜测面，入敏感限流桶
 
   /auth/device/authorizations:
     post:
@@ -1608,6 +1637,29 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
+  /admin/users/{actor_id}/password-reset:
+    post:
+      tags: [admin]
+      summary: 重置用户密码（platform:users:manage；直接设置新口令并吊销目标全部会话；禁止自重置——管理员改自己的密码走 /auth/password）
+      operationId: resetAdminUserPassword
+      parameters:
+        - { name: actor_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password: { type: string, minLength: 8, maxLength: 72, description: 需含字母与数字；管理员经其他渠道告知用户 }
+      responses:
+        "204": { description: 已重置（目标账号全部会话被吊销） }
+        "400": { $ref: "#/components/responses/Error" }   # VALIDATION_FAILED（口令策略）或自重置
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /admin/registration-invitations:
     post:
       tags: [admin]
@@ -1794,6 +1846,7 @@ components:
         - ALREADY_MEMBER          # 兑码入伙时已是该 workspace 成员（409，ADR-0009）
         - EMAIL_TAKEN             # email 已被注册（409，仅邀请码验证通过后可达）
         - PASSWORD_RESET_INVALID  # 重置 token 查无/过期/已用统一此码（400，防探测，仅 /auth/password-reset/confirm 可达）
+        - PASSWORD_MISMATCH       # 自助改密时当前口令不符（400，仅 /auth/password 可达；不用 401 防止客户端误判会话失效）
         - TAG_ALREADY_EXISTS
         - REVISION_CONFLICT
         - DOCUMENT_CONFLICT

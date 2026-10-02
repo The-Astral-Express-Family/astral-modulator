@@ -24,6 +24,16 @@ export function changeAdminUserRole(actorId: string, platformRole: Exclude<Platf
   })
 }
 
+/** 重置用户密码（协议 2.6）：直接设置新口令，目标账号全部会话被注销；
+ * 新口令需管理员经其他渠道告知用户。服务端禁止自重置（改自己的密码走
+ * /auth/password）。 */
+export function resetAdminUserPassword(actorId: string, newPassword: string): Promise<void> {
+  return apiFetch(`/api/v1/admin/users/${actorId}/password-reset`, {
+    method: 'POST',
+    body: { new_password: newPassword },
+  })
+}
+
 // ---- 注册邀请（00018 落地，00019 更名；唯一注册资格来源）----
 
 export interface RegistrationInvitation {

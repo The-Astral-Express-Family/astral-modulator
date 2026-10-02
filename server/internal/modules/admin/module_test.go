@@ -120,6 +120,8 @@ func (f *fixture) call(t *testing.T, p *auth.Principal, method, path, body strin
 		f.m.enableUser(rec, req.WithContext(ctx))
 	case strings.HasSuffix(path, "/role"):
 		f.m.changeRole(rec, req.WithContext(ctx))
+	case strings.HasSuffix(path, "/password-reset"):
+		f.m.resetUserPassword(rec, req.WithContext(ctx))
 	case strings.HasSuffix(path, "/users"):
 		f.m.listUsers(rec, req.WithContext(ctx))
 	default:

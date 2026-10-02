@@ -1,14 +1,15 @@
 <script setup lang="ts">
-// 个人资料页：头像外链 URL / 用户名 / 个性签名（PATCH /auth/me，部分更新契约）。
-// 校验规则与服务端 profile.go 对齐；邮箱是登录身份，只读展示。
+// 个人资料页：头像外链 URL / 用户名 / 个性签名（PATCH /auth/me，部分更新契约）
+// + 自助改密（POST /auth/password，协议 2.6：验当前密码后换新）。
+// 校验规则与服务端 password.go / profile.go 对齐；邮箱是登录身份，只读展示。
 import { computed, reactive } from 'vue'
 import { toast } from 'vue-sonner'
-import { updateMe } from '@/api/modules/auth'
+import { changePassword, updateMe } from '@/api/modules/auth'
 import type { PlatformRole } from '@/api/types'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import UserAvatar from '@/components/shared/UserAvatar.vue'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
@@ -87,11 +88,44 @@ async function save(): Promise<void> {
     toast.success('资料已保存')
   })
 }
+
+// 自助改密（协议 2.6）：与资料表单各自独立 busy，互不阻塞。
+// 服务端策略 = ≥8 位、≤72 字节、含字母与数字；这里做同一口径的前置校验。
+const pwd = reactive({ current: '', next: '', confirm: '' })
+const { busy: pwdBusy, run: runPwd } = useApiAction()
+
+function validatePwd(): string | null {
+  if (!pwd.current) return '请输入当前密码'
+  if (!pwd.next) return '请输入新密码'
+  if (pwd.next.length < 8) return '新密码至少 8 位'
+  if (pwd.next.length > 72) return '新密码过长（上限 72 字节）'
+  if (!/[a-zA-Z]/.test(pwd.next) || !/\d/.test(pwd.next))
+    return '新密码需同时包含字母与数字'
+  if (pwd.next !== pwd.confirm) return '两次输入的新密码不一致'
+  return null
+}
+
+async function savePassword(): Promise<void> {
+  const problem = validatePwd()
+  if (problem) {
+    toast.error(problem)
+    return
+  }
+  const ok = await runPwd(async () => {
+    await changePassword(pwd.current, pwd.next)
+  })
+  if (ok) {
+    toast.success('密码已更新，其他设备已注销登录')
+    pwd.current = ''
+    pwd.next = ''
+    pwd.confirm = ''
+  }
+}
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
-    <PageHeader title="个人资料" description="头像、用户名与个性签名" />
+    <PageHeader title="个人资料" description="头像、用户名、个性签名与登录密码" />
     <Card>
       <CardContent>
         <form class="flex flex-col gap-6" @submit.prevent="save">
@@ -147,6 +181,59 @@ async function save(): Promise<void> {
       <CardFooter>
         <p class="text-sm text-muted-foreground">
           邮箱是登录身份，暂不支持在此修改；头像仅支持 http(s) 外链，链接失效时会回退为首字母头像。
+        </p>
+      </CardFooter>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>修改密码</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form class="flex flex-col gap-6" @submit.prevent="savePassword">
+          <FieldGroup>
+            <Field>
+              <FieldLabel for="current_password">当前密码</FieldLabel>
+              <Input
+                id="current_password"
+                v-model="pwd.current"
+                type="password"
+                required
+                autocomplete="current-password"
+              />
+            </Field>
+            <Field>
+              <FieldLabel for="new_password">新密码</FieldLabel>
+              <Input
+                id="new_password"
+                v-model="pwd.next"
+                type="password"
+                required
+                autocomplete="new-password"
+                minlength="8"
+              />
+              <p class="text-xs text-muted-foreground">至少 8 位，需包含字母与数字</p>
+            </Field>
+            <Field>
+              <FieldLabel for="confirm_password">确认新密码</FieldLabel>
+              <Input
+                id="confirm_password"
+                v-model="pwd.confirm"
+                type="password"
+                required
+                autocomplete="new-password"
+              />
+            </Field>
+          </FieldGroup>
+          <Button type="submit" :disabled="pwdBusy" class="self-start">
+            <Spinner v-if="pwdBusy" data-icon="inline-start" />
+            {{ pwdBusy ? '更新中…' : '更新密码' }}
+          </Button>
+        </form>
+      </CardContent>
+      <CardFooter>
+        <p class="text-sm text-muted-foreground">
+          更新成功后，其他设备与 CLI 的登录将被注销（当前浏览器保持登录）；忘记当前密码可走登录页的「忘记密码」邮件重置。
         </p>
       </CardFooter>
     </Card>

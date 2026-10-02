@@ -83,6 +83,18 @@ export function updateMe(input: UpdateMeInput): Promise<MeResponse> {
   return apiFetch('/api/v1/auth/me', { method: 'PATCH', body: input })
 }
 
+// ---- 自助改密（协议 2.6）----
+
+/** 修改自己的密码：验证当前密码后设置新密码。成功后除当前浏览器会话外的
+ * 全部会话（其他设备/CLI）被注销。失败由全局拦截器 toast
+ * （PASSWORD_MISMATCH 当前密码不符 / VALIDATION_FAILED 新密码策略不过）。 */
+export function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  return apiFetch('/api/v1/auth/password', {
+    method: 'POST',
+    body: { current_password: currentPassword, new_password: newPassword },
+  })
+}
+
 // ---- device 审批页（A3）----
 
 export interface DeviceAuthorizationView {

@@ -630,6 +630,26 @@ func (s *Service) RevokeActorSessions(ctx context.Context, actorID string) (int6
 	return res.RowsAffected, nil
 }
 
+// RevokeActorSessionsExcept 撤销主体除 keepSessionID 外的全部未撤销会话
+// （自助改密用，协议 2.6：当前设备保持登录，其他设备/CLI 全部下线）。
+// 断流回调按 actor 粒度（Hub.DisconnectActor），当前设备的 SSE 会被一并
+// 切断——会话本身未撤销，前端自动重连即恢复。
+func (s *Service) RevokeActorSessionsExcept(ctx context.Context, actorID, keepSessionID string) (int64, error) {
+	q := s.DB.WithContext(ctx).Model(&model.Session{}).
+		Where("actor_id = ? AND revoked_at IS NULL", actorID)
+	if keepSessionID != "" {
+		q = q.Where("id <> ?", keepSessionID)
+	}
+	res := q.Update("revoked_at", time.Now())
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected > 0 {
+		s.notifyRevoked(actorID)
+	}
+	return res.RowsAffected, nil
+}
+
 // ActorDTO 是 actor 的公网形状（openapi Actor schema：id/kind/display_name/
 // bio/avatar_url），全仓单一来源：workspace 模块的 member/agent 响应复用本
 // 类型，不手写平行 DTO。直接序列化 model.Actor 会漏出大写字段名（E2E round 20

@@ -45,6 +45,8 @@ func (m *Module) RegisterPublic(r chi.Router) {
 func (m *Module) RegisterPrivate(r chi.Router) {
 	r.Get("/auth/me", m.me)
 	r.Patch("/auth/me", m.updateMe)
+	// 自助改密（协议 2.6）：human session 专属——agent credential 无本地口令。
+	r.Post("/auth/password", m.changePassword)
 	// 设备管理（会话列表/单会话注销）—— 需 human session
 	r.Get("/auth/sessions", m.listSessions)
 	r.Delete("/auth/sessions/{id}", m.revokeSession)
@@ -157,6 +159,30 @@ func (m *Module) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := m.Svc.ConfirmPasswordReset(r.Context(), in.Token, in.NewPassword); err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// changePassword 是 POST /auth/password {current_password,new_password}：
+// 自助改密（协议 2.6）。成功 204（除当前会话外全部吊销，本设备保持登录）；
+// 当前口令不符 400 PASSWORD_MISMATCH；新口令策略不过 400 VALIDATION_FAILED；
+// agent/service credential 无本地口令，403 INSUFFICIENT_SCOPE（RequireHuman）。
+func (m *Module) changePassword(w http.ResponseWriter, r *http.Request) {
+	if apiErr := RequireHuman(r, "local password requires a human session"); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	var in struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	p := PrincipalFrom(r.Context())
+	if err := m.Svc.ChangePassword(r.Context(), p.ActorID, p.SessionID, in.CurrentPassword, in.NewPassword); err != nil {
 		httpx.RespondError(w, r, err)
 		return
 	}

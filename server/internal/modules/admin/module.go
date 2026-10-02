@@ -36,6 +36,7 @@ func (m *Module) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/users/{actor_id}/disable", m.disableUser)
 	r.Post("/admin/users/{actor_id}/enable", m.enableUser)
 	r.Post("/admin/users/{actor_id}/role", m.changeRole)
+	r.Post("/admin/users/{actor_id}/password-reset", m.resetUserPassword)
 	r.Get("/admin/audit", m.listAudit)
 	r.Post("/admin/registration-invitations", m.createRegistrationInvitation)
 	r.Get("/admin/registration-invitations", m.listRegistrationInvitations)
@@ -289,4 +290,37 @@ func (m *Module) changeRole(w http.ResponseWriter, r *http.Request) {
 	}
 	email := m.emailsByActor(r, []model.Actor{updated})[updated.ID]
 	httpx.WriteOK(w, r, http.StatusOK, toUserDTO(updated, email))
+}
+
+// resetUserPassword 是 POST /admin/users/{actor_id}/password-reset {new_password}：
+// 管理员直接重置目标口令（协议 2.6）。领域面在 auth.SetPasswordByAdmin
+// （哈希 + 审计同事务），这里只做授权/自我保护编排；成功后目标全部会话
+// 在领域面内吊销（含 SSE 断流）。禁自重置：改自己的密码走 /auth/password
+// （验当前口令），管理员端点旁路这道验证属权限提升。
+func (m *Module) resetUserPassword(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	if apiErr := auth.RequireGlobal(r, auth.ScopePlatformUsersManage); apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	var in struct {
+		NewPassword string `json:"new_password"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return
+	}
+	target, apiErr := m.loadManagedHuman(r)
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
+	if target.ID == p.ActorID {
+		httpx.WriteError(w, r, httpx.Invalid("cannot reset your own password here; use POST /auth/password"))
+		return
+	}
+	if err := m.Auth.SetPasswordByAdmin(r.Context(), p.ActorID, target.ID, in.NewPassword); err != nil {
+		httpx.RespondError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
