@@ -99,10 +99,6 @@ type Principal struct {
 
 func (p *Principal) IsHuman() bool { return p.Kind == "human" }
 
-// IsPlatformAdmin 是展示/日志用的便捷判断；授权判定请走 RequireGlobal，
-// 与「按最终 scope 计算」的哲学一致。
-func (p *Principal) IsPlatformAdmin() bool { return p.PlatformRole == "admin" }
-
 // WorkspaceScopes 计算主体在某 workspace 的生效 scope 集合：
 //   - human：其成员角色的 scope bundle；
 //   - agent/service：credential scopes（workspace 绑定为空则全服务器生效）。

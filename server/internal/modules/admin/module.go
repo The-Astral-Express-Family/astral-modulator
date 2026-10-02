@@ -99,10 +99,7 @@ func toUserDTO(a model.Actor, email string) UserDTO {
 		Email:        email,
 		CreatedAt:    a.CreatedAt.UTC().Format(time.RFC3339),
 	}
-	if a.DisabledAt != nil {
-		disabled := a.DisabledAt.UTC().Format(time.RFC3339)
-		dto.DisabledAt = &disabled
-	}
+	dto.DisabledAt = httpx.TimeString(a.DisabledAt)
 	return dto
 }
 
