@@ -74,6 +74,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { copyText } from '@/lib/clipboard'
 
 const workspaceId = useWorkspaceId()
 const session = useSessionStore()
@@ -324,8 +325,7 @@ const secretCred = ref<IssuedCred | null>(null)
 
 async function copySecret(): Promise<void> {
   if (!secretText.value) return
-  await navigator.clipboard.writeText(secretText.value)
-  toast.success('凭证明文已复制')
+  await copyText(secretText.value, '凭证明文')
 }
 
 function closeSecret(): void {
