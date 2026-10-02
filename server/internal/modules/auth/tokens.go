@@ -57,9 +57,9 @@ func HashEqual(token, hash string) bool {
 const humanCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
 // randomFromAlphabet 是随机码生成的单一实现：n 字符取样自 alphabet。
-// 新增随机码场景在此复用并声明自己的字母表，不再抄循环（invite 字母表恰
-// 32 字符故 byte%len 无偏；user_code 的 31 字符表有 ±1/256 微偏，为既有
-// 接受设计——其定位见 docs/architecture.md §「user_code 随机强度」）。
+// 新增随机码场景在此复用并声明自己的字母表，不再抄循环（invite 字母表在
+// invites.go，恰 32 字符故 byte%len 无偏；user_code 的 31 字符表有 ±1/256
+// 微偏，为既有接受设计——其定位见 docs/architecture.md §「user_code 随机强度」）。
 func randomFromAlphabet(alphabet string, n int) (string, error) {
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
@@ -93,25 +93,4 @@ func NewUserCode() (string, error) {
 // IsCredentialToken 判断 Bearer 值是否为 agent/service credential（区别于 human access token）。
 func IsCredentialToken(bearer string) bool {
 	return strings.HasPrefix(bearer, CredentialPrefix)
-}
-
-// inviteCodeAlphabet 是 Crockford base32（去 I/L/O/U）。恰好 32 字符，
-// byte%32 无取样偏差；20 字符 = 100 bit 熵。
-const inviteCodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-
-// NewInviteCode 生成一次性邀请码，分组展示形 XXXXX-XXXXX-XXXXX-XXXXX。
-// 与 user_code（人短时手输）不同：邀请码要在邮箱/聊天里存活数天，防御对象
-// 是离线爆破，因此熵高两个量级（docs/registration.md §2.2）。
-func NewInviteCode() (string, error) {
-	body, err := randomFromAlphabet(inviteCodeAlphabet, 20)
-	if err != nil {
-		return "", err
-	}
-	return strings.Join([]string{body[:5], body[5:10], body[10:15], body[15:]}, "-"), nil
-}
-
-// NormalizeInviteCode 是兑换时的码归一化（比对前唯一入口）：去分隔符、大写。
-// 库中 code_hash 一律基于归一化形式计算。
-func NormalizeInviteCode(code string) string {
-	return strings.ToUpper(strings.ReplaceAll(code, "-", ""))
 }

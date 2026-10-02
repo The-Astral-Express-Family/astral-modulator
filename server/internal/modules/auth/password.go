@@ -2,10 +2,13 @@ package auth
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"unicode"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 )
 
 // 本地口令（TODO.md D6）。bcrypt cost 默认 10；口令上限 72 字节（bcrypt 输入限制）。
@@ -28,6 +31,17 @@ func HashPassword(password string) (string, error) {
 
 func CheckPassword(password, hash string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+// hashPasswordOrInvalid 是建号/改密路径共用的口令策略闸（register 两分支
+// 与 ConfirmPasswordReset）：策略失败统一 400 VALIDATION_FAILED
+// （err.Error 即人类可读原因）。
+func hashPasswordOrInvalid(password string) (string, *httpx.APIError) {
+	hash, err := HashPassword(password)
+	if err != nil {
+		return "", &httpx.APIError{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed, Message: err.Error()}
+	}
+	return hash, nil
 }
 
 func validatePassword(password string) error {

@@ -98,7 +98,7 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 		ID:          ids.New(ids.Invite),
 		WorkspaceID: ws.ID,
 		Role:        in.Role,
-		CodeHash:    auth.HashToken(auth.NormalizeInviteCode(code)),
+		CodeHash:    auth.InviteCodeHash(code),
 		CreatedBy:   p.ActorID,
 		Status:      "invited",
 		CreatedAt:   now,
@@ -335,7 +335,7 @@ func (m *Module) redeemInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var inv model.Invitation
-	codeHash := auth.HashToken(auth.NormalizeInviteCode(in.Code))
+	codeHash := auth.InviteCodeHash(in.Code)
 	err := m.DB.WithContext(r.Context()).Where("code_hash = ?", codeHash).First(&inv).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

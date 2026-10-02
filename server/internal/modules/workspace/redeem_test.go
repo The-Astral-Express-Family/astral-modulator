@@ -43,7 +43,7 @@ func (f *inviteFixture) regCode(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if err := f.db.Create(&model.RegistrationInvitation{
-		ID: "reg_decoy", CodeHash: auth.HashToken(auth.NormalizeInviteCode(code)),
+		ID: "reg_decoy", CodeHash: auth.InviteCodeHash(code),
 		CreatedBy: "usr_owner", Status: "invited", ExpiresAt: time.Now().Add(24 * time.Hour),
 	}).Error; err != nil {
 		t.Fatal(err)

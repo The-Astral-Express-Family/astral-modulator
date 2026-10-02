@@ -80,7 +80,7 @@ func (m *Module) createRegistrationInvitation(w http.ResponseWriter, r *http.Req
 	now := time.Now()
 	inv := model.RegistrationInvitation{
 		ID:        ids.New(ids.RegistrationInvite),
-		CodeHash:  auth.HashToken(auth.NormalizeInviteCode(code)),
+		CodeHash:  auth.InviteCodeHash(code),
 		CreatedBy: p.ActorID,
 		Status:    "invited",
 		CreatedAt: now,
