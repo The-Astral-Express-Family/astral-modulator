@@ -54,11 +54,7 @@ func (m *Module) listConflicts(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = rows[len(rows)-1].ID
-	}
+	rows, next := httpx.TrimPage(rows, limit, func(c model.DocumentConflict) string { return c.ID })
 	items := make([]conflictDTO, 0, len(rows))
 	for _, row := range rows {
 		ours, theirs := decodeSides(row)

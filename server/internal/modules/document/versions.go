@@ -96,11 +96,9 @@ func (m *Module) listVersions(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = strconv.FormatInt(rows[len(rows)-1].Revision, 10)
-	}
+	rows, next := httpx.TrimPage(rows, limit, func(v model.DocumentVersion) string {
+		return strconv.FormatInt(v.Revision, 10)
+	})
 	items := make([]versionItemDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toVersionItemDTO(row))
