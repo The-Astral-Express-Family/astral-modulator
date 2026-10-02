@@ -19,11 +19,13 @@ export const router = createRouter({
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),
+      meta: { track: false },
     },
     {
       path: '/register',
       name: 'register',
       component: () => import('../views/RegisterView.vue'),
+      meta: { track: false },
     },
     {
       // 忘记密码 / 重置密码（00023）：匿名过渡页，与 /login 同构；
@@ -31,11 +33,13 @@ export const router = createRouter({
       path: '/forgot-password',
       name: 'forgot-password',
       component: () => import('../views/ForgotPasswordView.vue'),
+      meta: { track: false },
     },
     {
       path: '/reset-password',
       name: 'reset-password',
       component: () => import('../views/ResetPasswordView.vue'),
+      meta: { track: false },
     },
     {
       path: '/',
@@ -132,6 +136,7 @@ export const router = createRouter({
           path: ':pathMatch(.*)*',
           name: 'not-found',
           component: () => import('../views/NotFoundView.vue'),
+          meta: { track: false },
         },
       ],
     },
@@ -144,6 +149,8 @@ declare module 'vue-router' {
     auth?: 'required' | 'optional'
     /** wide=内容列放宽（任务树等双栏视图需要横向空间） */
     wide?: boolean
+    /** track=false 不记入「上次停留位置」（登录/注册/重置等过渡页与 not-found） */
+    track?: boolean
   }
 }
 
@@ -189,18 +196,10 @@ router.beforeEach(async (to) => {
 })
 
 // 登录态下的每次落点记为「上次停留位置」，供冷启动 / 重新登录兜底恢复。
-// 匿名浏览与演示身份不记录（不污染真实恢复目标）；login/register 是过渡页、
-// not-found 不是有效停留位置，同样跳过。
+// 匿名浏览与演示身份不记录（不污染真实恢复目标）；过渡页与 not-found 经
+// meta.track=false 声明跳过（新增独立页时在路由上声明，不再改这里的名单）。
 router.afterEach((to) => {
-  if (
-    to.name === 'login' ||
-    to.name === 'register' ||
-    to.name === 'forgot-password' ||
-    to.name === 'reset-password' ||
-    to.name === 'not-found'
-  ) {
-    return
-  }
+  if (to.meta.track === false) return
   const session = useSessionStore()
   if (session.isLoggedIn && !session.isDemo) recordLocation(to.fullPath)
 })
