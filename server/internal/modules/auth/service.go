@@ -208,17 +208,9 @@ type RegisterInput struct {
 	DisplayName string `json:"display_name"`
 	// RegistrationCode 非空走注册码兑换分支（ADR-0009）；为空保持
 	// bootstrap-only 守卫（服务器已有 human 即 403）。工作区邀请码不是
-	// 注册资格：在本端点出现（或任何未知码）一律 errInviteInvalid，
+	// 注册资格：在本端点出现（或任何未知码）一律 ErrInviteInvalid，
 	// 与失效码同文案（防探测）。
 	RegistrationCode string `json:"registration_code,omitempty"`
-}
-
-// errInviteInvalid 是邀请码失效的统一错误：不存在/已兑换/已撤销/已过期
-// 同码同文案，不给区分（防探测，docs/registration.md §3）。
-var errInviteInvalid = &httpx.APIError{
-	Status:  http.StatusBadRequest,
-	Code:    httpx.CodeInviteInvalid,
-	Message: "invite code is invalid or expired",
 }
 
 // Register 注册 human 账号并建立 web 会话，返回 actor 与 refresh token
@@ -323,7 +315,7 @@ func seedOrgMemory(tx *gorm.DB, actorID string) error {
 // 建号 + 条件更新抢状态 + 审计/事件同事务，**不建任何 WorkspaceMember**——
 // 注册资格与入伙资格是两条轨道，入伙走 workspace 模块的
 // POST /invitations/redeem。只查 registration_invitations：工作区码在
-// 注册端点出现与未知码同待遇，统一 errInviteInvalid（防探测，同码同文案）。
+// 注册端点出现与未知码同待遇，统一 ErrInviteInvalid（防探测，同码同文案）。
 // 码校验先于口令策略；email 撞车由唯一索引兜底（此时注册码不消耗，
 // 可换邮箱重试）。
 func (s *Service) registerWithRegistrationCode(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
@@ -331,13 +323,13 @@ func (s *Service) registerWithRegistrationCode(ctx context.Context, in RegisterI
 	var inv model.RegistrationInvitation
 	err := s.DB.WithContext(ctx).Where("code_hash = ?", codeHash).First(&inv).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, "", errInviteInvalid
+		return nil, "", ErrInviteInvalid
 	}
 	if err != nil {
 		return nil, "", err
 	}
 	if inv.Status != "invited" || time.Now().After(inv.ExpiresAt) {
-		return nil, "", errInviteInvalid
+		return nil, "", ErrInviteInvalid
 	}
 	hash, apiErr := hashPasswordOrInvalid(in.Password)
 	if apiErr != nil {
@@ -361,7 +353,7 @@ func (s *Service) registerWithRegistrationCode(ctx context.Context, in RegisterI
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
-			return errInviteInvalid
+			return ErrInviteInvalid
 		}
 		// 服务器级审计：workspace_id 留空（/admin/audit 可见）。
 		if err := audit.RecordInTx(tx, audit.Entry{
@@ -384,8 +376,8 @@ func (s *Service) registerWithRegistrationCode(ctx context.Context, in RegisterI
 		})
 	})
 	if err != nil {
-		if errors.Is(err, errInviteInvalid) {
-			return nil, "", errInviteInvalid
+		if errors.Is(err, ErrInviteInvalid) {
+			return nil, "", ErrInviteInvalid
 		}
 		if store.IsUniqueViolation(err) {
 			return nil, "", httpx.Conflict(httpx.CodeEmailTaken, "email already registered")
