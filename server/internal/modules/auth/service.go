@@ -227,8 +227,8 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, ip, ua string)
 	if _, dbErr := s.dbOrError(); dbErr != nil {
 		return nil, "", dbErr
 	}
-	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
-	if in.Email == "" || !strings.Contains(in.Email, "@") {
+	var ok bool
+	if in.Email, ok = NormalizeEmail(in.Email); !ok {
 		return nil, "", httpx.Invalid("invalid email")
 	}
 	if strings.TrimSpace(in.DisplayName) == "" {
@@ -405,7 +405,8 @@ func (s *Service) Login(ctx context.Context, email, password, ip, ua string) (re
 	if _, dbErr := s.dbOrError(); dbErr != nil {
 		return "", nil, dbErr
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
+	// 形态不合按查无处理（401 口径，与原行为一致）。
+	email, _ = NormalizeEmail(email)
 	var ha model.HumanAuth
 	if e := s.DB.WithContext(ctx).Where("email = ?", email).First(&ha).Error; e != nil {
 		if !errors.Is(e, gorm.ErrRecordNotFound) {

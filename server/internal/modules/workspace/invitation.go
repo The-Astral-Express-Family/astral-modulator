@@ -116,8 +116,8 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 	// email 可选：提供即同时邮件投递（00024）。指针区分「未提供」与空串。
 	email := ""
 	if in.Email != nil {
-		email = strings.ToLower(strings.TrimSpace(*in.Email))
-		if email == "" || !strings.Contains(email, "@") || len(email) > 254 {
+		var ok bool
+		if email, ok = auth.NormalizeEmail(*in.Email); !ok {
 			httpx.WriteError(w, r, httpx.Invalid("email is malformed"))
 			return
 		}

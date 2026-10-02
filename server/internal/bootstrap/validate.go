@@ -5,11 +5,13 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
+
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 )
 
 // 本文件的校验规则与既有实现保持一致，避免向导拒绝服务端会接受的输入：
-//   - ValidateEmail / ValidatePassword 镜像 internal/modules/auth 的
-//     Register/validatePassword 规则（改规则需两处同步）；
+//   - ValidateEmail 直接复用 auth.NormalizeEmail；ValidatePassword 镜像
+//     auth 的 validatePassword（后者未导出，改规则需两处同步）；
 //   - ValidateDSN 只做形态检查，连通性一律以 store.Open 实测为准。
 
 // ValidateDSN 校验 PostgreSQL 连接串形态（postgres:// 或 postgresql:// 且带 host）。
@@ -24,10 +26,10 @@ func ValidateDSN(dsn string) error {
 	return nil
 }
 
-// ValidateEmail 与 auth.Service.Register 的最小校验一致（非空且含 @）。
+// ValidateEmail 经 auth.NormalizeEmail 校验（非空、含 @、≤254 字节），
+// 与服务端 Register/password-reset 同一规则，不再手工镜像。
 func ValidateEmail(email string) error {
-	email = strings.ToLower(strings.TrimSpace(email))
-	if email == "" || !strings.Contains(email, "@") {
+	if _, ok := auth.NormalizeEmail(email); !ok {
 		return fmt.Errorf("邮箱需形如 name@example.com")
 	}
 	return nil
