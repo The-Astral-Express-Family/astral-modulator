@@ -34,15 +34,12 @@ import {
 } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { useApiAction } from '@/composables/useApiAction'
+import { TTL_OPTIONS } from '@/lib/invitation'
+import { copyText } from '@/lib/clipboard'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 
-const TTL_OPTIONS = [
-  { value: '86400', label: '1 天' },
-  { value: '604800', label: '7 天' },
-  { value: '2592000', label: '30 天' },
-]
 const STATUS_VARIANTS: Record<RegistrationInvitation['status'], BadgeVariants['variant']> = {
   invited: 'secondary',
   redeemed: 'default',
@@ -103,10 +100,7 @@ async function revoke(inv: RegistrationInvitation): Promise<void> {
   }
 }
 
-async function copy(text: string, what: string): Promise<void> {
-  await navigator.clipboard.writeText(text)
-  toast.success(`${what}已复制`)
-}
+
 </script>
 
 <template>
@@ -195,7 +189,7 @@ async function copy(text: string, what: string): Promise<void> {
                 size="sm"
                 variant="outline"
                 class="shrink-0"
-                @click="copy(issued.invite_url, '注册链接')"
+                @click="copyText(issued.invite_url, '注册链接')"
               >
                 复制链接
               </Button>
@@ -212,7 +206,7 @@ async function copy(text: string, what: string): Promise<void> {
                 size="sm"
                 variant="outline"
                 class="shrink-0"
-                @click="copy(issued.code, '邀请码')"
+                @click="copyText(issued.code, '邀请码')"
               >
                 复制码
               </Button>

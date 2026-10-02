@@ -36,6 +36,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useApiAction } from '@/composables/useApiAction'
+import { TTL_OPTIONS } from '@/lib/invitation'
+import { copyText } from '@/lib/clipboard'
 
 const props = defineProps<{ workspaceId: string }>()
 
@@ -54,11 +56,6 @@ const ROLE_OPTIONS = [
   { value: 'contributor', label: 'contributor（读写）' },
   { value: 'maintainer', label: 'maintainer（管理）' },
 ]
-const TTL_OPTIONS = [
-  { value: '86400', label: '1 天' },
-  { value: '604800', label: '7 天' },
-  { value: '2592000', label: '30 天' },
-]
 const STATUS_VARIANTS: Record<Invitation['status'], BadgeVariants['variant']> = {
   invited: 'default',
   redeemed: 'secondary',
@@ -67,7 +64,7 @@ const STATUS_VARIANTS: Record<Invitation['status'], BadgeVariants['variant']> = 
 
 async function load(): Promise<void> {
   try {
-    items.value = (await listInvitations(props.workspaceId)).items
+    items.value = (await listInvitations(props.workspaceId)).items ?? []
     canManage.value = true
   } catch {
     canManage.value = false // 403 无 manage_members / 404 非成员：整卡隐藏
@@ -100,10 +97,7 @@ async function revoke(inv: Invitation): Promise<void> {
   if (ok) await load()
 }
 
-async function copy(text: string, what: string): Promise<void> {
-  await navigator.clipboard.writeText(text)
-  toast.success(`${what}已复制`)
-}
+
 
 onMounted(() => {
   void load()
@@ -171,10 +165,10 @@ watch(
       <div v-if="issued" class="flex flex-col gap-2 rounded-md border p-3">
         <div class="flex flex-wrap items-center gap-2">
           <code class="font-mono text-sm font-semibold">{{ issued.code }}</code>
-          <Button size="sm" variant="outline" @click="copy(issued.code, '邀请码')">
+          <Button size="sm" variant="outline" @click="copyText(issued.code, '邀请码')">
             复制码
           </Button>
-          <Button size="sm" variant="outline" @click="copy(issued.invite_url, '入伙链接')">
+          <Button size="sm" variant="outline" @click="copyText(issued.invite_url, '入伙链接')">
             复制链接
           </Button>
           <Badge v-if="issued.email" :variant="issued.email_sent_at ? 'default' : 'destructive'">

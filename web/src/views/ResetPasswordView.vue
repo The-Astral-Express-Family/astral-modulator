@@ -2,17 +2,17 @@
 // 重置密码（00023）：从邮件链接 ?token=prt_… 落地。新密码 + 二次确认
 // （PasswordInput 带小眼睛，与注册页同构——正是「注册口令输错」的补救面）。
 // 成功后服务端已吊销全部会话：清本地会话态再跳 /login 重新登录。
-import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useApiAction } from '@/composables/useApiAction'
+import { usePasswordConfirm } from '@/composables/usePasswordConfirm'
 import { confirmPasswordReset } from '@/api/modules/auth'
 import { useSessionStore } from '@/stores/session'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { PasswordInput } from '@/components/ui/password-input'
+import { PasswordInput } from '@/components/shared/password-input'
 import { Spinner } from '@/components/ui/spinner'
 
 const route = useRoute()
@@ -21,18 +21,10 @@ const session = useSessionStore()
 const { busy, run } = useApiAction()
 
 const token = typeof route.query.token === 'string' ? route.query.token : ''
-const password = ref('')
-const passwordConfirm = ref('')
-
-const confirmMismatch = computed(
-  () => passwordConfirm.value !== '' && passwordConfirm.value !== password.value,
-)
+const { password, passwordConfirm, confirmMismatch, ensureMatch } = usePasswordConfirm()
 
 async function submit(): Promise<void> {
-  if (password.value !== passwordConfirm.value) {
-    toast.error('两次输入的密码不一致')
-    return
-  }
+  if (!ensureMatch()) return
   const ok = await run(() => confirmPasswordReset(token, password.value))
   if (!ok) return
   toast.success('密码已重置，请重新登录')

@@ -73,7 +73,7 @@ func TestRegisterWithInviteDoesNotSeedOrgMemory(t *testing.T) {
 	}
 	if err := s.DB.Create(&model.RegistrationInvitation{
 		ID:       "inv_orgmem",
-		CodeHash: HashToken(NormalizeInviteCode(code)), CreatedBy: first.ID,
+		CodeHash: InviteCodeHash(code), CreatedBy: first.ID,
 		Status: "invited", ExpiresAt: time.Now().Add(24 * time.Hour),
 	}).Error; err != nil {
 		t.Fatal(err)

@@ -84,11 +84,7 @@ func (m *Module) listChildren(w http.ResponseWriter, r *http.Request, wsID strin
 		httpx.RespondError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = encodeSiblingCursor(rows[len(rows)-1])
-	}
+	rows, next := httpx.TrimPage(rows, limit, encodeSiblingCursor)
 	httpx.WriteOK(w, r, http.StatusOK, httpx.NewPage(m.enrichTasks(r.Context(), rows), next))
 }
 

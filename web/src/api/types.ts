@@ -4,36 +4,13 @@
 // （import type { components, operations } from '@/api/schema'），本文件保留
 // 导出别名供存量视图，随迁移逐步删除（TODO.md S7）。
 
+import type { components } from '@/api/schema'
+
 export type ID = string
 
-// 与 api/schemas/error.json 的 ErrorCode enum 保持一致（含 NOT_FOUND 等
-// 服务端 httpx/errors.go 全量稳定码）。
-export type ErrorCode =
-  | 'AUTH_REQUIRED'
-  | 'TOKEN_EXPIRED'
-  | 'TOKEN_REVOKED'
-  | 'INSUFFICIENT_SCOPE'
-  | 'SERVER_NOT_FOUND'
-  | 'WORKSPACE_NOT_FOUND'
-  | 'WORKSPACE_ALREADY_BOUND'
-  | 'WORKSPACE_NAME_TAKEN'
-  | 'TASK_NOT_FOUND'
-  | 'TASK_ALREADY_CLAIMED'
-  | 'TAG_PROPOSAL_EXPIRED'
-  | 'TAG_ALREADY_EXISTS'
-  | 'APPROVAL_EXPIRED'
-  | 'INVITE_INVALID'
-  | 'ALREADY_MEMBER'
-  | 'EMAIL_TAKEN'
-  | 'REVISION_CONFLICT'
-  | 'DOCUMENT_CONFLICT'
-  | 'RATE_LIMITED'
-  | 'CLIENT_VERSION_UNSUPPORTED'
-  | 'VALIDATION_FAILED'
-  | 'NOT_FOUND'
-  | 'AUTHORIZATION_PENDING'
-  | 'SLOW_DOWN'
-  | 'INTERNAL_ERROR'
+// 错误码联合直接取生成物（与 api/schemas/error.json 的 enum 同源，
+// gen:api drift 门兜底——新增码不再需要手工同步本文件）。
+export type ErrorCode = components['schemas']['ErrorCode']
 
 export interface ApiErrorBody {
   code: ErrorCode
@@ -127,30 +104,12 @@ export type InvitationRole = 'viewer' | 'contributor' | 'maintainer'
 
 export type InvitationStatus = 'invited' | 'redeemed' | 'revoked'
 
-// 手工对齐 openapi Invitation schema（服务端 workspace/invitation.go invitationDTO）。
+// 邀请类型直接取生成物（schema.d.ts 与 openapi 一字不差，drift 门兜底）。
 // email/email_sent_at 仅邮件渠道签发时出现（00024）：链接与站内码同一行
 // 同一生命周期，撤销/过期/兑换两渠道同时失效。
-export interface Invitation {
-  id: ID
-  workspace_id: ID
-  role: InvitationRole
-  status: InvitationStatus
-  created_by: ID
-  created_at: string
-  expires_at: string
-  redeemed_by?: ID | null
-  redeemed_at?: string | null
-  email?: string
-  email_sent_at?: string
-}
-
-// 签发响应：Invitation 追加一次性 code 明文与拼好的注册链接（仅本次返回）。
-export interface InvitationCreated extends Invitation {
-  code: string
-  invite_url: string
-}
-
-export interface InvitationPage extends Page<Invitation> {}
+export type Invitation = components['schemas']['Invitation']
+export type InvitationCreated = components['schemas']['InvitationCreated']
+export type InvitationPage = components['schemas']['InvitationPage']
 
 // ---- Tasks / Tags（手工对齐 openapi v2 Task/Tag schema）----
 // v2（D15）：集合端点（children/task-search）行内恒填充 tags 与 children_count。

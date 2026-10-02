@@ -40,7 +40,7 @@ func seedInviteWorld(t *testing.T, s *Service, role string, mutate func(*model.I
 		ID:          "inv_test1",
 		WorkspaceID: "ws_inv",
 		Role:        role,
-		CodeHash:    HashToken(NormalizeInviteCode(code)),
+		CodeHash:    InviteCodeHash(code),
 		CreatedBy:   "usr_owner",
 		Status:      "invited",
 		ExpiresAt:   time.Now().Add(24 * time.Hour),
@@ -108,7 +108,7 @@ func TestRegistrationCodeInvalidUnified(t *testing.T) {
 		inv.ExpiresAt = time.Now().Add(-time.Hour)
 	})
 	if err := s.DB.Model(&model.RegistrationInvitation{}).
-		Where("code_hash = ?", HashToken(NormalizeInviteCode(revoked))).
+		Where("code_hash = ?", InviteCodeHash(revoked)).
 		Update("status", "revoked").Error; err != nil {
 		t.Fatal(err)
 	}

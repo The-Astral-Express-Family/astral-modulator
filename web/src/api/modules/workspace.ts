@@ -52,7 +52,7 @@ export function listMembers(workspaceId: string): Promise<Page<Member>> {
 
 export function createInvitation(
   workspaceId: string,
-  input: { role: 'viewer' | 'contributor' | 'maintainer'; expires_in?: number; email?: string },
+  input: { role: InvitationRole; expires_in?: number; email?: string },
 ): Promise<InvitationCreated> {
   return apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`, {
     method: 'POST',

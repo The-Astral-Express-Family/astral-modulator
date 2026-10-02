@@ -214,11 +214,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = rows[len(rows)-1].ID
-	}
+	rows, next := httpx.TrimPage(rows, limit, func(row model.Message) string { return row.ID })
 	items := make([]messageDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toMessageDTO(row))
@@ -250,11 +246,7 @@ func (m *Module) listTaskThread(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = rows[len(rows)-1].ID
-	}
+	rows, next := httpx.TrimPage(rows, limit, func(row model.Message) string { return row.ID })
 	items := make([]messageDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toMessageDTO(row))

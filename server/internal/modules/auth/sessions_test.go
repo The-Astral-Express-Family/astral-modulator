@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,6 +99,10 @@ func TestListSessions(t *testing.T) {
 	}
 	if len(views) != 2 || views[0].ID != fresh.ID {
 		t.Fatalf("want recently-used first, got %+v", views)
+	}
+	// 时间渲染统一 UTC（Z 后缀），与全仓其余 DTO 对齐。
+	if views[0].LastUsedAt == nil || !strings.HasSuffix(*views[0].LastUsedAt, "Z") {
+		t.Fatalf("last_used_at should render as UTC RFC3339, got %v", views[0].LastUsedAt)
 	}
 }
 

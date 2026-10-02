@@ -118,11 +118,7 @@ func (m *Module) manifest(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = rows[len(rows)-1].Path
-	}
+	rows, next := httpx.TrimPage(rows, limit, func(d model.Document) string { return d.Path })
 	items := make([]manifestItemDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toManifestItemDTO(row))

@@ -23,7 +23,7 @@ func seedRegistrationInvite(t *testing.T, s *Service, mutate func(*model.Registr
 	}
 	inv := model.RegistrationInvitation{
 		ID:        "inv_plat1",
-		CodeHash:  HashToken(NormalizeInviteCode(code)),
+		CodeHash:  InviteCodeHash(code),
 		CreatedBy: "usr_owner",
 		Status:    "invited",
 		ExpiresAt: time.Now().Add(24 * time.Hour),
