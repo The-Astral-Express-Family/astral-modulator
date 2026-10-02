@@ -43,7 +43,11 @@ type LogSender struct {
 }
 
 func (s *LogSender) Send(_ context.Context, msg Message) error {
-	s.Log.Info("outbound mail (log transport; configure ASTRAL_SMTP_URL to send for real)",
+	log := s.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Info("outbound mail (log transport; configure ASTRAL_SMTP_URL to send for real)",
 		"to", msg.To, "subject", msg.Subject, "body", msg.Text)
 	return nil
 }

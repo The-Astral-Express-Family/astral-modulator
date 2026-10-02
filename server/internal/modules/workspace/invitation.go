@@ -58,20 +58,16 @@ type invitationCreatedDTO struct {
 }
 
 func toInvitationDTO(inv model.Invitation) invitationDTO {
-	dto := invitationDTO{
+	return invitationDTO{
 		ID: inv.ID, WorkspaceID: inv.WorkspaceID, Role: inv.Role,
 		Status: inv.Status, CreatedBy: inv.CreatedBy,
-		CreatedAt:  inv.CreatedAt.UTC().Format(time.RFC3339),
-		ExpiresAt:  inv.ExpiresAt.UTC().Format(time.RFC3339),
-		RedeemedBy: inv.RedeemedBy,
-		RedeemedAt: httpx.TimeString(inv.RedeemedAt),
-		Email:      inv.Email,
+		CreatedAt:   inv.CreatedAt.UTC().Format(time.RFC3339),
+		ExpiresAt:   inv.ExpiresAt.UTC().Format(time.RFC3339),
+		RedeemedBy:  inv.RedeemedBy,
+		RedeemedAt:  httpx.TimeString(inv.RedeemedAt),
+		Email:       inv.Email,
+		EmailSentAt: httpx.TimeString(inv.EmailSentAt),
 	}
-	if inv.EmailSentAt != nil {
-		sent := inv.EmailSentAt.UTC().Format(time.RFC3339)
-		dto.EmailSentAt = &sent
-	}
-	return dto
 }
 
 // 邀请管理三端点先过 auth.RequireHuman（human session 闸，agent credential
