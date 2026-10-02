@@ -57,8 +57,8 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email, ip, webBaseUR
 	if _, dbErr := s.dbOrError(); dbErr != nil {
 		return dbErr
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	if email == "" || !strings.Contains(email, "@") || len(email) > 254 {
+	var ok bool
+	if email, ok = NormalizeEmail(email); !ok {
 		return httpx.Invalid("invalid email")
 	}
 	var ha model.HumanAuth
