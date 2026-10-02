@@ -41,8 +41,8 @@ func TestRegisterBootstrapOnly(t *testing.T) {
 	long := strings.Repeat("a", 250) + "@x.com"
 	if _, _, err := s.Register(ctx, RegisterInput{Email: long, Password: "hunter2safe"}, "ip", "ua"); err == nil {
 		t.Fatal("overlong email should fail")
-	} else if apiErr, ok := err.(*httpx.APIError); !ok || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("overlong email should be 400, got %v", err)
+	} else if apiErr, ok := err.(*httpx.APIError); !ok || apiErr.Status != http.StatusBadRequest || apiErr.Code != httpx.CodeValidationFailed {
+		t.Fatalf("overlong email should be 400 %s, got %v", httpx.CodeValidationFailed, err)
 	}
 }
 
