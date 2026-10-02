@@ -51,11 +51,7 @@ func ListEntries(ctx context.Context, db *gorm.DB, f ListFilter) ([]model.AuditE
 	if err := query.Order("id DESC").Limit(f.Limit + 1).Find(&rows).Error; err != nil {
 		return nil, "", err
 	}
-	next := ""
-	if len(rows) > f.Limit {
-		rows = rows[:f.Limit]
-		next = rows[len(rows)-1].ID
-	}
+	rows, next := httpx.TrimPage(rows, f.Limit, func(e model.AuditEntry) string { return e.ID })
 	return rows, next, nil
 }
 

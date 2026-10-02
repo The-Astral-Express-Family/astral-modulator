@@ -148,11 +148,7 @@ func (m *Module) listRegistrationInvitations(w http.ResponseWriter, r *http.Requ
 		httpx.RespondError(w, r, err)
 		return
 	}
-	next := ""
-	if len(rows) > limit {
-		rows = rows[:limit]
-		next = rows[len(rows)-1].ID
-	}
+	rows, next := httpx.TrimPage(rows, limit, func(inv model.RegistrationInvitation) string { return inv.ID })
 	items := make([]registrationInvitationDTO, 0, len(rows))
 	for _, inv := range rows {
 		items = append(items, toRegistrationInvitationDTO(inv))
