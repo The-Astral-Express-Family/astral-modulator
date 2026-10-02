@@ -217,15 +217,14 @@ func (m *Module) listInvitations(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
+	status, apiErr := auth.ParseInviteStatusFilter(r.URL.Query().Get("status"))
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
 	query := m.DB.WithContext(r.Context()).Model(&model.Invitation{}).Where("workspace_id = ?", wsID)
-	if s := r.URL.Query().Get("status"); s != "" {
-		switch s {
-		case "invited", "redeemed", "revoked":
-			query = query.Where("status = ?", s)
-		default:
-			httpx.WriteError(w, r, httpx.Invalid("status must be invited, redeemed or revoked"))
-			return
-		}
+	if status != "" {
+		query = query.Where("status = ?", status)
 	}
 	var rows []model.Invitation
 	if err := query.Order("created_at DESC").Limit(200).Find(&rows).Error; err != nil {

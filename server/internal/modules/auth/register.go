@@ -50,6 +50,17 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, ip, ua string)
 	return s.registerBootstrap(ctx, in, ip, ua)
 }
 
+// registeredSession 是注册两分支的共同收尾：为新 actor 建 web 会话并记
+// 注册日志（返回形状对齐 Register）。
+func (s *Service) registeredSession(ctx context.Context, actor *model.Actor, ip, ua, event string) (*model.Actor, string, error) {
+	refresh, _, _, err := s.createSession(ctx, actor.ID, "web", ip, ua)
+	if err != nil {
+		return nil, "", err
+	}
+	s.Log.Info(event, "actor_id", actor.ID)
+	return actor, refresh, nil
+}
+
 // registerBootstrap 是冷启动的「零号邀请」（A5）：仅当服务器还没有任何 human。
 func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, ua string) (*model.Actor, string, error) {
 	var humans int64
@@ -78,12 +89,7 @@ func (s *Service) registerBootstrap(ctx context.Context, in RegisterInput, ip, u
 	if err != nil {
 		return nil, "", err
 	}
-	refresh, _, _, err := s.createSession(ctx, actor.ID, "web", ip, ua)
-	if err != nil {
-		return nil, "", err
-	}
-	s.Log.Info("bootstrap human registered", "actor_id", actor.ID)
-	return actor, refresh, nil
+	return s.registeredSession(ctx, actor, ip, ua, "bootstrap human registered")
 }
 
 // orgMemorySlug 是组织记忆保留 workspace 的 slug（M1 裁决，round 37；
@@ -192,10 +198,5 @@ func (s *Service) registerWithRegistrationCode(ctx context.Context, in RegisterI
 		}
 		return nil, "", err
 	}
-	refresh, _, _, err := s.createSession(ctx, actor.ID, "web", ip, ua)
-	if err != nil {
-		return nil, "", err
-	}
-	s.Log.Info("human registered via registration invite", "actor_id", actor.ID)
-	return actor, refresh, nil
+	return s.registeredSession(ctx, actor, ip, ua, "human registered via registration invite")
 }
