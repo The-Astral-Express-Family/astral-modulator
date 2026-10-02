@@ -8,8 +8,6 @@ package admin
 
 import (
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,11 +22,8 @@ import (
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/store"
 )
 
-// 注册邀请 TTL 与 workspace 邀请同规：默认 7d，上限 30d。
-const (
-	registrationInviteDefaultTTL = 7 * 24 * time.Hour
-	registrationInviteMaxTTL     = 30 * 24 * time.Hour
-)
+// 注册邀请 TTL/失效哨兵/链接拼装复用 auth 包共享件（invites.go）；
+// redeemed/expired 派生语义与 workspace 邀请一致。
 
 type registrationInvitationDTO struct {
 	ID         string  `json:"id"`
@@ -72,13 +67,10 @@ func (m *Module) createRegistrationInvitation(w http.ResponseWriter, r *http.Req
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
 	}
-	ttl := registrationInviteDefaultTTL
-	if in.ExpiresIn != nil {
-		if *in.ExpiresIn <= 0 || *in.ExpiresIn > int64(registrationInviteMaxTTL/time.Second) {
-			httpx.WriteError(w, r, httpx.Invalid("expires_in must be between 1 and 2592000 seconds"))
-			return
-		}
-		ttl = time.Duration(*in.ExpiresIn) * time.Second
+	ttl, apiErr := auth.ParseInviteTTL(in.ExpiresIn)
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
 	}
 	code, err := auth.NewInviteCode()
 	if err != nil {
@@ -118,8 +110,14 @@ func (m *Module) createRegistrationInvitation(w http.ResponseWriter, r *http.Req
 	httpx.WriteOK(w, r, http.StatusCreated, registrationInvitationCreatedDTO{
 		registrationInvitationDTO: toRegistrationInvitationDTO(inv),
 		Code:                      code,
-		InviteURL:                 m.inviteURL(r, code),
+		InviteURL:                 m.inviteLink(r, code),
 	})
+}
+
+// inviteLink 拼注册链接 {WebBaseURL}/register?code=<code>（与 workspace
+// 邀请 /join 深链同构）；拼装复用 auth.InviteLink。
+func (m *Module) inviteLink(r *http.Request, code string) string {
+	return auth.InviteLink(m.WebBaseURL, m.PublicURL, r, "/register?code=", code)
 }
 
 // listRegistrationInvitations 是 GET /admin/registration-invitations：
@@ -202,11 +200,4 @@ func (m *Module) revokeRegistrationInvitation(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// inviteURL 拼注册链接 {WebBaseURL}/register?code=<code>；基址回退链与
-// workspace 邀请 / device verification_uri 同源（auth.ResolveWebBaseURL）。
-func (m *Module) inviteURL(r *http.Request, code string) string {
-	base := auth.ResolveWebBaseURL(m.WebBaseURL, m.PublicURL, r)
-	return strings.TrimRight(base, "/") + "/register?code=" + url.QueryEscape(code)
 }

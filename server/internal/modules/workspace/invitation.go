@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -31,11 +30,7 @@ import (
 // membership.promote_owner approval，D8/registration.md §6.3）。
 var invitationRoles = map[string]bool{"viewer": true, "contributor": true, "maintainer": true}
 
-// 邀请 TTL：默认 7d，签发时可指定，上限 30d（expires_in 单位秒）。
-const (
-	defaultInviteTTL = 7 * 24 * time.Hour
-	maxInviteTTL     = 30 * 24 * time.Hour
-)
+// 邀请角色白名单与 TTL/失效哨兵/链接拼装均复用 auth 包共享件（invites.go）。
 
 type invitationDTO struct {
 	ID          string  `json:"id"`
@@ -92,36 +87,11 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
+	in, ok := parseInviteInput(w, r)
+	if !ok {
+		return
+	}
 	p := auth.PrincipalFrom(r.Context())
-	var in struct {
-		Role      string  `json:"role"`
-		ExpiresIn *int64  `json:"expires_in"`
-		Email     *string `json:"email"`
-	}
-	if !httpx.DecodeJSON(w, r, &in) {
-		return
-	}
-	if !invitationRoles[in.Role] {
-		httpx.WriteError(w, r, httpx.Invalid("role must be viewer, contributor or maintainer"))
-		return
-	}
-	ttl := defaultInviteTTL
-	if in.ExpiresIn != nil {
-		if *in.ExpiresIn <= 0 || *in.ExpiresIn > int64(maxInviteTTL/time.Second) {
-			httpx.WriteError(w, r, httpx.Invalid("expires_in must be between 1 and 2592000 seconds"))
-			return
-		}
-		ttl = time.Duration(*in.ExpiresIn) * time.Second
-	}
-	// email 可选：提供即同时邮件投递（00024）。指针区分「未提供」与空串。
-	email := ""
-	if in.Email != nil {
-		var ok bool
-		if email, ok = auth.NormalizeEmail(*in.Email); !ok {
-			httpx.WriteError(w, r, httpx.Invalid("email is malformed"))
-			return
-		}
-	}
 	code, err := auth.NewInviteCode()
 	if err != nil {
 		httpx.RespondError(w, r, err)
@@ -136,18 +106,18 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:   p.ActorID,
 		Status:      "invited",
 		CreatedAt:   now,
-		ExpiresAt:   now.Add(ttl),
+		ExpiresAt:   now.Add(in.TTL),
 	}
-	if email != "" {
-		inv.Email = &email
+	if in.Email != "" {
+		inv.Email = &in.Email
 	}
 	// 签发与审计/事件同事务；失败则邀请行不落库（明文码随之作废，重签即可）。
 	// 同 (workspace, email) 在途邀请在此事务内整体撤销——邮件渠道与站内渠道
 	// 同体同生命周期：重签即旧链接立即失效（收件人手上永远只有最新一封）。
 	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if email != "" {
+		if in.Email != "" {
 			if err := tx.Model(&model.Invitation{}).
-				Where("workspace_id = ? AND email = ? AND status = 'invited'", ws.ID, email).
+				Where("workspace_id = ? AND email = ? AND status = 'invited'", ws.ID, in.Email).
 				Update("status", "revoked").Error; err != nil {
 				return err
 			}
@@ -156,8 +126,8 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		details := map[string]any{"role": in.Role}
-		if email != "" {
-			details["email"] = email
+		if in.Email != "" {
+			details["email"] = in.Email
 		}
 		if err := audit.RecordInTx(tx, audit.Entry{
 			WorkspaceID: ws.ID, ActorID: p.ActorID,
@@ -175,25 +145,70 @@ func (m *Module) createInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.RespondError(w, r, err)
 		return
 	}
-	// 投递在事务外：行已落库，投递失败不回滚（签发响应仍带明文码，管理员可
-	// 手动转发）；email_sent_at 标记结果，列表可见，失败可重签（即作废本张）。
-	if email != "" {
-		inviteURL := m.inviteURL(r, code)
-		if err := mail.OrLog(m.Mailer, m.inviteMailLog()).Send(r.Context(), inviteEmail(ws.Name, in.Role, inv.ExpiresAt, email, code, inviteURL)); err != nil {
-			m.inviteMailLog().Error("invitation mail delivery failed", "invitation_id", inv.ID, "email", email, "err", err)
-		} else {
-			inv.EmailSentAt = &now
-			if err := m.DB.WithContext(r.Context()).Model(&model.Invitation{}).
-				Where("id = ?", inv.ID).Update("email_sent_at", now).Error; err != nil {
-				m.inviteMailLog().Warn("invitation email_sent_at write failed", "invitation_id", inv.ID, "err", err)
-			}
-		}
+	inviteURL := m.inviteLink(r, code)
+	if in.Email != "" {
+		m.deliverInviteEmail(r, &inv, ws.Name, code, inviteURL)
 	}
 	httpx.WriteOK(w, r, http.StatusCreated, invitationCreatedDTO{
 		invitationDTO: toInvitationDTO(inv),
 		Code:          code,
-		InviteURL:     m.inviteURL(r, code),
+		InviteURL:     inviteURL,
 	})
+}
+
+// inviteInput 是 createInvitation 的已校验输入（TTL 已解析、email 已规范化；
+// Email 空串 = 不投递）。
+type inviteInput struct {
+	Role  string
+	TTL   time.Duration
+	Email string
+}
+
+// parseInviteInput 解码并校验签发请求；校验失败已写响应，返回 ok=false。
+func parseInviteInput(w http.ResponseWriter, r *http.Request) (inviteInput, bool) {
+	var in struct {
+		Role      string  `json:"role"`
+		ExpiresIn *int64  `json:"expires_in"`
+		Email     *string `json:"email"`
+	}
+	if !httpx.DecodeJSON(w, r, &in) {
+		return inviteInput{}, false
+	}
+	if !invitationRoles[in.Role] {
+		httpx.WriteError(w, r, httpx.Invalid("role must be viewer, contributor or maintainer"))
+		return inviteInput{}, false
+	}
+	ttl, apiErr := auth.ParseInviteTTL(in.ExpiresIn)
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return inviteInput{}, false
+	}
+	// email 可选：提供即同时邮件投递（00024）。指针区分「未提供」与空串。
+	email := ""
+	if in.Email != nil {
+		var ok bool
+		if email, ok = auth.NormalizeEmail(*in.Email); !ok {
+			httpx.WriteError(w, r, httpx.Invalid("email is malformed"))
+			return inviteInput{}, false
+		}
+	}
+	return inviteInput{Role: in.Role, TTL: ttl, Email: email}, true
+}
+
+// deliverInviteEmail 在事务外投递邀请邮件并回写 email_sent_at：投递失败
+// 不回滚（行已落库、签发响应仍带明文码，管理员可手动转发），失败可重签
+// （重签即作废本张）。inv.EmailSentAt 原地更新，供签发响应携带。
+func (m *Module) deliverInviteEmail(r *http.Request, inv *model.Invitation, workspaceName, code, inviteURL string) {
+	sentAt := time.Now()
+	if err := mail.OrLog(m.Mailer, m.inviteMailLog()).Send(r.Context(), inviteEmail(workspaceName, inv.Role, inv.ExpiresAt, *inv.Email, code, inviteURL)); err != nil {
+		m.inviteMailLog().Error("invitation mail delivery failed", "invitation_id", inv.ID, "email", *inv.Email, "err", err)
+		return
+	}
+	inv.EmailSentAt = &sentAt
+	if err := m.DB.WithContext(r.Context()).Model(&model.Invitation{}).
+		Where("id = ?", inv.ID).Update("email_sent_at", sentAt).Error; err != nil {
+		m.inviteMailLog().Warn("invitation email_sent_at write failed", "invitation_id", inv.ID, "err", err)
+	}
 }
 
 func (m *Module) listInvitations(w http.ResponseWriter, r *http.Request) {
@@ -277,20 +292,10 @@ func (m *Module) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// inviteURL 拼入伙链接 {WebBaseURL}/join?ws=<code>：收件人是已注册用户
-// （ADR-0009——工作区码不再指向 /register）；基址回退链与 device
-// verification_uri 同源（auth.ResolveWebBaseURL），不再另造拼装点。
-func (m *Module) inviteURL(r *http.Request, code string) string {
-	base := auth.ResolveWebBaseURL(m.WebBaseURL, m.PublicURL, r)
-	return strings.TrimRight(base, "/") + "/join?ws=" + url.QueryEscape(code)
-}
-
-// errInviteInvalid 与 auth 包同文案同语义（防探测：查无/已用/撤销/过期/
-// 类型不符一律同码同消息）。独立构造，避免 workspace→auth 内部符号耦合。
-var errInviteInvalid = &httpx.APIError{
-	Status:  http.StatusBadRequest,
-	Code:    httpx.CodeInviteInvalid,
-	Message: "invite code is invalid or expired",
+// inviteLink 拼入伙链接 {WebBaseURL}/join?ws=<code>：收件人是已注册用户
+// （ADR-0009——工作区码不再指向 /register）；拼装复用 auth.InviteLink。
+func (m *Module) inviteLink(r *http.Request, code string) string {
+	return auth.InviteLink(m.WebBaseURL, m.PublicURL, r, "/join?ws=", code)
 }
 
 var errAlreadyMember = &httpx.APIError{
@@ -338,7 +343,7 @@ func (m *Module) redeemInvitation(w http.ResponseWriter, r *http.Request) {
 	err := m.DB.WithContext(r.Context()).Where("code_hash = ?", codeHash).First(&inv).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.WriteError(w, r, errInviteInvalid)
+			httpx.WriteError(w, r, auth.ErrInviteInvalid)
 			return
 		}
 		httpx.RespondError(w, r, err)
@@ -358,20 +363,11 @@ func (m *Module) redeemInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if inv.Status != "invited" || time.Now().After(inv.ExpiresAt) {
-		httpx.WriteError(w, r, errInviteInvalid)
+		httpx.WriteError(w, r, auth.ErrInviteInvalid)
 		return
 	}
-	var memberCount int64
-	if err := m.DB.WithContext(r.Context()).Model(&model.WorkspaceMember{}).
-		Where("workspace_id = ? AND actor_id = ?", inv.WorkspaceID, p.ActorID).
-		Count(&memberCount).Error; err != nil {
-		httpx.RespondError(w, r, err)
-		return
-	}
-	if memberCount > 0 {
-		httpx.WriteError(w, r, errAlreadyMember)
-		return
-	}
+	// 已是成员不再前置 Count 预检：事务内 member Create 撞唯一约束整体回滚
+	//（码不消耗、无审计/事件残留），与预检同报 409——少一次往返查询。
 
 	err = m.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		// 条件更新抢状态（tag confirm 验证过的模式）：并发同码只有一个赢家。
@@ -382,7 +378,7 @@ func (m *Module) redeemInvitation(w http.ResponseWriter, r *http.Request) {
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
-			return errInviteInvalid
+			return auth.ErrInviteInvalid
 		}
 		mem := model.WorkspaceMember{WorkspaceID: inv.WorkspaceID, ActorID: p.ActorID, Role: inv.Role}
 		if err := tx.Create(&mem).Error; err != nil {
@@ -408,8 +404,8 @@ func (m *Module) redeemInvitation(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 	if err != nil {
-		if errors.Is(err, errInviteInvalid) {
-			httpx.WriteError(w, r, errInviteInvalid)
+		if errors.Is(err, auth.ErrInviteInvalid) {
+			httpx.WriteError(w, r, auth.ErrInviteInvalid)
 			return
 		}
 		// 并发窗口：抢到码但成员行已被 addMember 建立（唯一约束）→
