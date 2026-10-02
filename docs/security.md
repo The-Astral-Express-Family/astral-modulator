@@ -214,6 +214,28 @@ MVP 推荐 opaque 或 short JWT + server session metadata，先优先安全和�
 - 纯出站连接（无入站端口）；TLS 强制（smtps 隐式 / smtp+STARTTLS，
   明文凭证绝不出网）。
 
+### 7.3 自助改密与管理员重置（协议 2.6）
+
+- **自助改密（POST /auth/password）**：human session 专属（agent/service
+  credential 无本地口令，403）。必须验证当前口令——防会话劫持者直接换锁。
+  当前口令不符 = 400 `PASSWORD_MISMATCH`，**刻意不用 401**：web 拦截器把
+  认证端点的 401 解释为会话失效并走登出，口令打错就把自己登出是事故；
+  新口令走同一策略闸（validatePassword，先验证旧口令后校验新口令策略）；
+  入 Private 段敏感限流桶（当前口令是在线猜测面）。
+- **会话吊销口径**：自助改密吊销**除当前会话外**的全部会话
+  （RevokeActorSessionsExcept）——威胁模型是「其他设备可能失窃」，当前
+  设备由刚通过的当前口令验证担保，改完即被登出是可用性事故；管理员重置
+  与忘记密码兑换吊销**全部**会话——两者的威胁模型都是「旧凭证不可信」。
+  断流回调按 actor 粒度，当前设备 SSE 被一并切断后会话仍存活，前端自动
+  重连即恢复。
+- **管理员重置（POST /admin/users/{actor_id}/password-reset）**：
+  platform:users:manage；直接设置新口令（不验目标旧口令——重置的语义即
+  绕过失联/失窃的旧凭证），成功吊销目标全部会话；新口令经带外渠道告知。
+  **禁自重置**：管理员改自己的密码必须走 /auth/password 验当前口令，
+  管理员端点旁路这道验证属自我提权。停用账号允许重置（先重置后恢复的
+  管理路径）。审计 `platform.user.password_reset` / `auth.password_change`
+  与口令更新同事务落库。
+
 ## 8. 本地凭证存储
 
 抽象 `CredentialStore`：
