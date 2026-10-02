@@ -68,6 +68,16 @@ func ParseInviteTTL(expiresIn *int64) (time.Duration, *httpx.APIError) {
 	return time.Duration(*expiresIn) * time.Second, nil
 }
 
+// ParseInviteStatusFilter 解析两轨列表端点的 ?status=：合法值 invited/
+// redeemed/revoked，空串 = 不过滤；非法值统一 400（文案两轨一致）。
+func ParseInviteStatusFilter(raw string) (status string, apiErr *httpx.APIError) {
+	switch raw {
+	case "", "invited", "redeemed", "revoked":
+		return raw, nil
+	}
+	return "", httpx.Invalid("status must be invited, redeemed or revoked")
+}
+
 // InviteLink 在 ResolveWebBaseURL 基址上拼邀请深链：pathPrefix 形如
 // "/join?ws="（工作区码，面向已注册用户）或 "/register?code="（注册码），
 // value 做 query 转义。两类邀请的 invite_url 共用此拼装点，基址回退链

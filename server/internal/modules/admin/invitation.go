@@ -127,15 +127,14 @@ func (m *Module) listRegistrationInvitations(w http.ResponseWriter, r *http.Requ
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
+	status, apiErr := auth.ParseInviteStatusFilter(r.URL.Query().Get("status"))
+	if apiErr != nil {
+		httpx.WriteError(w, r, apiErr)
+		return
+	}
 	query := m.DB.WithContext(r.Context()).Model(&model.RegistrationInvitation{})
-	if s := r.URL.Query().Get("status"); s != "" {
-		switch s {
-		case "invited", "redeemed", "revoked":
-			query = query.Where("status = ?", s)
-		default:
-			httpx.WriteError(w, r, httpx.Invalid("status must be invited, redeemed or revoked"))
-			return
-		}
+	if status != "" {
+		query = query.Where("status = ?", status)
 	}
 	limit := httpx.ParseLimit(r.URL.Query().Get("limit"), 50, 200)
 	// 游标是「上一页最后一行的 id」：id 是 uuidv7（前缀 inv_/reg_ 不参与
