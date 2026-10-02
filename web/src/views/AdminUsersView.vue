@@ -14,8 +14,9 @@ import {
 import type { AdminUser, PlatformRole } from '@/api/types'
 import { fmtTime } from '@/lib/format'
 import CreateInvitationDialog from '@/components/admin/CreateInvitationDialog.vue'
+import ResetPasswordDialog from '@/components/admin/ResetPasswordDialog.vue'
 import PageHeader from '@/components/shared/PageHeader.vue'
-import { Plus } from '@lucide/vue'
+import { KeyRound, Plus } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import type { BadgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -46,6 +47,8 @@ const session = useSessionStore()
 const canAccess = ref<boolean | null>(null)
 const users = ref<AdminUser[]>([])
 const showInviteDialog = ref(false)
+const showResetDialog = ref(false)
+const resetTarget = ref<AdminUser | null>(null)
 const busyId = ref<string | null>(null)
 const { run } = useApiAction()
 
@@ -73,6 +76,11 @@ onMounted(async () => {
 
 function isSelf(u: AdminUser): boolean {
   return u.id === session.actor?.id
+}
+
+function openReset(u: AdminUser): void {
+  resetTarget.value = u
+  showResetDialog.value = true
 }
 
 async function toggleDisabled(u: AdminUser): Promise<void> {
@@ -119,6 +127,8 @@ async function changeRole(u: AdminUser, role: HumanRole): Promise<void> {
     </div>
 
     <CreateInvitationDialog v-model:open="showInviteDialog" />
+
+    <ResetPasswordDialog v-model:open="showResetDialog" :user="resetTarget" />
 
     <div v-if="canAccess === null" class="flex justify-center py-16">
       <Spinner class="size-6" />
@@ -183,6 +193,15 @@ async function changeRole(u: AdminUser, role: HumanRole): Promise<void> {
                         <SelectItem value="user">普通用户</SelectItem>
                       </SelectContent>
                     </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      :disabled="busyId === u.id"
+                      @click="openReset(u)"
+                    >
+                      <KeyRound class="size-4" />
+                      重置密码
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"

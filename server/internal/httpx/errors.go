@@ -68,6 +68,11 @@ const (
 	// 账号统一此码同文案（400，与 INVITE_INVALID 同哲学：不给探测者区分
 	// 信号，docs/security.md 密码重置节）。
 	CodePasswordResetInvalid = "PASSWORD_RESET_INVALID"
+
+	// CodePasswordMismatch：自助改密（POST /auth/password）当前口令不符
+	// （400）。刻意不用 401——web 客户端把认证端点的 401 解释为「会话失效」
+	// 走登出流程，口令打错就把自己登出是事故；400 才是表单内联可处理的形状。
+	CodePasswordMismatch = "PASSWORD_MISMATCH"
 )
 
 // Error 是公网错误 envelope，契约见 api/schemas/error.json（语义见 docs/protocol.md §3）。

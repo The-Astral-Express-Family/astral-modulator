@@ -341,8 +341,10 @@ func classifyPublic(method, path string) bucketClass {
 	}
 }
 
-// classifyPrivate 是 Private 段的 (method, path) → 桶表：auth 域内仅
-// 设备审批三端点是敏感桶，其余（me 等）入通用桶。
+// classifyPrivate 是 Private 段的 (method, path) → 桶表：auth 域内
+// 设备审批三端点与自助改密是敏感桶，其余（me 等）入通用桶。
+// /auth/password 验证的是当前口令——会话劫持者在线爆破换锁的猜测面，
+// 与 password-reset/confirm 同口径（auth/password_change.go）。
 func classifyPrivate(method, path string) bucketClass {
 	segs := splitPath(path)
 	if len(segs) == 0 {
@@ -354,6 +356,9 @@ func classifyPrivate(method, path string) bucketClass {
 			method == http.MethodGet) ||
 			(len(segs) == 5 && segs[1] == "device" && segs[2] == "authorizations" &&
 				(segs[4] == "approve" || segs[4] == "deny") && method == http.MethodPost)):
+		return classSensitive
+	case segs[0] == "auth" && len(segs) == 2 && segs[1] == "password" &&
+		method == http.MethodPost:
 		return classSensitive
 	case len(segs) == 3 && segs[0] == "workspaces" && segs[2] == "events" &&
 		method == http.MethodGet:
