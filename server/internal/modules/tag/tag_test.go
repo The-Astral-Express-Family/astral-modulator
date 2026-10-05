@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/httpx"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/model"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/auth"
 	"github.com/The-Astral-Express-Family/astral-modulator/server/internal/modules/event"
@@ -196,6 +197,42 @@ func TestRenameAndDeleteFlow(t *testing.T) {
 	f.db.Model(&model.Tag{}).Where("id = ?", tagRow.ID).Count(&count)
 	if count != 0 {
 		t.Fatal("tag not deleted")
+	}
+}
+
+func TestDeleteConfirmClearsDanglingReferences(t *testing.T) {
+	// PG 回归（00004 的 target_tag_id 外键无 ON DELETE 动作）：tag 被其他
+	// pending proposal 引用时，delete confirm 须先解除引用再删除，否则
+	// PG 上 DELETE 违反外键 → 500（sqlite 测试不启用外键，测不出）。
+	f := setup(t)
+	tagRow := model.Tag{ID: "tag_d1", WorkspaceID: f.wsID, Name: "doomed", NormalizedName: "doomed", CreatedBy: f.human.ID}
+	if err := f.db.Create(&tagRow).Error; err != nil {
+		t.Fatal(err)
+	}
+	other, otherCode := propose(t, f, "rename", "doomed")
+	other.TargetTagID = &tagRow.ID
+	f.db.Save(&other)
+
+	proposal, code := propose(t, f, "delete", "doomed")
+	proposal.TargetTagID = &tagRow.ID
+	f.db.Save(&proposal)
+	if _, err := f.m.Confirm(context.Background(), f.p, proposal.ID, code, "doomed"); err != nil {
+		t.Fatalf("delete confirm: %v", err)
+	}
+
+	var restored model.TagProposal
+	if err := f.db.First(&restored, "id = ?", other.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if restored.TargetTagID != nil {
+		t.Fatal("dangling target_tag_id reference not cleared")
+	}
+
+	// 引用被解除的 rename proposal 确认 → 404（目标已删），而非 panic。
+	_, err := f.m.Confirm(context.Background(), f.p, other.ID, otherCode, "doomed")
+	apiErr, ok := err.(*httpx.APIError)
+	if !ok || apiErr.Status != 404 {
+		t.Fatalf("rename on deleted tag: want 404, got %v", err)
 	}
 }
 

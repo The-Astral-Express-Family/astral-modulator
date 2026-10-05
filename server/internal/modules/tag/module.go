@@ -263,6 +263,11 @@ func (m *Module) checkProposal(ctx context.Context, p *auth.Principal, proposal 
 	if proposal.Status != "pending" || time.Now().After(proposal.ExpiresAt) {
 		return httpx.Conflict(httpx.CodeTagProposalExpired, "proposal expired or already used")
 	}
+	// rename/delete 的目标可能已被其他 proposal 删除（applyTagDelete 会解除
+	// 全部 target_tag_id 引用）——此处置 404，防止下游 nil 解引用。
+	if proposal.Action != "create" && proposal.TargetTagID == nil {
+		return httpx.NotFound("target tag not found")
+	}
 	if !auth.HashEqual(confirmCode, proposal.ConfirmCodeHash) {
 		return &httpx.APIError{Status: 403, Code: httpx.CodeValidationFailed, Message: "confirm_code mismatch"}
 	}
@@ -333,14 +338,23 @@ func applyTagRename(tx *gorm.DB, proposal *model.TagProposal, name, normalized s
 }
 
 func applyTagDelete(tx *gorm.DB, proposal *model.TagProposal, name string) (model.Tag, string, error) {
-	res := tx.Where("id = ? AND workspace_id = ?", *proposal.TargetTagID, proposal.WorkspaceID).Delete(&model.Tag{})
+	tagID := *proposal.TargetTagID
+	// tag_proposals.target_tag_id 外键无 ON DELETE 动作（00004，PG 下
+	// NO ACTION）：先解除全部引用（含本 proposal 与其他 pending/过期
+	// proposal），否则 PG 上 DELETE 违反外键、confirm 落 500。
+	if err := tx.Model(&model.TagProposal{}).
+		Where("target_tag_id = ?", tagID).
+		Update("target_tag_id", nil).Error; err != nil {
+		return model.Tag{}, "", err
+	}
+	res := tx.Where("id = ? AND workspace_id = ?", tagID, proposal.WorkspaceID).Delete(&model.Tag{})
 	if res.Error != nil {
 		return model.Tag{}, "", res.Error
 	}
 	if res.RowsAffected == 0 {
 		return model.Tag{}, "", httpx.NotFound("target tag not found")
 	}
-	return model.Tag{ID: *proposal.TargetTagID, WorkspaceID: proposal.WorkspaceID, Name: name}, outbox.TypeTagDeleted, nil
+	return model.Tag{ID: tagID, WorkspaceID: proposal.WorkspaceID, Name: name}, outbox.TypeTagDeleted, nil
 }
 
 // confirm：两步确认第二步的 HTTP 面（CLI 固定拼写 --confirm）。
