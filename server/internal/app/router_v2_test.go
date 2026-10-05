@@ -174,6 +174,14 @@ func TestTaskTreeContainersV2(t *testing.T) {
 	if code != 400 {
 		t.Fatalf("blocked 非布尔值不计入条件: %d %v", code, errBody)
 	}
+	code, errBody = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?blocked=false", nil)
+	if code != 400 {
+		t.Fatalf("blocked=false 不表达过滤,单独使用仍 400: %d %v", code, errBody)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?tag=backend&blocked=maybe", nil)
+	if code != 200 {
+		t.Fatalf("组合过滤下非法 blocked 被忽略: %d %v", code, page)
+	}
 	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?tag=backend", nil)
 	if code != 200 || len(items(t, page)) != 1 {
 		t.Fatalf("tag-only search: %d %v", code, page)
@@ -181,10 +189,6 @@ func TestTaskTreeContainersV2(t *testing.T) {
 	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?blocked=true", nil)
 	if code != 200 || len(items(t, page)) != 0 {
 		t.Fatalf("blocked-only search (no edges yet): %d %v", code, page)
-	}
-	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?blocked=false", nil)
-	if code != 200 || len(items(t, page)) != 3 {
-		t.Fatalf("blocked=false-only search: %d %v", code, page)
 	}
 	// 建一条依赖边（child 依赖 root）后，blocked/blocked_by 单带可查且过滤生效。
 	code, dep := doAuthed(t, ts, cookie, "PUT",

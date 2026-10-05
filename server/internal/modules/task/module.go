@@ -140,8 +140,8 @@ func (m *Module) requireTask(r *http.Request, taskID string, need string) (*mode
 
 // search：workspace 级平面查询（v2 task-search）。结构化（tag/status/assignee/
 // blocked/blocked_by）与内容（regex/fuzzy）平权；至少一个条件，防全量 dump
-// （候选集另有封顶，D7）。blocked 仅在值为 true/false 时计入条件——其余取值
-// 不表达过滤意图，计入会开出无过滤全量 dump 的口子。
+// （候选集另有封顶，D7）。blocked 仅在取 true 时计入条件并过滤（false 不表达
+// 过滤意图，计入等于无过滤全量枚举）；与其他条件并用时非法取值被忽略。
 func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskRead); apiErr != nil {
@@ -149,10 +149,9 @@ func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	blocked := q.Get("blocked")
 	if q.Get("regex") == "" && q.Get("fuzzy") == "" && q.Get("tag") == "" &&
 		q.Get("status") == "" && q.Get("assignee") == "" &&
-		blocked != "true" && blocked != "false" && q.Get("blocked_by") == "" {
+		q.Get("blocked") != "true" && q.Get("blocked_by") == "" {
 		httpx.WriteError(w, r, httpx.Invalid("at least one filter (regex/fuzzy/tag/status/assignee/blocked/blocked_by) is required"))
 		return
 	}
