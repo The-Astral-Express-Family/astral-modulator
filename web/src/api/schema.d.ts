@@ -502,8 +502,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * workspace 级平面查询（跨层级）。结构化（tag/status/assignee）与内容
-         *     （regex/fuzzy）平权，至少提供其一（防全量 dump）。语义固定：
+         * workspace 级平面查询（跨层级）。结构化（tag/status/assignee/blocked/
+         *     blocked_by）与内容（regex/fuzzy）平权，至少提供其一（防全量 dump）。
+         *     blocked 仅取 true/false 计入条件，其余取值 400。语义固定：
          *     权限过滤 -> 结构化过滤 -> regex 过滤 -> fuzzy 排序 -> 分页（architecture §13）。
          *     候选集封顶（实现见 TODO.md D7）。
          */
@@ -1494,7 +1495,13 @@ export interface components {
             description?: string;
             status?: components["schemas"]["TaskStatus"];
             priority?: components["schemas"]["TaskPriority"];
+            /**
+             * @description 缺席或 null 均视为「不改」。移动到其他父容器或根层走
+             *     POST /workspaces/{workspace_id}/tasks/move——该端点的
+             *     parent_id=null 才表示根层语义。
+             */
             parent_id?: components["schemas"]["IdOrNull"];
+            /** @description 缺席 = 不改；显式 null = 清空指派；传 actor id = 重新指派（2.6.1 起）。 */
             assignee_actor_id?: components["schemas"]["IdOrNull"];
         };
         Task: {
@@ -1604,6 +1611,7 @@ export interface components {
             set: {
                 status?: components["schemas"]["TaskStatus"];
                 priority?: components["schemas"]["TaskPriority"];
+                /** @description 缺席 = 不改；显式 null = 清空指派；传 actor id = 重新指派（2.6.1 起）。 */
                 assignee_actor_id?: components["schemas"]["IdOrNull"];
             };
         };
