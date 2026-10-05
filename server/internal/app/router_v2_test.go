@@ -165,14 +165,41 @@ func TestTaskTreeContainersV2(t *testing.T) {
 	}
 
 	// 6. task-search：零条件 400；纯 tag 条件 200（D15 修订的关键场景）；
-	//	  结构化+内容组合可用。
+	//	  结构化+内容组合可用；依赖过滤（2.2）单带也合法（2.6.1 放宽）。
 	code, errBody = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search", nil)
 	if code != 400 {
 		t.Fatalf("search zero-condition guard: %d %v", code, errBody)
 	}
+	code, errBody = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?blocked=maybe", nil)
+	if code != 400 {
+		t.Fatalf("blocked 非布尔值不计入条件: %d %v", code, errBody)
+	}
 	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?tag=backend", nil)
 	if code != 200 || len(items(t, page)) != 1 {
 		t.Fatalf("tag-only search: %d %v", code, page)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?blocked=true", nil)
+	if code != 200 || len(items(t, page)) != 0 {
+		t.Fatalf("blocked-only search (no edges yet): %d %v", code, page)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?blocked=false", nil)
+	if code != 200 || len(items(t, page)) != 3 {
+		t.Fatalf("blocked=false-only search: %d %v", code, page)
+	}
+	// 建一条依赖边（child 依赖 root）后，blocked/blocked_by 单带可查且过滤生效。
+	code, dep := doAuthed(t, ts, cookie, "PUT",
+		api+"/tasks/"+childID+"/dependencies/"+rootID, map[string]any{"kind": "blocks"})
+	if code != 201 && code != 200 {
+		t.Fatalf("add dependency: %d %v", code, dep)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET",
+		api+"/workspaces/"+wsID+"/task-search?blocked_by="+rootID, nil)
+	if code != 200 || len(items(t, page)) != 1 {
+		t.Fatalf("blocked_by-only search: %d %v", code, page)
+	}
+	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?blocked=true", nil)
+	if code != 200 || len(items(t, page)) != 1 {
+		t.Fatalf("blocked-only search (edge present): %d %v", code, page)
 	}
 	code, page = doAuthed(t, ts, cookie, "GET", api+"/workspaces/"+wsID+"/task-search?regex=DDL&fuzzy=migration", nil)
 	if code != 200 || len(items(t, page)) != 1 {
@@ -332,6 +359,75 @@ func TestTaskBatchV2(t *testing.T) {
 		}})
 	if code != 409 || errCode(t, errBody) != "REVISION_CONFLICT" {
 		t.Fatalf("revision conflict: %d %v", code, errBody)
+	}
+}
+
+// TestTaskAssigneeNullSemanticsV2（协议 2.6.1）：assignee_actor_id 显式
+// null = 清空、缺席 = 不改（PATCH 与 batch-update 同口径）。**string 在
+// encoding/json 下 null 与缺席不可区分，HTTP 层必须 RawMessage 分辨。
+func TestTaskAssigneeNullSemanticsV2(t *testing.T) {
+	ts := newTestServer(t)
+	cookie := loginHuman(t, ts, "assignee-null@example.com")
+	api := "/api/v1"
+	code, ws := doAuthed(t, ts, cookie, "POST", api+"/workspaces", map[string]any{"name": "assignee-null"})
+	if code != 201 {
+		t.Fatalf("create ws: %d %v", code, ws)
+	}
+	wsID := ws["id"].(string)
+
+	code, tree := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/task-trees",
+		map[string]any{"trees": []any{map[string]any{"title": "A"}, map[string]any{"title": "B"}}})
+	if code != 201 {
+		t.Fatalf("task-trees: %d %v", code, tree)
+	}
+	created := items(t, tree)
+	a := created[0].(map[string]any)["task"].(map[string]any)
+	aID := a["id"].(string)
+	bID := created[1].(map[string]any)["task"].(map[string]any)["id"].(string)
+
+	// 认领 A → assignee 指派给自己（rev 2, in_progress）。
+	code, claimed := doAuthed(t, ts, cookie, "POST", api+"/tasks/"+aID+"/claim",
+		map[string]any{"expected_revision": 1})
+	if code != 200 {
+		t.Fatalf("claim: %d %v", code, claimed)
+	}
+
+	// PATCH 缺席 assignee 字段 = 不改：只改 title，assignee 保持自己。
+	code, patched := doAuthed(t, ts, cookie, "PATCH", api+"/tasks/"+aID,
+		map[string]any{"expected_revision": 2, "title": "renamed"})
+	if code != 200 {
+		t.Fatalf("patch absent: %d %v", code, patched)
+	}
+	if patched["assignee_actor_id"] == nil || patched["title"] != "renamed" {
+		t.Fatalf("absent assignee must not change: %v", patched)
+	}
+
+	// PATCH 显式 null = 清空：assignee 归 nil，其余字段不动。
+	code, patched = doAuthed(t, ts, cookie, "PATCH", api+"/tasks/"+aID,
+		map[string]any{"expected_revision": 3, "assignee_actor_id": nil})
+	if code != 200 {
+		t.Fatalf("patch null: %d %v", code, patched)
+	}
+	if patched["assignee_actor_id"] != nil || patched["status"] != "in_progress" {
+		t.Fatalf("null must clear assignee only: %v", patched)
+	}
+
+	// batch-update：HTTP 层显式 null 同样清空（service 层三态原样保留）。
+	code, claimed = doAuthed(t, ts, cookie, "POST", api+"/tasks/"+bID+"/claim",
+		map[string]any{"expected_revision": 1})
+	if code != 200 {
+		t.Fatalf("claim B: %d %v", code, claimed)
+	}
+	code, batched := doAuthed(t, ts, cookie, "POST", api+"/workspaces/"+wsID+"/tasks/batch-update",
+		map[string]any{
+			"items": []any{map[string]any{"task_id": bID, "expected_revision": 2}},
+			"set":   map[string]any{"assignee_actor_id": nil},
+		})
+	if code != 200 {
+		t.Fatalf("batch null: %d %v", code, batched)
+	}
+	if got := items(t, batched)[0].(map[string]any)["assignee_actor_id"]; got != nil {
+		t.Fatalf("batch null must clear assignee: %v", got)
 	}
 }
 

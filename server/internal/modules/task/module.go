@@ -5,6 +5,7 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -137,8 +138,10 @@ func (m *Module) requireTask(r *http.Request, taskID string, need string) (*mode
 
 // ---- CRUD：创建走容器端点（children.go）；读取集合走容器集合（children.go）----
 
-// search：workspace 级平面查询（v2 task-search）。结构化（tag/status/assignee）
-// 与内容（regex/fuzzy）平权；至少一个条件，防全量 dump（候选集另有封顶，D7）。
+// search：workspace 级平面查询（v2 task-search）。结构化（tag/status/assignee/
+// blocked/blocked_by）与内容（regex/fuzzy）平权；至少一个条件，防全量 dump
+// （候选集另有封顶，D7）。blocked 仅在值为 true/false 时计入条件——其余取值
+// 不表达过滤意图，计入会开出无过滤全量 dump 的口子。
 func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 	wsID := chi.URLParam(r, "workspace_id")
 	if apiErr := auth.RequireWorkspace(r, m.Auth, wsID, auth.ScopeTaskRead); apiErr != nil {
@@ -146,9 +149,11 @@ func (m *Module) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	blocked := q.Get("blocked")
 	if q.Get("regex") == "" && q.Get("fuzzy") == "" && q.Get("tag") == "" &&
-		q.Get("status") == "" && q.Get("assignee") == "" {
-		httpx.WriteError(w, r, httpx.Invalid("at least one filter (regex/fuzzy/tag/status/assignee) is required"))
+		q.Get("status") == "" && q.Get("assignee") == "" &&
+		blocked != "true" && blocked != "false" && q.Get("blocked_by") == "" {
+		httpx.WriteError(w, r, httpx.Invalid("at least one filter (regex/fuzzy/tag/status/assignee/blocked/blocked_by) is required"))
 		return
 	}
 	results, next, apiErr := m.Search(r.Context(), wsID, SearchParams{
@@ -194,8 +199,8 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		Description      *string  `json:"description"`
 		Status           *string  `json:"status"`
 		Priority         *string  `json:"priority"`
-		ParentID         **string `json:"parent_id"` // 三态：null=不改，非null带内层
-		AssigneeActorID  **string `json:"assignee_actor_id"`
+		ParentID         **string `json:"parent_id"` // JSON null 与缺席同义 = 不改（encoding/json 对 **string 的 null 置外层 nil）；移动走 move 端点
+		AssigneeActorID  json.RawMessage `json:"assignee_actor_id"` // 出现于请求体才生效：显式 null = 清空，缺席 = 不改
 	}
 	if !httpx.DecodeJSON(w, r, &in) {
 		return
@@ -255,7 +260,12 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		updates["parent_id"] = parent
 	}
 	if in.AssigneeActorID != nil {
-		updates["assignee_actor_id"] = *in.AssigneeActorID
+		assignee, err := assigneeFromJSON(in.AssigneeActorID)
+		if err != nil {
+			httpx.WriteError(w, r, httpx.Invalid("assignee_actor_id must be an actor id or null"))
+			return
+		}
+		updates["assignee_actor_id"] = *assignee // 内层 nil = 清空（GORM map nil → NULL，同 release）
 	}
 
 	// 单事务：条件更新（乐观并发）+ audit + outbox。业务写与事件
@@ -285,6 +295,23 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteOK(w, r, http.StatusOK, toTaskDTO(fresh, m.loadTags(r, t.ID),
 		m.childCount(r.Context(), t.ID), m.depView(r.Context(), t.ID)))
+}
+
+// assigneeFromJSON 把请求体里的 assignee_actor_id 归一为 service 层三态
+// (**string)：显式 null → 内层 nil（清空）；其余 → 内层指到该值。缺席由
+// 调用方先判 json.RawMessage 是否出现。encoding/json 对 **string 的 null
+// 会置外层指针为 nil、与缺席不可区分——三态只能在 RawMessage 层分辨
+// （PATCH 与 batch-update 的 HTTP 层共用此归一）。
+func assigneeFromJSON(raw json.RawMessage) (**string, error) {
+	if string(raw) == "null" {
+		inner := (*string)(nil)
+		return &inner, nil
+	}
+	var v *string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 
 // checkCycle 沿 newParent 向上遍历祖先链，返回是否形成环。

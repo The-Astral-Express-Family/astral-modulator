@@ -13,6 +13,7 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -526,7 +527,19 @@ type taskBatchUpdateIn struct {
 	Set   struct {
 		Status          *string  `json:"status"`
 		Priority        *string  `json:"priority"`
-		AssigneeActorID **string `json:"assignee_actor_id"` // 三态：缺省不改，null 清空
+		AssigneeActorID **string `json:"assignee_actor_id"` // 三态：缺省不改，内层 nil 清空
+	} `json:"set"`
+}
+
+// taskBatchUpdateWireIn HTTP 层解码结构：assignee_actor_id 用 RawMessage
+// 区分缺席与显式 null（**string 在 encoding/json 下两者不可区分，归一见
+// assigneeFromJSON）。service 入参保持 taskBatchUpdateIn 三态原样。
+type taskBatchUpdateWireIn struct {
+	Items []taskBatchUpdateItemIn `json:"items"`
+	Set   struct {
+		Status          *string         `json:"status"`
+		Priority        *string         `json:"priority"`
+		AssigneeActorID json.RawMessage `json:"assignee_actor_id"`
 	} `json:"set"`
 }
 
@@ -536,9 +549,20 @@ func (m *Module) batchUpdate(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apiErr)
 		return
 	}
-	var in taskBatchUpdateIn
-	if !httpx.DecodeJSON(w, r, &in) {
+	var wire taskBatchUpdateWireIn
+	if !httpx.DecodeJSON(w, r, &wire) {
 		return
+	}
+	in := taskBatchUpdateIn{Items: wire.Items}
+	in.Set.Status = wire.Set.Status
+	in.Set.Priority = wire.Set.Priority
+	if wire.Set.AssigneeActorID != nil {
+		assignee, err := assigneeFromJSON(wire.Set.AssigneeActorID)
+		if err != nil {
+			httpx.WriteError(w, r, httpx.Invalid("assignee_actor_id must be an actor id or null"))
+			return
+		}
+		in.Set.AssigneeActorID = assignee
 	}
 	out, err := m.BatchUpdateTasks(r.Context(), auth.PrincipalFrom(r.Context()), wsID, in)
 	if err != nil {
