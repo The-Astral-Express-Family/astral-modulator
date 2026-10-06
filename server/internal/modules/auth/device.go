@@ -98,7 +98,7 @@ func (s *Service) FindByUserCode(ctx context.Context, userCode string) (*DeviceA
 	s.expireIfDue(ctx, &row)
 	return &DeviceAuthorizationView{
 		ID: row.ID, UserCode: row.UserCode, ClientType: row.ClientType,
-		Status: row.Status, CreatedAt: row.CreatedAt.Format(time.RFC3339), ExpiresAt: row.ExpiresAt.Format(time.RFC3339),
+		Status: row.Status, CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339), ExpiresAt: row.ExpiresAt.UTC().Format(time.RFC3339),
 	}, nil
 }
 

@@ -7,18 +7,18 @@
 //
 // 二次密码确认（2026-10-01 生产 case：注册口令输错 → 无法登录且无自助恢复）：
 // 两次不一致就地拦截，不发起请求；密码框带小眼睛可在提交前核对明文。
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
 import { useApiAction } from '@/composables/useApiAction'
 import { useLoginRedirect } from '@/composables/useLoginRedirect'
+import { usePasswordConfirm } from '@/composables/usePasswordConfirm'
 import { useSessionStore } from '@/stores/session'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { PasswordInput } from '@/components/ui/password-input'
+import { PasswordInput } from '@/components/shared/password-input'
 import { Spinner } from '@/components/ui/spinner'
 
 const session = useSessionStore()
@@ -29,19 +29,11 @@ const { busy, run } = useApiAction()
 
 const registrationCode = ref(typeof route.query.code === 'string' ? route.query.code : '')
 const email = ref('')
-const password = ref('')
-const passwordConfirm = ref('')
 const displayName = ref('')
-
-const confirmMismatch = computed(
-  () => passwordConfirm.value !== '' && passwordConfirm.value !== password.value,
-)
+const { password, passwordConfirm, confirmMismatch, ensureMatch } = usePasswordConfirm()
 
 async function submit(): Promise<void> {
-  if (password.value !== passwordConfirm.value) {
-    toast.error('两次输入的密码不一致')
-    return
-  }
+  if (!ensureMatch()) return
   const ok = await run(() =>
     session.register({
       email: email.value,

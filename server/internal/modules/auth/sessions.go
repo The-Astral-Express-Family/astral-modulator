@@ -52,14 +52,11 @@ func (s *Service) toSessionView(sess *model.Session, currentSessionID string) Se
 		ClientType: sess.ClientType,
 		UserAgent:  sess.UserAgent,
 		RemoteAddr: sess.RemoteAddr,
-		CreatedAt:  sess.CreatedAt.Format(time.RFC3339),
-		ExpiresAt:  sess.ExpiresAt.Format(time.RFC3339),
+		CreatedAt:  sess.CreatedAt.UTC().Format(time.RFC3339),
+		ExpiresAt:  sess.ExpiresAt.UTC().Format(time.RFC3339),
 		Current:    sess.ID == currentSessionID,
 	}
-	if sess.LastUsedAt != nil {
-		last := sess.LastUsedAt.Format(time.RFC3339)
-		view.LastUsedAt = &last
-	}
+	view.LastUsedAt = httpx.TimeString(sess.LastUsedAt)
 	return view
 }
 

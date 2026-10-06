@@ -37,6 +37,13 @@ func TestRegisterBootstrapOnly(t *testing.T) {
 	if _, _, err := s.Register(ctx, RegisterInput{Email: "x@y.com", Password: "short"}, "ip", "ua"); err == nil {
 		t.Fatal("weak password should fail")
 	}
+	// 超长邮箱（>254 字节，human_auth.email 列宽）统一 400，而非撞列 500。
+	long := strings.Repeat("a", 250) + "@x.com"
+	if _, _, err := s.Register(ctx, RegisterInput{Email: long, Password: "hunter2safe"}, "ip", "ua"); err == nil {
+		t.Fatal("overlong email should fail")
+	} else if apiErr, ok := err.(*httpx.APIError); !ok || apiErr.Status != http.StatusBadRequest || apiErr.Code != httpx.CodeValidationFailed {
+		t.Fatalf("overlong email should be 400 %s, got %v", httpx.CodeValidationFailed, err)
+	}
 }
 
 func TestLoginAndSessionRefreshRotation(t *testing.T) {
