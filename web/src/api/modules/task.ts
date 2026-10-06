@@ -34,11 +34,14 @@ export interface TaskSearchParams {
   tag?: string
   status?: string
   assignee?: string
+  blocked?: boolean
+  blocked_by?: string
   limit?: number
   cursor?: string
 }
 
-// 平面查询（跨层级）；regex/fuzzy/tag/status/assignee 至少其一，否则 400。
+// 平面查询（跨层级）；regex/fuzzy/tag/status/assignee/blocked/blocked_by
+// 至少其一，否则 400（2.6.1 起依赖过滤单独即可满足）。
 export function searchTasks(
   workspaceId: string,
   params: TaskSearchParams,
