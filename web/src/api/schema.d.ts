@@ -504,7 +504,8 @@ export interface paths {
         /**
          * workspace 级平面查询（跨层级）。结构化（tag/status/assignee/blocked/
          *     blocked_by）与内容（regex/fuzzy）平权，至少提供其一（防全量 dump）。
-         *     blocked 仅取 true/false 计入条件，其余取值 400。语义固定：
+         *     blocked 仅在取 true 时计入条件；单独使用且不计入时 400（如 false、
+         *     非布尔值），与其他条件并用时非法取值被忽略。语义固定：
          *     权限过滤 -> 结构化过滤 -> regex 过滤 -> fuzzy 排序 -> 分页（architecture §13）。
          *     候选集封顶（实现见 TODO.md D7）。
          */

@@ -193,12 +193,12 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 	}
 	p := auth.PrincipalFrom(r.Context())
 	var in struct {
-		ExpectedRevision *int64   `json:"expected_revision"`
-		Title            *string  `json:"title"`
-		Description      *string  `json:"description"`
-		Status           *string  `json:"status"`
-		Priority         *string  `json:"priority"`
-		ParentID         **string `json:"parent_id"` // JSON null 与缺席同义 = 不改（encoding/json 对 **string 的 null 置外层 nil）；移动走 move 端点
+		ExpectedRevision *int64          `json:"expected_revision"`
+		Title            *string         `json:"title"`
+		Description      *string         `json:"description"`
+		Status           *string         `json:"status"`
+		Priority         *string         `json:"priority"`
+		ParentID         **string        `json:"parent_id"`         // JSON null 与缺席同义 = 不改（encoding/json 对 **string 的 null 置外层 nil）；移动走 move 端点
 		AssigneeActorID  json.RawMessage `json:"assignee_actor_id"` // 出现于请求体才生效：显式 null = 清空，缺席 = 不改
 	}
 	if !httpx.DecodeJSON(w, r, &in) {
