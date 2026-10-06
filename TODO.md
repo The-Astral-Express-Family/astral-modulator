@@ -138,7 +138,7 @@ docs/                               architecture/protocol/sync-semantics/registr
 - httpx 已有：`ParseLimit`（缺省 50 上限 200）、`NewPage(items, nextCursor)`、
   `NotFound/Invalid/Conflict` 错误构造（round 38 起 501 桩与 NOT_IMPLEMENTED 已全部移除）。
 
-## 2. 实施计划（S1-S8 按序执行）
+## 2. 实施计划（S1-S8 按序执行；S9 为 2026-10 后补阶段）
 
 > 契约与 501 桩已先行铺好（round 37）。实装 = 替换 501 处理器为真实实现，
 > 并**删除 openapi 中对应操作的 "501" 响应行**（契约门强制两侧同步）。
@@ -301,6 +301,35 @@ docs/                               architecture/protocol/sync-semantics/registr
   ErrorCode enum、api/schemas/error.json 三处移除（契约门强制同步）。
 - [x] 最后一道完整档卫生门（§0.4，含 D 段文档卫生）+ §0.2 全量验证命令绿；
   `.hygiene-baseline.json` 刷新提交；`git status` 干净。
+
+### S9 平台账号密码管理补口（2026-10-01 后补登记）
+
+> 背景：实际发生「注册时口令输错、无法登录亦无自助恢复」case（2026-10-01，
+> 生产服），当时唯一手段是直连库 `UPDATE human_auth SET password_hash =
+> crypt('<临时口令>', gen_salt('bf', 10))`（pgcrypto 的 `$2a$` 与服务端
+> golang.org/x/crypto/bcrypt 校验兼容，cost 同为 10）。同日协议 2.5
+> （PR #17）落地「忘记密码」邮件重置（`POST /auth/password-reset[/confirm]`，
+> docs/security.md §7.1），锁号自救已闭环；本阶段收敛为剩余两个入口——
+> 登录态自助改密与 admin 重置（§3 延期清单同口径：体验补口），彻底消除
+> 直连库改密手段。
+
+- [ ] **S9-1 自助改密码**：`POST /auth/password`（human session）：body
+  `{current_password, new_password}`；先 CheckPassword 验旧口令（失败 400，
+  文案口径与口令策略一致），新口令走 hashPasswordOrInvalid 同款策略；同事务
+  更新 human_auth.password_hash + audit `auth.password_change`
+  （denied/allowed 各一条）；成功后吊销**除当前会话外**全部会话（对比
+  password-reset/confirm 吊销全部：登录态改密保留当前）；current_password
+  连错复用 S5 login 同款限流键防爆破。agent/service 账号无口令，403。
+  openapi 补端点 + §9 契约登记 + web gen:api（CLI 不受影响：device flow
+  不消费）。Web 设置页「当前/新/确认」三字段表单接本端点；当前会话保留
+  故成功后无需重登。
+  验收：单测覆盖旧口令错 / 策略不过 / 成功换哈希且旧会话 401、当前会话存活。
+- [ ] **S9-2 admin 口令重置**：`POST /admin/users/{actor_id}/password`
+  （RequireGlobal platform:users:manage）：body `{new_password}`，目标须
+  human（复用 loadManagedHuman）；重置后吊销该 actor 全部会话；audit
+  `platform.user.password_reset`；防自锁不做（与停用不同，重置自己口令合法）。
+  Web AdminUsersView 行内入口（与停用/改角色同级）。
+  验收：单测覆盖非 human 拒绝 / 成功后目标会话失效 / scope 不足 403。
 
 ## 3. 明确不做 / 延期清单（不要顺手实现）
 
